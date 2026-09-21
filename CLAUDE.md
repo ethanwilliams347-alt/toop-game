@@ -88,13 +88,6 @@ python tools/rawpng.py out.raw out.png 804 604
 **Any change to feel constants:** update `TUNING.md` in the same commit — value,
 correct line number, and a `History` entry saying why.
 
-> ⚠ **`TUNING.md` is currently out of sync with the source.** It documents
-> `WALL_SLIDE_SPEED`, `COYOTE_STEPS`, `JUMP_BUFFER_STEPS`, `FLAP_FALL_CANCEL`,
-> `GLIDE_GRAVITY` and `CRUSH_PERCENT`, **none of which exist**; `MAX_STEP_HEIGHT` is
-> 3 not 2; `BURN_DAMAGE`/`BURN_INTERVAL_STEPS` are 2/6 not 5/10; every `player.h`
-> line number is stale. **Read `src/physics/player.h` for ground truth. Never
-> implement a constant because `TUNING.md` names it.**
-
 ## Writing tuning constants
 
 Exact rationals only — no float literals, no float folding:

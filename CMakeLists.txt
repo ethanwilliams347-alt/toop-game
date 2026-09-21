@@ -127,6 +127,13 @@ if(BUILD_TESTING)
     target_include_directories(player_test PRIVATE src tests)
     add_test(NAME player_test COMMAND player_test)
 
+    # TUNING.md against the source it documents. Runs from the source tree because
+    # the file under test lives there; links ENGINE_SOURCES only for the Player
+    # constants it compares, never SDL.
+    add_executable(tuning_test tests/test_tuning.cpp ${ENGINE_SOURCES})
+    target_include_directories(tuning_test PRIVATE src tests)
+    add_test(NAME tuning_test COMMAND tuning_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     add_executable(tool_test tests/test_tool.cpp ${ENGINE_SOURCES})
     target_include_directories(tool_test PRIVATE src tests)
     add_test(NAME tool_test COMMAND tool_test)

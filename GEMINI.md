@@ -46,7 +46,7 @@ test. Read the comments above each `set()` before touching them.
 | Make `updated_tag` a `bool` | Reintroduces a full-world reset pass every step. |
 | Raise `MAX_SUPPORT_CELLS` "for correctness" | It guesses *supported* on purpose. A wrong collapse destroys a level; a missed one is invisible. |
 | Suppress a failing `static_assert` | Those messages are the cross-file design review (`player.h:344-400`). |
-| Cite `TUNING.md` as ground truth | It has drifted — see warning below. |
+| Edit `TUNING.md` rows by hand without running `tuning_test` | The test checks every linked row's line number and every `player.h` value; it is what keeps the doc from drifting again. |
 
 ## Commands
 
@@ -100,13 +100,6 @@ Exact rationals only. `fx::v(112.5f * 65536)` is forbidden — compile-time floa
 folding varies by platform. Velocities are cells/second; `fx::per_step()` converts.
 One cell = `Camera::DEFAULT_SCALE` (4) screen pixels. `steps` always means a fixed
 60 Hz simulation step, never a rendered frame.
-
-> ⚠ **`TUNING.md` is stale.** It lists `WALL_SLIDE_SPEED`, `COYOTE_STEPS`,
-> `JUMP_BUFFER_STEPS`, `FLAP_FALL_CANCEL`, `GLIDE_GRAVITY`, `CRUSH_PERCENT` —
-> **none exist in the tree**. `MAX_STEP_HEIGHT` is 3 (documented 2).
-> `BURN_DAMAGE`/`BURN_INTERVAL_STEPS` are 2/6 (documented 5/10). Every `player.h`
-> line number is wrong. **`src/physics/player.h` is ground truth.** Do not
-> implement a mechanic because `TUNING.md` mentions it.
 
 ## Performance baseline (measured, 1920×1080, Release)
 
