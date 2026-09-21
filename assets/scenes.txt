@@ -1,0 +1,28 @@
+# The scenes the game can load, and what each one is made of.
+#
+# Five fields, all required. `-` means none. Blank lines and `#` comments are
+# fine. See src/scene/scene_list.h for field details.
+#
+# spawn is `terrain` (stand on ground under spawn column) or `floor`
+# (stand on world border). A scene without a material map must use `floor`.
+#
+# Optional fields: `mode` (`fixed` or `infinite`), `width`, `height`, `scale`.
+
+# name     material           albedo           props           spawn    mode      width  height
+empty      -                  -                -               floor    infinite  1920   1080
+
+# Authoring nine-layer backdrop set (art_src/Background_1)
+# name     material          albedo          props  spawn    mode   width height scale
+bg1        bg1_material.bmp  bg1_albedo.bmp  -      terrain  fixed  344   144    10
+
+# Extended 688x288 version of bg1
+# name     material              albedo              props  spawn    mode   width height scale
+bg1_ext    bg1_ext_material.bmp  bg1_ext_albedo.bmp  -      terrain  fixed  688   288    10
+
+# Generated 688x288 extended backdrop scene
+# name       material                albedo                props  spawn    mode   width height scale
+bg_gemini    bg_gemini_material.bmp  bg_gemini_albedo.bmp  -      terrain  fixed  688   288    10
+
+# Forest trail authored location
+# name       material                albedo                props  spawn    mode   width height scale
+bg_forest    bg_forest_material.bmp  bg_forest_albedo.bmp  -      terrain  fixed  688   288    10

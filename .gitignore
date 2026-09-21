@@ -1,0 +1,42 @@
+# CMake build directories
+/build/
+/out/
+_deps/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor settings
+.vs/
+.vscode/
+.clangd/
+.cache/
+
+# Build artifacts and compiled binaries
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.log
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Recordings and raw frame dumps
+*.raw
+*.preview.png
+*.rec
+
+# Player settings generated at runtime
+/settings.txt
+
+# Environment variables & secrets
+.env
+.env.*
+*.local

@@ -1,0 +1,17 @@
+# Props for the fixture scene (assets/test_material.bmp).
+#
+# One record per line: <sprite> <x>. `sprite` names assets/<sprite>.bmp; `x` is
+# a world cell, the sprite's bottom-CENTRE column. Each prop is planted on
+# whatever terrain is under its footprint at load time.
+#
+# Placed on the fixture's flat ground either side of the pit and water channel.
+
+tree_c    100.0
+tree_a    145.0
+tree_b    187.5
+tree_c    225.0
+tree_a    262.5
+tree_b    590.0
+tree_c    625.0
+tree_a    660.0
+tree_b    700.0

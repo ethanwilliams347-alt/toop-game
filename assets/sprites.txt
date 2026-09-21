@@ -1,0 +1,49 @@
+# Which BMP each piece of art loads from. Written by tools/load_sprite.py;
+# hand-editable, and read by src/scene/sprites.cpp at launch.
+#
+# One record per line:
+#
+#     <key> <file.bmp> [<frame_w> <frame_h>]
+#
+# `key` is what the code asks for. `file` is a bare filename inside assets/ -
+# no paths, the file has to sit in this directory. The frame size is optional
+# and only for sheets; it is checked at load, not used to slice anything.
+#
+# Naming: a filename says WHAT A THING IS, never which revision it is.
+# Revisions belong to version control; names are identities. Drafts and
+# superseded art live in assets/wip/, which nothing loads.
+#
+# Deleting a line, or this whole file, is safe: every key falls back to the
+# default asset.
+#
+# To point a key at something new:
+#
+#     python tools/load_sprite.py player_sheet my_new_sheet.bmp
+#
+# which validates the BMP, rewrites the line below, and stages the file next to
+# the built exe so it takes effect on the next launch with no rebuild.
+
+# --- player ---------------------------------------------------------------
+# The frame size here must match FRAME_W/FRAME_H in tools/player_sheet.py.
+# main.cpp checks the whole sheet against the compiled animation table and says
+# so if they disagree.
+player_sheet            player_sheet.bmp            14 26
+
+# --- backdrop -------------------------------------------------------------
+# Parallax layers, sized by tools/generate_backdrop.py to cover the camera's
+# pan range at their own factor.
+#
+# `backdrop_ground` is a wrapping tile: its size has no relationship to the pan
+# range, and it is repeated across the window. A replacement must still tile
+# seamlessly left to right, and its *rows are depth*: the top row is the plane's
+# horizon edge and the bottom row its near edge, sampled once across the band.
+backdrop_sky            backdrop_sky.bmp
+backdrop_mountains      backdrop_mountains.bmp
+backdrop_ground         backdrop_ground.bmp
+
+# --- props ----------------------------------------------------------------
+# A prop's key is the name assets/test_props.txt already uses, so rebinding one
+# here swaps the drawing without touching the scene's placements.
+tree_a                  tree_a.bmp
+tree_b                  tree_b.bmp
+tree_c                  tree_c.bmp
