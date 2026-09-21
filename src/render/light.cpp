@@ -212,7 +212,13 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
             // log-transmission times BLOCK is the exponent, which for a block
             // holding one cell of rock is exactly "three cells of air and one of
             // rock" and nothing else.
-            const float k = std::exp(log_transmit / (CELLS_PER_BLOCK / BLOCK));
+            //
+            // log(k) is kept rather than recovered: the anisotropic factors below
+            // are k^c, and exp(c * log k) is that with no log round trip. Not
+            // bit-identical to pow(k, c) -- it differs in the last ulp, towards the
+            // exact value -- so this is a numerical change, not a refactor.
+            const float log_k = log_transmit / (CELLS_PER_BLOCK / BLOCK);
+            const float k = std::exp(log_k);
             transmit[i] = k;
             // k raised to the diagonal's length, sqrt(2).
             //
@@ -221,11 +227,11 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
             // per block arrives roughly half as bright ten blocks out. Per unit of
             // distance that makes the diagonal cost more than the orthogonal, and
             // the field bulges along the axes -- which is one of the two things that
-            // reads as shafts. A pow over the block grid is nothing next to
+            // reads as shafts. An exp over the block grid is nothing next to
             // ITERATIONS sweeps of it.
-            transmit_diag[i] = std::pow(k, 1.41421356f);
+            transmit_diag[i] = std::exp(log_k * 1.41421356f);
             // sqrt(5), the length of a (1,2) step.
-            transmit_knight[i] = std::pow(k, 2.23606798f);
+            transmit_knight[i] = std::exp(log_k * 2.23606798f);
 
             if (hottest <= GLOW_THRESHOLD) {
                 emission[i] = Rgb{};
