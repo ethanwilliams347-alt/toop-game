@@ -1,5 +1,6 @@
 #include "render/light.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace {
@@ -54,17 +55,6 @@ constexpr float TRANSMIT_CLEAR = 0.77f;
 // as the arithmetic error it is.
 const float TRANSMIT_SOLID = std::pow(CELL_SOLID, static_cast<float>(LightField::BLOCK));
 
-// Per-cell log-transmission, summed over a block during the gather. The block's
-// transmission is exp(sum/BLOCK): BLOCK^2 cells sampled, BLOCK of them crossed.
-float cell_log_transmit(ElementType type, float log_air) {
-    if (type == ElementType::Empty) return log_air;
-    switch (material_of(type).move) {
-        case MoveKind::Gas:    return std::log(CELL_GAS);
-        case MoveKind::Liquid: return std::log(CELL_LIQUID);
-        default:               return std::log(CELL_SOLID);  // Static and Powder
-    }
-}
-
 // Clear air, per cell rather than per block -- the BLOCK'th root of the figure
 // above. Hoisted so the gather pays one exp per block instead of a log per cell.
 //
@@ -74,6 +64,30 @@ float cell_log_transmit(ElementType type, float log_air) {
 // per block -- halving the reach exactly where a coarser field was asked for to
 // extend it.
 const float LOG_CELL_AIR = std::log(TRANSMIT_CLEAR) / static_cast<float>(LightField::BLOCK);
+
+// Per-cell log-transmission, summed over a block during the gather. The block's
+// transmission is exp(sum/BLOCK): BLOCK^2 cells sampled, BLOCK of them crossed.
+//
+// A table built once at static init, not a switch returning std::log(constant):
+// MSVC does not fold std::log of a constant at /O2, so the switch paid a real libm
+// call for every cell of every block, every frame -- ~311k per frame at 1080p,
+// most of the dark-frame cost. Defined after LOG_CELL_AIR because it reads it, and
+// both are in this translation unit, so initialisation order is declaration order.
+const std::array<float, static_cast<size_t>(ElementType::Count)> LOG_TRANSMIT = [] {
+    std::array<float, static_cast<size_t>(ElementType::Count)> t{};
+    for (size_t i = 0; i < t.size(); ++i) {
+        const ElementType type = static_cast<ElementType>(i);
+        if (type == ElementType::Empty) { t[i] = LOG_CELL_AIR; continue; }
+        switch (material_of(type).move) {
+            case MoveKind::Gas:    t[i] = std::log(CELL_GAS);    break;
+            case MoveKind::Liquid: t[i] = std::log(CELL_LIQUID); break;
+            default:               t[i] = std::log(CELL_SOLID);  break;  // Static and Powder
+        }
+    }
+    return t;
+}();
+
+float cell_log_transmit(ElementType type) { return LOG_TRANSMIT[static_cast<size_t>(type)]; }
 
 // Peak emission from a block that is entirely on fire, before tone mapping.
 //
@@ -181,7 +195,7 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
                     const Element cell = grid.get_element(origin_x + bx * BLOCK + cx,
                                                           origin_y + by * BLOCK + cy);
                     hottest = std::max(hottest, cell.temperature);
-                    log_transmit += cell_log_transmit(cell.type, LOG_CELL_AIR);
+                    log_transmit += cell_log_transmit(cell.type);
                     if (cell.temperature > GLOW_THRESHOLD) ++glowing;
                 }
             }
