@@ -51,6 +51,23 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     scratch_visit.resize(width * height, 0);
     balance_visit.resize(width * height, 0);
 
+    // The step loop allocates nothing, and these three are why that is true rather
+    // than merely usual: they grow by push_back and are only ever .clear()ed, so
+    // without a reserve the first collapse or pressure probe to reach a new high-water
+    // mark would reallocate mid-step. Each is reserved to a hard bound, not a guess:
+    //
+    //   support_component -- capped by the `> MAX_SUPPORT_CELLS` check in
+    //     resolve_support, which runs after the push, so one past the cap.
+    //   support_stack -- not capped by that check at all. Every cell popped pushes up
+    //     to eight neighbours, and pops stop pushing once the component passes the
+    //     cap, so the stack never holds more than eight per judged cell plus the seed.
+    //   pressure_queue -- the `>= MAX_PRESSURE_CELLS` check runs once per cell
+    //     dequeued, before its up-to-four neighbours are pushed, so a queue of
+    //     MAX_PRESSURE_CELLS - 1 can pass it and still grow by four.
+    support_component.reserve(MAX_SUPPORT_CELLS + 1);
+    support_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
+    pressure_queue.reserve(MAX_PRESSURE_CELLS + 3);
+
     // Nothing to seed. The seed is stored and read straight out of world_seed by
     // the hash in random.h, so the whole 64 bits reach the work by construction.
 }
