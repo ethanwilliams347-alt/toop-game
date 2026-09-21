@@ -126,7 +126,7 @@ cooldown, governed by three constants:
 
 | Knob | Line | Now | What it does |
 |---|---|---|---|
-| `TRANSMIT_CLEAR` | [light.cpp:45](src/render/light.cpp#L45) | 0.77 | Light transmission factor through empty/air cells per sample block. |
+| `TRANSMIT_CLEAR` | [light.cpp:52](src/render/light.cpp#L52) | 0.77 | Light transmission factor through empty/air cells per sample block. |
 | `ITERATIONS` | [light.h:46](src/render/light.h#L46) | 24 | Number of propagation passes for the light field. |
 | `BLOCK` | [light.h:34](src/render/light.h#L34) | 4 | Cell block size per light sample (4x4 cells). |
 
