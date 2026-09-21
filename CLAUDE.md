@@ -106,11 +106,12 @@ simulation step, never a rendered frame.
 |---|---|---|
 | `churning` | 50.2 ms/step (301%) | `vent_fluid` alone is 25.5 ms of it |
 | `cascading` | 41.1 ms/step (247%) | |
-| `light/fire` | 15.2 ms/frame (91%) | 88% of it is the 22-iteration propagate sweep |
+| `light/fire` | 4.3 ms/frame (26%) | was 15.2 ms; propagate sweep now threaded (up to 8) |
 | `burning` | 8.0 ms/step (48%) | |
 
-Do not claim a perf win without back-to-back `grid_bench` output. The comment at
-`main.cpp:1566` calling the light field "too cheap to measure" is wrong — ignore it.
+Do not claim a perf win without back-to-back `grid_bench` output. Run-to-run noise
+on `churning`/`cascading` is roughly ±10% on this machine — run both columns in one
+sitting.
 
 ## House style
 

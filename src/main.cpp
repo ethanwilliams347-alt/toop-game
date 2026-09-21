@@ -1692,10 +1692,13 @@ int main(int argc, char* argv[]) {
         // camera.follow for the same reason that upload is: a light field built from
         // last frame's view would slide against the world it is lighting.
         //
-        // Recomputed from scratch every frame rather than carried between them. It is
-        // affordable, and the alternative is a cache keyed on both the camera and
-        // every temperature in view -- a correctness problem in exchange for saving
-        // something already too cheap to measure.
+        // Recomputed from scratch every frame rather than carried between them. Not
+        // cheap: grid_bench's light/fire row measured ~15 ms (91% of a 60 Hz frame)
+        // before the propagate sweep was threaded and ~4.3 ms (26%) after, on a
+        // 20-thread machine; a dark view is ~0.6 ms. Still the right trade, because
+        // the alternative is a cache keyed on both the camera and every temperature in
+        // view -- a correctness problem. If this needs to get cheaper, the sweep's
+        // iteration count is the lever, not a cache.
         targets.light.update(run.grid, camera.view_x(), camera.view_y());
         if (targets.light.any_light()) {
             SDL_UpdateTexture(targets.light_texture, nullptr, targets.light.pixels().data(),

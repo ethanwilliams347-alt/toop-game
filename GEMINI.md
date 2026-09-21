@@ -108,14 +108,12 @@ churning    50.2 ms/step  301%   <- vent_fluid is 25.5 ms of this (ablation-prov
 cascading   41.1 ms/step  247%
 burning      8.0 ms/step   48%
 collapsing   2.7 ms/step   16%
-light/fire  15.2 ms/frame  91%   <- 88% is the 22-iteration propagate sweep
-light/dark   1.2 ms/frame   7%
+light/fire   4.3 ms/frame  26%   <- was 15.2; propagate sweep threaded
+light/dark   0.6 ms/frame   3%
 settled      0.0005 ms/step       <- chunk sleeping works; keep it working
 ```
 
 Never claim an optimization without back-to-back `grid_bench` output.
-`main.cpp:1566` calls the light field "too cheap to measure" — that comment is
-contradicted by the benchmark; do not trust it.
 
 ## Determinism contract
 
