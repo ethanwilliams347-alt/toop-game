@@ -65,6 +65,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     //     dequeued, before its up-to-four neighbours are pushed, so a queue of
     //     MAX_PRESSURE_CELLS - 1 can pass it and still grow by four.
     support_component.reserve(MAX_SUPPORT_CELLS + 1);
+    drop_keys.reserve(MAX_SUPPORT_CELLS + 1);
     support_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
     pressure_queue.reserve(MAX_PRESSURE_CELLS + 3);
 
@@ -767,12 +768,26 @@ void Grid::drop_component() {
     // lower neighbour has already left. Doing this per column also handles a column
     // containing two separate parts of the same piece -- an arch, say -- without
     // needing to find the runs explicitly.
-    std::sort(support_component.begin(), support_component.end(),
-              [w = width](int a, int b) {
-                  const int ax = a % w, ay = a / w;
-                  const int bx = b % w, by = b / w;
-                  return ax != bx ? ax < bx : ay > by;
-              });
+    //
+    // Sorted as precomputed keys rather than with a comparator that splits each
+    // index into x and y: that was two divisions and two modulos per comparison,
+    // ~49k comparisons for a component at the MAX_SUPPORT_CELLS cap. Here each index
+    // is split once. The key orders by x ascending, then y descending (as H-1-y
+    // ascending), and carries the index itself in the low 32 bits -- so keys are
+    // unique, the order is exactly the old comparator's, and reading an index back
+    // needs no division. 64 bits because x << 20 in an int already overflows at
+    // x = 2048; 16 bits each for x and H-1-y hold any grid up to 65535 on a side.
+    drop_keys.clear();
+    for (const int idx : support_component) {
+        const int cy = idx / width;
+        const int cx = idx - cy * width;
+        drop_keys.push_back((static_cast<uint64_t>(cx) << 48) |
+                            (static_cast<uint64_t>(height - 1 - cy) << 32) |
+                            static_cast<uint32_t>(idx));
+    }
+    std::sort(drop_keys.begin(), drop_keys.end());
+    for (size_t k = 0; k < drop_keys.size(); ++k)
+        support_component[k] = static_cast<int>(static_cast<uint32_t>(drop_keys[k]));
 
     for (const int idx : support_component) {
         const int cy = idx / width;
