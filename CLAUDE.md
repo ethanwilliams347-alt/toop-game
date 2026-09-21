@@ -115,7 +115,8 @@ Do not claim a perf win without back-to-back `grid_bench` output. The comment at
 ## House style
 
 - Comments explain **why**, at length, at the point of use. Match that density.
-- `/W4` is clean today except six `C4996` (`fopen`/`sscanf`). Do not add warnings.
+- `/W4 /permissive-` is on for all our targets (not SDL) and the tree builds with
+  zero warnings; `_CRT_SECURE_NO_WARNINGS` covers `fopen`/`sscanf`. Do not add warnings.
 - No test framework: suites are plain C++ returning non-zero. Keep it that way.
 - Probes (`*_probe.exe`) assert nothing by design — they report taste. Do not
   promote one to `add_test()`.

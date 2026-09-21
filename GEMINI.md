@@ -131,6 +131,6 @@ two fields will not be caught by a replay check.
 ## Style
 
 Comments carry the reasoning, in full, at the point of use — this codebase argues
-with itself in prose and that is deliberate. Match the density. `/W4` is clean
-except six `C4996` (`fopen`/`sscanf`); do not add warnings. Tests are plain C++
+with itself in prose and that is deliberate. Match the density. `/W4 /permissive-`
+is on and the tree builds with zero warnings; do not add warnings. Tests are plain C++
 returning non-zero — no framework. `*_probe.exe` assert nothing by design.

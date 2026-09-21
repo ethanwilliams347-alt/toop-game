@@ -71,13 +71,13 @@ void Grid::reset(uint64_t seed) {
     support_component.clear();
     support_seeds.clear();
     support_deferred.clear();
-    std::fill(support_visit.begin(), support_visit.end(), 0);
-    std::fill(support_state.begin(), support_state.end(), 0);
+    std::fill(support_visit.begin(), support_visit.end(), uint8_t{0});
+    std::fill(support_state.begin(), support_state.end(), uint8_t{0});
     support_epoch = 0;
     resolving_support = false;
 
     pressure_queue.clear();
-    std::fill(scratch_visit.begin(), scratch_visit.end(), 0);
+    std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
     scratch_epoch = 0;
 
     fracture_component.clear();
