@@ -248,6 +248,15 @@ public:
     // call site means every consumer keeps its own copy of last step's value.
     int damage_this_step() const { return hurt_this_step; }
 
+    // Damage from something outside the body -- an enemy's swipe. The third source,
+    // and the one that is not a read of the grid: the body cannot see an enemy any
+    // more than the grid can, so whoever saw the hit says so. Goes through hurt(),
+    // so it gets the clamp and the damage_this_step() event like the other two.
+    //
+    // Called after update() on the same step, which is what lets it land in this
+    // step's damage_this_step() rather than being wiped by the next update().
+    void take_hit(int amount) { hurt(amount); }
+
     // True if a body placed with its top-left at (px, py) would overlap any solid
     // cell. Public because "the player is not inside a wall" is the single most
     // useful thing for a test to assert.

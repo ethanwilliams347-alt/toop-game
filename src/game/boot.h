@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include "game/run.h"
 #include "physics/grid.h"
@@ -218,6 +220,73 @@ inline PlantingReport plant_props(const Grid& grid,
             continue;
         }
         report.planted.push_back(Planted{i, surface});
+    }
+    return report;
+}
+
+// --- enemies -------------------------------------------------------------
+//
+// Spread across the world at a fixed step, standing on whatever is under each
+// column, and none close enough to the player's start to have noticed them
+// already -- a run that opens with something swiping at you has started before
+// the player has.
+//
+// The step is a share of the world's width with a floor under it, because the
+// shipped scenes span a factor of five in width (344 to 1920 cells) and a fixed
+// step either crowds the small ones or leaves the big one nearly empty.
+//
+// Scanned off the terrain after the scene is stamped, the same as the props and
+// the objective, so moving a hill in the material BMP moves the enemies with it
+// instead of burying them. Deterministic in the grid: the same scene plants the
+// same enemies in the same places, which is what keeps a session log's start
+// state reproducible from the scene alone.
+inline constexpr int ENEMY_MIN_SPACING = 12 * Enemy::WIDTH;
+inline constexpr int ENEMIES_ACROSS = 8;
+inline constexpr int ENEMY_EDGE_MARGIN = 2 * Enemy::WIDTH;
+
+// From the player's start, box centre to box centre. Past the notice range by a
+// body, so nothing planted starts the run already chasing.
+inline constexpr int ENEMY_CLEARANCE = Enemy::NOTICE_X + Enemy::WIDTH;
+
+// What the planter did, for the launch line main.cpp prints.
+struct EnemyPlanting {
+    int placed = 0;
+    int skipped = 0;  // columns under water, or where the pool was full
+};
+
+inline EnemyPlanting plant_enemies(Run& run) {
+    EnemyPlanting report;
+    const int w = run.grid.get_width();
+    const int h = run.grid.get_height();
+    const int spacing = std::max(ENEMY_MIN_SPACING, w / ENEMIES_ACROSS);
+    for (int x = ENEMY_EDGE_MARGIN; x + Enemy::WIDTH <= w; x += spacing) {
+        if (std::abs(x + Enemy::WIDTH / 2 - run.player.center_x()) < ENEMY_CLEARANCE) continue;
+
+        // Highest, not lowest, for the reason stand_player_on_ground gives: a body
+        // stops on the first thing its footprint meets. A column with no terrain
+        // at all stands on the world's bottom border, which is solid -- that is
+        // the whole of the `floor` scenes, and a body dropped there would land
+        // there anyway.
+        int surface = highest_surface_under(run.grid, x, Enemy::WIDTH);
+        if (surface < 0) surface = h;
+        if (surface < Enemy::HEIGHT) {
+            ++report.skipped;
+            continue;
+        }
+
+        // The box has to be open air. terrain_surface sees through water, because
+        // water is not solid, so without this a column over a pond plants an enemy
+        // standing on the pond's floor -- alive, underwater, and invisible.
+        const int y = surface - Enemy::HEIGHT;
+        bool open = true;
+        for (int cy = y; cy < surface && open; ++cy)
+            for (int cx = x; cx < x + Enemy::WIDTH && open; ++cx)
+                if (run.grid.get_element(cx, cy).type != ElementType::Empty) open = false;
+        if (!open || !run.spawn_enemy(x, y)) {
+            ++report.skipped;
+            continue;
+        }
+        ++report.placed;
     }
     return report;
 }

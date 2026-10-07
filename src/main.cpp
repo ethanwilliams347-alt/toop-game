@@ -495,6 +495,36 @@ int main(int argc, char* argv[]) {
     }
     player_anim::State anim_state;
 
+    // The enemies' bodies, one frame-sized slot per Run::enemies slot, rebuilt from
+    // each body's surviving pixels every frame they are on screen.
+    //
+    // Built rather than loaded, because there is no fixed picture to load: an enemy
+    // looks like whatever is left of it, and the pixel mask is simulation state
+    // (see physics/enemy_art.h for why the art lives there and not in assets/).
+    // Every frame rather than on change, because the whole atlas is a few
+    // thousand pixels -- smaller than one row of the cell texture -- and a cache
+    // keyed on which body is in which slot is a correctness problem in exchange
+    // for nothing measurable.
+    SDL_Texture* enemy_atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                                 SDL_TEXTUREACCESS_STREAMING,
+                                                 Enemy::FRAME_W * Run::MAX_ENEMIES,
+                                                 Enemy::FRAME_H);
+    if (enemy_atlas) {
+        SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
+    } else {
+        // Loud, not fatal: the enemies are still simulated and can still be shot,
+        // they are just invisible -- which is worse than a missing sprite and is
+        // why this says so rather than falling back to nothing quietly.
+        std::fprintf(stderr, "WARNING: could not create the enemy texture (%s); "
+                             "enemies will not be drawn.\n", SDL_GetError());
+    }
+    std::vector<uint32_t> enemy_atlas_pixels(
+        static_cast<size_t>(Enemy::FRAME_W) * Run::MAX_ENEMIES * Enemy::FRAME_H, 0u);
+    std::vector<frame::EnemySprite> enemy_sprites;
+    std::vector<frame::ArrowSprite> arrow_sprites;
+    enemy_sprites.reserve(Run::MAX_ENEMIES);
+    arrow_sprites.reserve(Quiver::CAPACITY);
+
     // Which way the figure faces. Tracked here rather than on Player because
     // Player is simulation and this is presentation: a facing flag on the body
     // would be state the determinism tests would have to account for. Sampled off
@@ -936,6 +966,12 @@ int main(int argc, char* argv[]) {
         load_props_for(def);
         plant_props_now(def);
 
+        // After the player stands, because the planter keeps clear of where the
+        // player is; after the props only because that is the order the launch
+        // lines have always come out in.
+        const boot::EnemyPlanting enemies_planted = boot::plant_enemies(run);
+        std::printf("Enemies: %d placed\n", enemies_planted.placed);
+
         // The world is new, so a log of inputs into the old one is not a log of
         // anything.
         recording.steps.clear();
@@ -955,6 +991,7 @@ int main(int argc, char* argv[]) {
 
     ElementType current_brush = ElementType::Sand;
     int brush_size = 3;
+    bool spawn_requested = false;
 
     // The settings menu is a state, not an overlay with a flag: while it is open
     // the fixed-step loop below does not run, so the world is frozen rather than
@@ -1223,6 +1260,12 @@ int main(int argc, char* argv[]) {
                 }
 
                 // --- pause, single-step, the free camera, the inspector ---
+                // An enemy at the cursor. A development key like the brush, and a
+                // request rather than a call on the Run: the spawn changes the world,
+                // so it has to arrive through Input and be in the recording. See the
+                // step loop below for why it is consumed by the first step only.
+                if (e.key.keysym.sym == SDLK_n && !repeat) spawn_requested = true;
+
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
                 if (e.key.keysym.sym == SDLK_i && !repeat) debug.inspector = !debug.inspector;
@@ -1409,6 +1452,12 @@ int main(int argc, char* argv[]) {
         input.brush_active = (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
         input.brush_type = current_brush;
         input.brush_size = brush_size;
+        // The bow on E: held, it looses at the cursor on the bow's own draw. A key
+        // rather than a mouse button because both buttons are taken -- the dig on
+        // the left and the brush on the right -- and E sits under the finger that
+        // is already on W.
+        input.shoot = !debug.free_camera && keys[SDL_SCANCODE_E];
+        input.spawn_enemy = spawn_requested;
 
         // The camera is centred and stays centred; nothing per-frame is left to do to
         // it besides the follow further down.
@@ -1430,12 +1479,26 @@ int main(int argc, char* argv[]) {
         const int steps = frame_pacer.steps(
             frame_time,
             pacer::world_advances(screen == Screen::Settings, run_over, debug.paused));
-        for (int i = 0; i < steps; ++i) advance_one_step(input);
+        // The spawn is a one-shot carried on a per-frame sample, so the first step
+        // that runs takes it and the rest of this frame's steps run without it. A
+        // frame that runs no steps -- paused, or in the menu -- keeps the request
+        // for the next frame that does, rather than losing the keypress.
+        auto consume_spawn = [&]() {
+            input.spawn_enemy = false;
+            spawn_requested = false;
+        };
+        for (int i = 0; i < steps; ++i) {
+            advance_one_step(input);
+            consume_spawn();
+        }
 
         // The single-step. Outside the pacer's loop and spending none of its time,
         // which is what makes it advance the world by exactly one step and leave the
         // accumulator where the pause left it.
-        while (debug.consume_single_step()) advance_one_step(input);
+        while (debug.consume_single_step()) {
+            advance_one_step(input);
+            consume_spawn();
+        }
 
         // Where between the last two simulated states this frame falls, and the
         // teleport clamp that stops resolve_overlap's several-cell shove being eased
@@ -1578,6 +1641,54 @@ int main(int argc, char* argv[]) {
         // golden_frame_test checksums the result. What stays below this call is UI,
         // and that split is not filing: the light pass is the last thing in the world,
         // and anything drawn after it is deliberately not lit.
+        // --- the enemies and the arrows, at this frame's alpha ---
+        //
+        // Interpolated between the last two steps like the body is, and with the
+        // same teleport clamp for the enemies -- climbing out of its own dust can
+        // lift one a few cells in a step. Not for the arrows: they cover several
+        // cells every step by design, and the clamp would make every arrow in
+        // flight strobe.
+        enemy_sprites.clear();
+        bool any_enemy = false;
+        for (int slot = 0; slot < Run::MAX_ENEMIES; ++slot) {
+            const Enemy& en = run.enemies[static_cast<size_t>(slot)];
+            if (!en.is_alive()) continue;
+            any_enemy = true;
+            for (int y = 0; y < Enemy::FRAME_H; ++y) {
+                for (int x = 0; x < Enemy::FRAME_W; ++x) {
+                    const size_t at = static_cast<size_t>(y) * Enemy::FRAME_W * Run::MAX_ENEMIES +
+                                      static_cast<size_t>(slot) * Enemy::FRAME_W + x;
+                    enemy_atlas_pixels[at] = en.has_pixel(x, y) ? enemy_art::color_at(x, y) : 0u;
+                }
+            }
+            const pacer::Interpolated at = pacer::interpolate(
+                static_cast<float>(en.prev_cell_x()) + fx::to_float(en.prev_remainder_x()),
+                static_cast<float>(en.prev_cell_y()) + fx::to_float(en.prev_remainder_y()),
+                static_cast<float>(en.cell_x()) + fx::to_float(en.remainder_x()),
+                static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha);
+            enemy_sprites.push_back(frame::EnemySprite{
+                SDL_Rect{slot * Enemy::FRAME_W, 0, Enemy::FRAME_W, Enemy::FRAME_H},
+                at.x, at.y, en.facing_left()});
+        }
+        if (any_enemy && enemy_atlas) {
+            SDL_UpdateTexture(enemy_atlas, nullptr, enemy_atlas_pixels.data(),
+                              Enemy::FRAME_W * Run::MAX_ENEMIES * static_cast<int>(sizeof(uint32_t)));
+        }
+
+        arrow_sprites.clear();
+        for (const Arrow& a : run.quiver.arrows()) {
+            if (!a.live) continue;
+            const float px = static_cast<float>(a.prev_x) + fx::to_float(a.prev_rem_x);
+            const float py = static_cast<float>(a.prev_y) + fx::to_float(a.prev_rem_y);
+            const float nx = static_cast<float>(a.x) + fx::to_float(a.rem_x);
+            const float ny = static_cast<float>(a.y) + fx::to_float(a.rem_y);
+            const float vx = fx::to_float(a.vel_x), vy = fx::to_float(a.vel_y);
+            const float len = std::sqrt(vx * vx + vy * vy);
+            arrow_sprites.push_back(frame::ArrowSprite{
+                px + (nx - px) * alpha, py + (ny - py) * alpha,
+                len > 0.0f ? vx / len : 0.0f, len > 0.0f ? vy / len : 0.0f});
+        }
+
         frame::Params fp;
         fp.camera = &camera;
         fp.padded_w = mode.padded_w(view_scale);
@@ -1599,6 +1710,9 @@ int main(int argc, char* argv[]) {
         fp.sheet_row = anim_state.sheet_row();
         fp.player_box_w = Player::WIDTH;
         fp.player_box_h = Player::HEIGHT;
+        fp.enemy_atlas = enemy_atlas;
+        fp.enemies = &enemy_sprites;
+        fp.arrows = &arrow_sprites;
         fp.light = &targets.light;
         fp.light_texture = targets.light_texture;
         frame::compose(renderer, fp);
@@ -1660,6 +1774,10 @@ int main(int argc, char* argv[]) {
                 static_cast<double>(gdx) * gdx + static_cast<double>(gdy) * gdy));
             status += "  GOAL:" + std::to_string(gdist) + (gdx < 0 ? "W" : "E");
         }
+        // The enemies' line: how many are left and how many are down. Beside HP
+        // because it is the other number the player is playing against.
+        status += "  FOES:" + std::to_string(run.enemies_alive()) +
+                  "  KILLS:" + std::to_string(run.kills());
         op.hud_text = status + "  " + hud_text;
 
         // The lines under the readout, pushed in the order they are drawn. A list
@@ -1738,6 +1856,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (player_tex) SDL_DestroyTexture(player_tex);
+    if (enemy_atlas) SDL_DestroyTexture(enemy_atlas);
     // The cache is the destroy list -- one entry per distinct sprite name, so a
     // scene with fifty trees of three kinds still frees exactly three textures and
     // `props` holding several borrowed copies of each is not a double free.
