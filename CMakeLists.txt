@@ -18,6 +18,16 @@ set(SDL_SHARED OFF CACHE BOOL "Build SDL shared library" FORCE)
 set(SDL_STATIC ON CACHE BOOL "Build SDL static library" FORCE)
 FetchContent_MakeAvailable(SDL2)
 
+# Warnings on, for our code only: this comes after SDL is added, so SDL's own
+# sources keep their flags. /W4 was clean apart from six C4996 on std::fopen /
+# std::sscanf. Those are silenced with the define rather than by switching to
+# fopen_s, which is MSVC-flavoured Annex K and would stop the tree building
+# anywhere else.
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    add_compile_options(/W4 /permissive-)
+endif()
+
 # The five source sets below are kept apart on purpose. Each one draws a
 # boundary the code is not allowed to cross, and the separation is what makes a
 # crossing a build error rather than a habit: the day something under
@@ -126,6 +136,13 @@ if(BUILD_TESTING)
     add_executable(player_test tests/test_player.cpp ${ENGINE_SOURCES})
     target_include_directories(player_test PRIVATE src tests)
     add_test(NAME player_test COMMAND player_test)
+
+    # TUNING.md against the source it documents. Runs from the source tree because
+    # the file under test lives there; links ENGINE_SOURCES only for the Player
+    # constants it compares, never SDL.
+    add_executable(tuning_test tests/test_tuning.cpp ${ENGINE_SOURCES})
+    target_include_directories(tuning_test PRIVATE src tests)
+    add_test(NAME tuning_test COMMAND tuning_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     add_executable(tool_test tests/test_tool.cpp ${ENGINE_SOURCES})
     target_include_directories(tool_test PRIVATE src tests)

@@ -1,6 +1,14 @@
 #include "render/light.h"
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <thread>
+#include <vector>
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#endif
 
 namespace {
 
@@ -54,17 +62,6 @@ constexpr float TRANSMIT_CLEAR = 0.77f;
 // as the arithmetic error it is.
 const float TRANSMIT_SOLID = std::pow(CELL_SOLID, static_cast<float>(LightField::BLOCK));
 
-// Per-cell log-transmission, summed over a block during the gather. The block's
-// transmission is exp(sum/BLOCK): BLOCK^2 cells sampled, BLOCK of them crossed.
-float cell_log_transmit(ElementType type, float log_air) {
-    if (type == ElementType::Empty) return log_air;
-    switch (material_of(type).move) {
-        case MoveKind::Gas:    return std::log(CELL_GAS);
-        case MoveKind::Liquid: return std::log(CELL_LIQUID);
-        default:               return std::log(CELL_SOLID);  // Static and Powder
-    }
-}
-
 // Clear air, per cell rather than per block -- the BLOCK'th root of the figure
 // above. Hoisted so the gather pays one exp per block instead of a log per cell.
 //
@@ -74,6 +71,30 @@ float cell_log_transmit(ElementType type, float log_air) {
 // per block -- halving the reach exactly where a coarser field was asked for to
 // extend it.
 const float LOG_CELL_AIR = std::log(TRANSMIT_CLEAR) / static_cast<float>(LightField::BLOCK);
+
+// Per-cell log-transmission, summed over a block during the gather. The block's
+// transmission is exp(sum/BLOCK): BLOCK^2 cells sampled, BLOCK of them crossed.
+//
+// A table built once at static init, not a switch returning std::log(constant):
+// MSVC does not fold std::log of a constant at /O2, so the switch paid a real libm
+// call for every cell of every block, every frame -- ~311k per frame at 1080p,
+// most of the dark-frame cost. Defined after LOG_CELL_AIR because it reads it, and
+// both are in this translation unit, so initialisation order is declaration order.
+const std::array<float, static_cast<size_t>(ElementType::Count)> LOG_TRANSMIT = [] {
+    std::array<float, static_cast<size_t>(ElementType::Count)> t{};
+    for (size_t i = 0; i < t.size(); ++i) {
+        const ElementType type = static_cast<ElementType>(i);
+        if (type == ElementType::Empty) { t[i] = LOG_CELL_AIR; continue; }
+        switch (material_of(type).move) {
+            case MoveKind::Gas:    t[i] = std::log(CELL_GAS);    break;
+            case MoveKind::Liquid: t[i] = std::log(CELL_LIQUID); break;
+            default:               t[i] = std::log(CELL_SOLID);  break;  // Static and Powder
+        }
+    }
+    return t;
+}();
+
+float cell_log_transmit(ElementType type) { return LOG_TRANSMIT[static_cast<size_t>(type)]; }
 
 // Peak emission from a block that is entirely on fire, before tone mapping.
 //
@@ -158,6 +179,119 @@ LightField::LightField(int region_cells_w, int region_cells_h)
     texels.assign(count, 0xFF000000u);
 }
 
+namespace {
+
+// A spin-wait hint where the CPU has one, a yield where it does not -- this file
+// has no business being x86-only.
+inline void cpu_relax() {
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+    _mm_pause();
+#else
+    std::this_thread::yield();
+#endif
+}
+
+// A persistent worker pool for the propagate sweep, which is ~88% of a lit frame.
+//
+// Persistent because the sweep dispatches once per iteration, up to ITERATIONS
+// times a frame: spawning threads per dispatch would cost more than the work.
+//
+// Workers spin briefly and then block on the generation counter. The spin covers
+// the gap between iterations inside one frame (microseconds); the block covers the
+// gap between frames (milliseconds), so an idle pool costs nothing. A pool that
+// only spins keeps every worker core at 100% for the life of the process.
+//
+// This is render code. It reads the grid const through LightField and writes only
+// LightField's buffers, so it cannot touch the simulation or its determinism.
+//
+// C4324 ("structure was padded due to alignment specifier") is the point of the
+// alignas members here and in SliceChange, not an accident to be told about.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+class SweepPool {
+public:
+    static constexpr int MAX_THREADS = 8;
+
+    SweepPool() {
+        const unsigned hw = std::thread::hardware_concurrency();
+        count = static_cast<int>(std::clamp(hw, 1u, static_cast<unsigned>(MAX_THREADS)));
+        for (int id = 1; id < count; ++id) workers.emplace_back([this, id] { loop(id); });
+    }
+    ~SweepPool() {
+        quit.store(true, std::memory_order_relaxed);
+        gen.fetch_add(1, std::memory_order_release);
+        gen.notify_all();
+        for (std::thread& t : workers) t.join();
+    }
+    SweepPool(const SweepPool&) = delete;
+    SweepPool& operator=(const SweepPool&) = delete;
+
+    int threads() const { return count; }
+
+    // Runs fn(ctx, id) for every id in [0, threads()), the caller taking id 0, and
+    // returns once all of them have finished.
+    void run(void (*fn)(void*, int), void* ctx) {
+        job = fn;
+        job_ctx = ctx;
+        pending.store(count - 1, std::memory_order_relaxed);
+        gen.fetch_add(1, std::memory_order_release);
+        gen.notify_all();
+        fn(ctx, 0);
+        for (int spin = 0; spin < SPIN && pending.load(std::memory_order_acquire) != 0; ++spin)
+            cpu_relax();
+        for (int p; (p = pending.load(std::memory_order_acquire)) != 0;) pending.wait(p);
+    }
+
+private:
+    // ~0.1 ms of pausing: far longer than the gap between two iterations, far
+    // shorter than the gap between two frames.
+    static constexpr int SPIN = 4000;
+
+    void loop(int id) {
+        uint64_t seen = 0;
+        for (;;) {
+            for (int spin = 0; spin < SPIN && gen.load(std::memory_order_acquire) == seen; ++spin)
+                cpu_relax();
+            gen.wait(seen, std::memory_order_acquire);
+            // No dispatch can be missed: run() waits for every worker to finish
+            // before it bumps gen again, so this is exactly seen + 1.
+            seen = gen.load(std::memory_order_acquire);
+            if (quit.load(std::memory_order_relaxed)) return;
+            job(job_ctx, id);
+            if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1) pending.notify_one();
+        }
+    }
+
+    int count = 1;
+    std::vector<std::thread> workers;
+    void (*job)(void*, int) = nullptr;
+    void* job_ctx = nullptr;
+    std::atomic<bool> quit{false};
+    // Each on its own line: every worker polls gen and every worker writes
+    // pending, and neither should drag the other's line around.
+    alignas(64) std::atomic<uint64_t> gen{0};
+    alignas(64) std::atomic<int> pending{0};
+};
+
+SweepPool& sweep_pool() {
+    static SweepPool pool;
+    return pool;
+}
+
+// One slice's largest change, padded to a cache line. This is the detail that
+// decides whether the sweep scales at all: unpadded, every thread's accumulator
+// shares one line, and the measured speedup on 4 threads was 1.15x instead of 3.76x.
+struct alignas(64) SliceChange {
+    float v = 0.0f;
+};
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+} // namespace
+
 void LightField::update(const Grid& grid, int origin_x, int origin_y) {
     const size_t count = static_cast<size_t>(block_cols) * block_rows;
     constexpr float CELLS_PER_BLOCK = static_cast<float>(BLOCK * BLOCK);
@@ -181,7 +315,7 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
                     const Element cell = grid.get_element(origin_x + bx * BLOCK + cx,
                                                           origin_y + by * BLOCK + cy);
                     hottest = std::max(hottest, cell.temperature);
-                    log_transmit += cell_log_transmit(cell.type, LOG_CELL_AIR);
+                    log_transmit += cell_log_transmit(cell.type);
                     if (cell.temperature > GLOW_THRESHOLD) ++glowing;
                 }
             }
@@ -198,7 +332,13 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
             // log-transmission times BLOCK is the exponent, which for a block
             // holding one cell of rock is exactly "three cells of air and one of
             // rock" and nothing else.
-            const float k = std::exp(log_transmit / (CELLS_PER_BLOCK / BLOCK));
+            //
+            // log(k) is kept rather than recovered: the anisotropic factors below
+            // are k^c, and exp(c * log k) is that with no log round trip. Not
+            // bit-identical to pow(k, c) -- it differs in the last ulp, towards the
+            // exact value -- so this is a numerical change, not a refactor.
+            const float log_k = log_transmit / (CELLS_PER_BLOCK / BLOCK);
+            const float k = std::exp(log_k);
             transmit[i] = k;
             // k raised to the diagonal's length, sqrt(2).
             //
@@ -207,11 +347,11 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
             // per block arrives roughly half as bright ten blocks out. Per unit of
             // distance that makes the diagonal cost more than the orthogonal, and
             // the field bulges along the axes -- which is one of the two things that
-            // reads as shafts. A pow over the block grid is nothing next to
+            // reads as shafts. An exp over the block grid is nothing next to
             // ITERATIONS sweeps of it.
-            transmit_diag[i] = std::pow(k, 1.41421356f);
+            transmit_diag[i] = std::exp(log_k * 1.41421356f);
             // sqrt(5), the length of a (1,2) step.
-            transmit_knight[i] = std::pow(k, 2.23606798f);
+            transmit_knight[i] = std::exp(log_k * 2.23606798f);
 
             if (hottest <= GLOW_THRESHOLD) {
                 emission[i] = Rgb{};
@@ -256,10 +396,21 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
     // Double-buffered because an in-place sweep propagates further in the direction
     // it happens to walk, and a fire lighting further to its right than its left is
     // obvious on screen and invisible in the code that caused it.
+    //
+    // Threaded by rows. Within an iteration each output block is a pure function of
+    // front, emission and transmit*, none of which the pass writes, so row slices
+    // are independent and the result is identical at any thread count. Each slice
+    // keeps its largest change in a register and publishes it once, to its own
+    // padded slot (see SliceChange).
     front = emission;
-    for (int iter = 0; iter < ITERATIONS; ++iter) {
+    SweepPool& pool = sweep_pool();
+    const int slices = pool.threads();
+    std::array<SliceChange, SweepPool::MAX_THREADS> change{};
+    auto sweep_rows = [&](int tid) {
+        const int y0 = static_cast<int>(static_cast<int64_t>(block_rows) * tid / slices);
+        const int y1 = static_cast<int>(static_cast<int64_t>(block_rows) * (tid + 1) / slices);
         float largest_change = 0.0f;
-        for (int by = 0; by < block_rows; ++by) {
+        for (int by = y0; by < y1; ++by) {
             for (int bx = 0; bx < block_cols; ++bx) {
                 const size_t i = static_cast<size_t>(by) * block_cols + bx;
 
@@ -343,6 +494,15 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
                 back[i] = next;
             }
         }
+        change[static_cast<size_t>(tid)].v = largest_change;
+    };
+    using Sweep = decltype(sweep_rows);
+    for (int iter = 0; iter < ITERATIONS; ++iter) {
+        pool.run([](void* ctx, int tid) { (*static_cast<Sweep*>(ctx))(tid); },
+                 &sweep_rows);
+        float largest_change = 0.0f;
+        for (int t = 0; t < slices; ++t)
+            largest_change = std::max(largest_change, change[static_cast<size_t>(t)].v);
         front.swap(back);
         if (largest_change < CONVERGED) break;
     }

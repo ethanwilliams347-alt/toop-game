@@ -703,6 +703,9 @@ private:
     std::vector<int> pending_support;
     std::vector<int> support_stack;     // scratch, reused across fills
     std::vector<int> support_component; // scratch, reused across fills
+    // drop_component's sort keys, one per support_component entry. Scratch, and
+    // reserved to the same bound, for the same no-allocation reason.
+    std::vector<uint64_t> drop_keys;
 
     // The two working queues of resolve_support(): the seeds taken for the pass in
     // hand, and the ones too slow for it. Members rather than locals so the

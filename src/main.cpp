@@ -1652,31 +1652,53 @@ int main(int argc, char* argv[]) {
             plane_row_scale[static_cast<size_t>(wy)] = scale;
         }
 
-        const size_t window_cells =
-            static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
-        if (cell_window.size() != window_cells) cell_window.assign(window_cells, 0u);
-        if (cell_depth.size() != window_cells) cell_depth.assign(window_cells, -1);
+        // With the pass off, every row is a straight copy, and a straight copy is what
+        // SDL_UpdateTexture already does given the grid's own pitch. So the upload
+        // reads the grid directly and skips both apply's copy and its depth_map, which
+        // runs over the whole window unconditionally and whose output only the
+        // (unreachable) blend path reads. Only when the window lies wholly inside the
+        // grid, though: apply is what clears rows past the grid's edge, and a scene
+        // with the horizontal clamp dropped can put the window there. Turning the pass
+        // back on is still the one constant above.
+        const int grid_w = run.grid.get_width();
+        const int view_x = camera.view_x(), view_y = camera.view_y();
+        const bool window_inside_grid = view_x >= 0 && view_y >= 0 &&
+                                        view_x + visible_w <= grid_w &&
+                                        view_y + visible_h <= run.grid.get_height();
+        if (!PLANE_ON_NEAR_TERRAIN && window_inside_grid) {
+            SDL_UpdateTexture(targets.cells, &visible_rect,
+                              pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
+                              grid_w * static_cast<int>(sizeof(uint32_t)));
+        } else {
+            const size_t window_cells =
+                static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
+            if (cell_window.size() != window_cells) cell_window.assign(window_cells, 0u);
+            if (cell_depth.size() != window_cells) cell_depth.assign(window_cells, -1);
 
-        const surface_plane::View view{camera.view_x(), camera.view_y(), visible_w, visible_h};
-        const surface_plane::TileRows tile_rows{
-            ground_rows.empty() ? nullptr : ground_rows.data(),
-            static_cast<int>(ground_rows.size() / 3)
-        };
-        surface_plane::apply(pixels.data(), run.grid.get_width(), run.grid.get_height(), view,
-                             tile_rows, plane_src_row_for.data(), plane_row_scale.data(),
-                             ground_grade.r, ground_grade.g, ground_grade.b,
-                             cell_depth.data(), cell_window.data());
-        SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
-                          visible_w * sizeof(uint32_t));
+            const surface_plane::View view{view_x, view_y, visible_w, visible_h};
+            const surface_plane::TileRows tile_rows{
+                ground_rows.empty() ? nullptr : ground_rows.data(),
+                static_cast<int>(ground_rows.size() / 3)
+            };
+            surface_plane::apply(pixels.data(), grid_w, run.grid.get_height(), view,
+                                 tile_rows, plane_src_row_for.data(), plane_row_scale.data(),
+                                 ground_grade.r, ground_grade.g, ground_grade.b,
+                                 cell_depth.data(), cell_window.data());
+            SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
+                              visible_w * static_cast<int>(sizeof(uint32_t)));
+        }
 
         // Computed against the same view origin the cell upload just used, and after
         // camera.follow for the same reason that upload is: a light field built from
         // last frame's view would slide against the world it is lighting.
         //
-        // Recomputed from scratch every frame rather than carried between them. It is
-        // affordable, and the alternative is a cache keyed on both the camera and
-        // every temperature in view -- a correctness problem in exchange for saving
-        // something already too cheap to measure.
+        // Recomputed from scratch every frame rather than carried between them. Not
+        // cheap: grid_bench's light/fire row measured ~15 ms (91% of a 60 Hz frame)
+        // before the propagate sweep was threaded and ~4.3 ms (26%) after, on a
+        // 20-thread machine; a dark view is ~0.6 ms. Still the right trade, because
+        // the alternative is a cache keyed on both the camera and every temperature in
+        // view -- a correctness problem. If this needs to get cheaper, the sweep's
+        // iteration count is the lever, not a cache.
         targets.light.update(run.grid, camera.view_x(), camera.view_y());
         if (targets.light.any_light()) {
             SDL_UpdateTexture(targets.light_texture, nullptr, targets.light.pixels().data(),
