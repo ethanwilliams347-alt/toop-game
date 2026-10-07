@@ -39,7 +39,26 @@ if(MSVC)
     add_compile_options(/constexpr:steps10000000)
 endif()
 
-# The five source sets below are kept apart on purpose. Each one draws a
+# AddressSanitizer, off by default: `just asan` builds it in build-asan/.
+# It catches the out-of-bounds reads and use-after-free that a falling-sand grid
+# indexed by hand is most likely to have, at roughly 2x run time, which is why it
+# is a separate build tree and never the one grid_bench numbers come from.
+#
+# Placed after SDL is fetched so only our code is instrumented. MSVC's ASan
+# rejects incremental linking and /RTC, so the asan recipe uses RelWithDebInfo
+# (no /RTC) with incremental linking off, which still has line numbers in reports.
+option(SLOP_ASAN "Build with AddressSanitizer" OFF)
+if(SLOP_ASAN)
+    if(MSVC)
+        add_compile_options(/fsanitize=address /Zi)
+        add_link_options(/INCREMENTAL:NO /DEBUG)
+    else()
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+        add_link_options(-fsanitize=address)
+    endif()
+endif()
+
+# The source sets below are kept apart on purpose. Each one draws a
 # boundary the code is not allowed to cross, and the separation is what makes a
 # crossing a build error rather than a habit: the day something under
 # src/physics/ reaches for the renderer, the mistake has to be written into this
@@ -195,8 +214,8 @@ if(BUILD_TESTING)
     add_test(NAME run_test COMMAND run_test)
 
     # The debug tooling. Links only ENGINE_SOURCES because src/game/debug_view.h
-    # is a header -- it deliberately does not become a sixth source variable, so
-    # the guard the five above enforce is untouched.
+    # is a header -- it deliberately does not become another source variable, so
+    # the guard the sets above enforce is untouched.
     add_executable(debug_test tests/test_debug.cpp ${ENGINE_SOURCES})
     target_include_directories(debug_test PRIVATE src tests)
     add_test(NAME debug_test COMMAND debug_test)
@@ -375,4 +394,25 @@ if(BUILD_TESTING)
     # test over it would pin a prototype rather than check the product.
     add_executable(velocity_probe tests/velocity_probe.cpp ${ENGINE_SOURCES})
     target_include_directories(velocity_probe PRIVATE src tests)
+endif()
+
+# MSVC's ASan runtime is a DLL that lives next to cl.exe and is only on PATH
+# inside a Developer prompt. Copied next to the executables so `just asan` (and
+# double-clicking an ASan build) works from a plain terminal or VS Code.
+# Every target here writes to the same per-config directory, so one copy covers
+# the game and every test.
+if(SLOP_ASAN AND MSVC)
+    get_filename_component(SLOP_CL_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(SLOP_ASAN_DLL "${SLOP_CL_DIR}/clang_rt.asan_dynamic-x86_64.dll")
+    if(EXISTS "${SLOP_ASAN_DLL}")
+        # make_directory first: this can run before any executable has created
+        # the directory, and copying onto a missing directory makes a file.
+        add_custom_target(asan_runtime ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SlopPhysics>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SLOP_ASAN_DLL}"
+                    "$<TARGET_FILE_DIR:SlopPhysics>")
+    else()
+        message(WARNING "SLOP_ASAN: ${SLOP_ASAN_DLL} not found; run ASan builds "
+                        "from a Developer PowerShell so the runtime is on PATH.")
+    endif()
 endif()

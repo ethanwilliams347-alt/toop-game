@@ -1,0 +1,31 @@
+# clang-format settings chosen to match the code as it is already written, not
+# an imported house style: 4-space indent, attached braces, `Type& name`, short
+# case labels on one line with their bodies aligned (grid.cpp's MoveKind switch),
+# and a 100-column limit, which is where the hand-wrapped code already breaks.
+#
+# `just code_cleanup` applies this to *changed lines only* (tools/code_cleanup.py),
+# so a one-line fix never drags a whole file's reformat into its diff. A one-time
+# full reformat is a separate commit for a moment when no branches are open.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+PointerAlignment: Left
+IndentCaseLabels: true
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+SpacesBeforeTrailingComments: 2
+FixNamespaceComments: true
+# Comments here are the documentation, often written as aligned tables or
+# derivations (tool.cpp's range proof). Rewrapping them would wreck that, and
+# their line breaks are chosen by hand.
+ReflowComments: false
+AlignTrailingComments:
+  Kind: Leave
+# Include order carries meaning in places (own header first, then siblings, then
+# the standard library) and sorting it is a review question, not a format one.
+SortIncludes: Never

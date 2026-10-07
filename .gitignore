@@ -41,5 +41,8 @@ __pycache__/
 .env.*
 *.local
 
+# ASan build tree (just asan)
+/build-asan/
+
 # Local session handoff notes -- written only on request, never shared
 /HANDOFF.md
