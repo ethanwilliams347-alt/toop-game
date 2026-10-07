@@ -94,7 +94,7 @@ void Grid::reset(uint64_t seed) {
     tip_next.clear();
     tip_carry.clear();
     tip_displaced.clear();
-    std::fill(balance_visit.begin(), balance_visit.end(), 0);
+    std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
     balance_epoch = 0;
     balance_pass_start = 1;
 
