@@ -61,7 +61,7 @@ cmake --build build --config Release --target grid_bench   # single target
 
 .\build\Release\SlopPhysics.exe                      # run (F9 writes session.rec)
 
-ctest --test-dir build -C Release --output-on-failure           # 18 suites
+ctest --test-dir build -C Release --output-on-failure           # 19 suites
 ctest --test-dir build -C Release -R grid_test --output-on-failure
 
 .\build\Release\grid_bench.exe                       # timings; NOT a test
@@ -74,7 +74,7 @@ python tools/rawpng.py out.raw out.png 804 604
 ## Verification workflow — mandatory
 
 **Any change under `src/physics/`:**
-1. `ctest ... --output-on-failure` — all 18 must pass. `grid_test`, `player_test`,
+1. `ctest ... --output-on-failure` — all 19 must pass. `grid_test`, `player_test`,
    `collapse_test`, `run_test` are the ones that bite.
 2. `golden_frame_test` must pass **unchanged**. It composites a real frame including
    a lit fire and checksums it. A changed checksum means you altered visible

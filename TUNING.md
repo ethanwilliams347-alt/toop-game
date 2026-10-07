@@ -165,6 +165,45 @@ Grading multipliers shape the relative brightness of background, terrain, and li
 
 ---
 
+## Enemies
+
+[src/physics/enemy.h](src/physics/enemy.h). The body is the player's 8x20 box;
+the art (and so which pixels can be hit) is the ASCII grid in
+[src/physics/enemy_art.h](src/physics/enemy_art.h).
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `PATROL_SPEED` | [47](src/physics/enemy.h#L47) | 22 | Wandering walk speed, cells/s. |
+| `CHASE_SPEED` | [48](src/physics/enemy.h#L48) | 45 | Speed once it has noticed you. Asserted below the player's `MOVE_SPEED`, so it can always be walked away from. |
+| `JUMP_SPEED` | [54](src/physics/enemy.h#L54) | 120 | The hop it makes at a wall it cannot step over while chasing. |
+| `NOTICE_X` | [69](src/physics/enemy.h#L69) | 12 body widths | How close you have to be, horizontally, before it chases. |
+| `LEDGE_DROP` | [74](src/physics/enemy.h#L74) | 1 body height | A wandering enemy turns back at a drop deeper than this. |
+| `SWIPE_DAMAGE` | [81](src/physics/enemy.h#L81) | 8 | Damage per swipe when the boxes touch (needs an arm). |
+| `SWIPE_INTERVAL_STEPS` | [82](src/physics/enemy.h#L82) | 40 | Steps between swipes. |
+| `COLLAPSE_PERCENT` | [92](src/physics/enemy.h#L92) | 40 | Below this share of its pixels it collapses into sand. |
+| `BURN_PIXELS_PER_TICK` | [106](src/physics/enemy.h#L106) | 2 | Pixels burned away per burn tick, lowest first. |
+
+## Bow and arrows
+
+[src/physics/arrow.h](src/physics/arrow.h)
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `LAUNCH_SPEED` | [57](src/physics/arrow.h#L57) | 480 | Arrow speed at release, cells/s (8 cells a step). |
+| `GRAVITY` | [64](src/physics/arrow.h#L64) | 150 | Arrow drop. About 8 cells over a 160-cell shot. |
+| `DRAW_STEPS` | [69](src/physics/arrow.h#L69) | 20 | Steps between shots while `E` is held. |
+| `STUCK_STEPS` | [72](src/physics/arrow.h#L72) | 240 | How long a stuck arrow stays in a wall. |
+| `BITE_RADIUS` | [79](src/physics/arrow.h#L79) | 2 | Radius of body an arrow takes out where it lands. Asserted wider than an arm. |
+| `FLUID_DRAG_PERCENT` | [84](src/physics/arrow.h#L84) | 80 | Speed kept per step through water or oil. |
+
+---
+
 ## History
 
 Record adjustments to tuning parameters and their rationale here.
+- **Enemies and the bow added** (all values above are first-pass). Arrow
+  gravity was taken down from 260 to 150 before landing: at 260 a shot across
+  160 cells dropped about 19, enough to land in the ground in front of a target
+  aimed at the chest. Enemy burning was capped at 2 pixels a tick after the
+  first version took every pixel in a flame at once, which removed both feet on
+  contact and killed the body the step it touched fire.

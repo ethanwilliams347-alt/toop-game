@@ -1,4 +1,7 @@
 #pragma once
+#include <array>
+#include "physics/arrow.h"
+#include "physics/enemy.h"
 #include "physics/grid.h"
 #include "physics/player.h"
 #include "physics/tool.h"
@@ -35,6 +38,17 @@ struct Input {
     bool brush_active = false;
     ElementType brush_type = ElementType::Sand;
     int brush_size = 1;
+
+    // The bow, held: looses an arrow at the cursor every Quiver::DRAW_STEPS.
+    bool shoot = false;
+
+    // Puts an enemy down centred on the cursor, on this step. A one-shot rather
+    // than a held state, and main.cpp clears it after the first step of the frame
+    // that pressed it -- a frame that bought three steps would otherwise spawn
+    // three. It is on Input rather than being a call main.cpp makes on the Run
+    // directly because it changes the world, and every change to the world has to
+    // be in the recorded stream or a replay of the session is a different session.
+    bool spawn_enemy = false;
 };
 
 // Everything one play session needs, held as a single object instead of three
@@ -97,7 +111,8 @@ public:
     // fresh Grid(w, h, seed), which is the one thing the reset contract promises.
     void reset(uint64_t seed, int new_width = 0, int new_height = 0);
 
-    // Advances grid, player and dig tool by exactly one fixed step, in that order.
+    // Advances grid, player, dig tool, arrows and enemies by exactly one fixed
+    // step, in that order.
     // The brush paints first, before the grid steps: a cell should not move on the
     // same step it was placed.
     //
@@ -148,9 +163,30 @@ public:
 
     Outcome outcome() const { return run_outcome; }
 
+    // --- enemies ---------------------------------------------------------
+    //
+    // A fixed pool, for the step loop's no-allocation rule: spawning on a step
+    // reuses a dead slot rather than growing anything. Twenty-four is several
+    // screens' worth -- the planter puts down a handful, and the spawn key is a
+    // development tool.
+    static constexpr int MAX_ENEMIES = 24;
+
+    // Brings a dead slot to life with the box's top-left at (x, y). Refused, and
+    // false, when every slot is taken or the box would start inside something
+    // solid -- an enemy spawned into a wall would spend its life stuck there.
+    bool spawn_enemy(int x, int y);
+
+    int enemies_alive() const;
+
+    // Enemies brought down this run. A count rather than an event list: it is for
+    // the readout, and the readout wants the number.
+    int kills() const { return kill_count; }
+
     Grid grid;
     Player player;
     DigTool dig_tool;
+    Quiver quiver;
+    std::array<Enemy, MAX_ENEMIES> enemies{};
 
 private:
     // The outcome latches. Once a run is over it stays over, even though step()
@@ -158,6 +194,7 @@ private:
     // makes it by not accumulating time. A Run driven headlessly past its own ending
     // must not have the answer flicker back.
     Outcome run_outcome = Outcome::Playing;
+    int kill_count = 0;
 
     // The objective survives reset(), and this is the second documented exception to
     // "reset restores a fresh Run", after Grid::vent_radius. It is a property of the

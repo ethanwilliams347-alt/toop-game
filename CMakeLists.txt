@@ -30,6 +30,8 @@ set(ENGINE_SOURCES
     src/physics/grid.cpp
     src/physics/player.cpp
     src/physics/tool.cpp
+    src/physics/enemy.cpp
+    src/physics/arrow.cpp
     src/game/run.cpp
     src/game/input_log.cpp
     src/scene/scene.cpp
@@ -131,6 +133,13 @@ if(BUILD_TESTING)
     add_executable(collapse_test tests/test_collapse.cpp ${ENGINE_SOURCES})
     target_include_directories(collapse_test PRIVATE src tests)
     add_test(NAME collapse_test COMMAND collapse_test)
+
+    # Enemies and the bow: a hit takes the pixels it lands on, cuts off what it
+    # severs, and every pixel lost is a grain of sand in the grid. Headless like
+    # the rest of the physics suites, because the body is simulation state.
+    add_executable(enemy_test tests/test_enemy.cpp ${ENGINE_SOURCES})
+    target_include_directories(enemy_test PRIVATE src tests)
+    add_test(NAME enemy_test COMMAND enemy_test)
 
     add_executable(run_test tests/test_run.cpp ${ENGINE_SOURCES})
     target_include_directories(run_test PRIVATE src tests)

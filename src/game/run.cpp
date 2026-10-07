@@ -18,9 +18,29 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
     }
     player = Player(grid.get_width() / 2, grid.get_height() / 4);
     dig_tool = DigTool();
+    quiver = Quiver();
+    enemies.fill(Enemy{});
+    kill_count = 0;
     run_outcome = Outcome::Playing;
     // objective_set, goal_x and goal_y are deliberately not cleared -- see the field
     // comment in run.h.
+}
+
+bool Run::spawn_enemy(int x, int y) {
+    for (Enemy& e : enemies) {
+        if (e.is_alive()) continue;
+        if (e.overlaps_solid(grid, x, y)) return false;
+        e.spawn(x, y);
+        return true;
+    }
+    return false;
+}
+
+int Run::enemies_alive() const {
+    int n = 0;
+    for (const Enemy& e : enemies)
+        if (e.is_alive()) ++n;
+    return n;
 }
 
 void Run::set_objective(int x, int y) {
@@ -49,6 +69,12 @@ bool Run::step(const Input& input) {
     // no room and be deleted. Bottom-up, each row escapes before the row above it
     // exists. No other brush shows it, because everything else the brush paints is
     // movable and a climb walks straight through it.
+    // The spawn first of all, before the brush and the grid, for the brush's own
+    // reason: what is put into the world on a step should not also move on it.
+    if (input.spawn_enemy) {
+        spawn_enemy(input.cursor_x - Enemy::WIDTH / 2, input.cursor_y - Enemy::HEIGHT / 2);
+    }
+
     if (input.brush_active) {
         for (int dy = input.brush_size; dy >= -input.brush_size; --dy) {
             for (int dx = -input.brush_size; dx <= input.brush_size; ++dx) {
@@ -79,6 +105,34 @@ bool Run::step(const Input& input) {
     // advances the tool's cooldown.
     const bool dug = dig_tool.update(grid, input.dig, player.center_x(), player.center_y(),
                                      input.cursor_x, input.cursor_y);
+
+    // The bow, then the arrows, then the bodies. Arrows before enemies so a shot is
+    // tested against the enemy where it stood at the start of the step, which is
+    // where the player saw it when they let go; the enemy then moves with whatever
+    // it has left.
+    //
+    // Loosed from a little above the body's centre -- the chest the bow is held
+    // at, rather than the belt.
+    std::array<bool, MAX_ENEMIES> was_alive{};
+    for (int i = 0; i < MAX_ENEMIES; ++i) was_alive[i] = enemies[i].is_alive();
+
+    quiver.update_bow(input.shoot, player.center_x(), player.center_y() - Player::HEIGHT / 5,
+                      input.cursor_x, input.cursor_y);
+    quiver.update_arrows(grid, enemies.data(), MAX_ENEMIES);
+
+    for (Enemy& e : enemies) {
+        if (!e.is_alive()) continue;
+        if (e.update(grid, player.cell_x(), player.cell_y(), player.is_alive())) {
+            player.take_hit(Enemy::SWIPE_DAMAGE);
+        }
+    }
+
+    // Counted after both passes, because both can kill: an arrow through the head,
+    // or the last of the legs burning away while it walks through a fire. A slot
+    // alive before them and dead after them is one kill, whichever did it.
+    for (int i = 0; i < MAX_ENEMIES; ++i) {
+        if (was_alive[i] && !enemies[i].is_alive()) ++kill_count;
+    }
 
     // --- has the run ended? ---
     //
