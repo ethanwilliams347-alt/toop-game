@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 #include "body_art.h"
+#include "box_body.h"
 #include "enemy_art.h"
 #include "fixed.h"
 #include "grid.h"
@@ -411,16 +412,16 @@ public:
     int shatter(Grid& grid, int wx, int wy, int radius);
 
     // Top-left of the box, in cells.
-    int cell_x() const { return pos_x; }
-    int cell_y() const { return pos_y; }
-    int center_x() const { return pos_x + kind->width / 2; }
-    int center_y() const { return pos_y + kind->height / 2; }
+    int cell_x() const { return body.x; }
+    int cell_y() const { return body.y; }
+    int center_x() const { return body.x + kind->width / 2; }
+    int center_y() const { return body.y + kind->height / 2; }
 
     // The sub-cell remainder and last step's box, for the renderer's interpolation
     // and nothing else -- the same arrangement as Player::visual_x, except that the
     // float conversion happens on the render side rather than in this header.
-    fx::v remainder_x() const { return rem_x; }
-    fx::v remainder_y() const { return rem_y; }
+    fx::v remainder_x() const { return body.rem_x; }
+    fx::v remainder_y() const { return body.rem_y; }
     int prev_cell_x() const { return prev_x; }
     int prev_cell_y() const { return prev_y; }
     fx::v prev_remainder_x() const { return prev_rem_x; }
@@ -460,13 +461,14 @@ public:
 private:
     const Species* kind = &species::GHOUL;
     bool alive = false;
-    int pos_x = 0;
-    int pos_y = 0;
-    fx::v rem_x = 0;
-    fx::v rem_y = 0;
-    fx::v vel_x = 0;
-    fx::v vel_y = 0;
-    bool on_ground = false;
+    // The box and its motion against the grid, shared with the player -- see
+    // box_body.h. The species' BoxRule is what differs: powder only at the feet,
+    // or not at all for a body that wades.
+    BoxBody body;
+    BoxRule rule() const {
+        return BoxRule{kind->width, kind->height, kind->max_step_height,
+                       kind->wades ? 0 : kind->footing_rows()};
+    }
     bool face_left = false;
     bool chasing = false;
 
@@ -533,10 +535,7 @@ private:
     void slam(Grid& grid);
     void shove_powder(Grid& grid);
 
-    int climb_for(const Grid& grid, int sign) const;
     bool drop_ahead_is_deep(const Grid& grid, int sign) const;
-    void move_x(const Grid& grid, int amount);
-    void move_y(const Grid& grid, int amount);
 };
 
 // Speeds are lengths per unit time and the ghoul's body is the player's, so the

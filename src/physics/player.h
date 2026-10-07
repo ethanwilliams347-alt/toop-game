@@ -1,5 +1,6 @@
 #pragma once
 #include "fixed.h"
+#include "box_body.h"
 #include "grid.h"
 
 // What the player is being told to do this step.
@@ -181,14 +182,14 @@ public:
     void update(const Grid& grid, const PlayerInput& input);
 
     // Top-left corner of the body, in cells.
-    int cell_x() const { return pos_x; }
-    int cell_y() const { return pos_y; }
+    int cell_x() const { return body.x; }
+    int cell_y() const { return body.y; }
 
     // Centre of the body, in cells. Where tools originate from -- firing from the
     // top-left corner would let the player dig through a wall its own body is flush
     // against on the other side.
-    int center_x() const { return pos_x + WIDTH / 2; }
-    int center_y() const { return pos_y + HEIGHT / 2; }
+    int center_x() const { return body.x + WIDTH / 2; }
+    int center_y() const { return body.y + HEIGHT / 2; }
 
     // The body's position including the sub-cell remainder. For rendering only --
     // nothing in src/physics/ may read these, and no test asserts on them, because
@@ -204,10 +205,10 @@ public:
     // player hands to the renderer, which multiplies it by a screen scale and rounds
     // it to a pixel. Converting at the boundary keeps the float on the render side,
     // where a last-bit difference is a pixel that was going to be rounded anyway.
-    float visual_x() const { return static_cast<float>(pos_x) + fx::to_float(rem_x); }
-    float visual_y() const { return static_cast<float>(pos_y) + fx::to_float(rem_y); }
+    float visual_x() const { return static_cast<float>(body.x) + fx::to_float(body.rem_x); }
+    float visual_y() const { return static_cast<float>(body.y) + fx::to_float(body.rem_y); }
 
-    bool is_on_ground() const { return on_ground; }
+    bool is_on_ground() const { return body.on_ground; }
 
     // Downward speed in fx cells per second -- compare it against the constants
     // above, or against fx::from_int(n), not against a plain number. fx::trunc()
@@ -216,7 +217,7 @@ public:
     // Fixed point rather than float because fall damage reads it for more than a
     // sign: a damage threshold is a rule, and a run that kills the player on one
     // machine and not another is a worse bug than a wrong threshold.
-    fx::v velocity_y() const { return vel_y; }
+    fx::v velocity_y() const { return body.vel_y; }
 
     // True on the step a wing beat actually fired, not while the key is held. The
     // animation selector needs the event rather than the input: a flap animation
@@ -234,7 +235,7 @@ public:
     // fx cells per second, like velocity_y(). It is exactly zero or exactly
     // +/-MOVE_SPEED, so a caller asking whether the body is travelling compares
     // against 0 rather than against an epsilon.
-    fx::v velocity_x() const { return vel_x; }
+    fx::v velocity_x() const { return body.vel_x; }
 
     // Health remaining, 0 to MAX_HEALTH. Clamped at zero rather than allowed to go
     // negative: "how dead" is not a quantity anything reads, and a negative bar is a
@@ -279,14 +280,12 @@ private:
     // was always the half that mattered for collision; making the other half integer
     // too is what turns "deterministic on this binary" into "deterministic
     // anywhere", which is what the replay check in tests/test_run.cpp proves.
-    int pos_x;
-    int pos_y;
-    fx::v rem_x = 0;
-    fx::v rem_y = 0;
-
-    fx::v vel_x = 0;
-    fx::v vel_y = 0;
-    bool on_ground = false;
+    //
+    // The box's movement against the grid is shared with every enemy -- see
+    // box_body.h. What the player adds is in update(): flight, burns, fall damage
+    // and the dig-out search.
+    BoxBody body;
+    static constexpr BoxRule BOX{WIDTH, HEIGHT, MAX_STEP_HEIGHT, HEIGHT};
 
     // Steps remaining before the next wing beat is allowed, and whether one fired
     // this step. Counted in fixed steps rather than seconds for the same reason
@@ -312,18 +311,6 @@ private:
     // damage_this_step(). One writer for both sources, so a third one added later
     // cannot forget the clamp or the event.
     void hurt(int amount);
-
-    // How far the body would have to be lifted to move one cell towards `sign`, or
-    // -1 if that direction is a wall rather than a step. Zero means the way is
-    // already clear. Shared by move_x, which needs the height, and by update(),
-    // which only needs to know whether the sub-cell remainder is allowed to keep
-    // accumulating that way.
-    int climb_for(const Grid& grid, int sign) const;
-
-    // Both move one cell at a time and stop at the first blocked cell, so the body
-    // cannot tunnel through thin terrain no matter how fast it is going.
-    void move_x(const Grid& grid, int amount);
-    void move_y(const Grid& grid, int amount);
 
     // How many of the body's cells are inside solid material at a position.
     // overlaps_solid answers whether the body is stuck; this answers how badly,

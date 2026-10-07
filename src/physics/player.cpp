@@ -2,18 +2,13 @@
 #include <algorithm>
 #include <cstdlib>
 
-Player::Player(int start_x, int start_y) : pos_x(start_x), pos_y(start_y) {}
+Player::Player(int start_x, int start_y) {
+    body.x = start_x;
+    body.y = start_y;
+}
 
 bool Player::overlaps_solid(const Grid& grid, int px, int py) const {
-    for (int cy = py; cy < py + HEIGHT; ++cy) {
-        for (int cx = px; cx < px + WIDTH; ++cx) {
-            // get_element() reads out-of-bounds as Wall, which is exactly right
-            // here: the same border that seals the sand in also stops the player
-            // walking out of the world.
-            if (is_solid(grid.get_element(cx, cy).type)) return true;
-        }
-    }
-    return false;
+    return body.overlaps(grid, BOX, px, py);
 }
 
 // The same box overlaps_solid walks, asking a different question of it. Kept as
@@ -23,8 +18,8 @@ bool Player::overlaps_solid(const Grid& grid, int px, int py) const {
 // would have to be called with one of the answers discarded.
 uint8_t Player::hottest_overlap(const Grid& grid) const {
     uint8_t hottest = 0;
-    for (int cy = pos_y; cy < pos_y + HEIGHT; ++cy) {
-        for (int cx = pos_x; cx < pos_x + WIDTH; ++cx) {
+    for (int cy = body.y; cy < body.y + HEIGHT; ++cy) {
+        for (int cx = body.x; cx < body.x + WIDTH; ++cx) {
             const uint8_t t = grid.get_element(cx, cy).temperature;
             if (t > hottest) hottest = t;
         }
@@ -37,60 +32,6 @@ void Player::hurt(int amount) {
     if (amount > hp) amount = hp;  // clamp before the subtraction, so the event matches the loss
     hp -= amount;
     hurt_this_step += amount;
-}
-
-// Blocked at foot height is not the same as blocked. Before calling it a wall,
-// try lifting the whole body by up to MAX_STEP_HEIGHT and re-testing: if the
-// body fits there, what we hit was a step. Testing the destination box rather
-// than just the blocking cell is what makes this safe -- a position with no
-// overlap anywhere cannot be inside geometry, so there is nothing to tunnel
-// through.
-//
-// Grounded only, so the player cannot climb the side of a shaft by repeatedly
-// nudging into it mid-air.
-int Player::climb_for(const Grid& grid, int sign) const {
-    if (!overlaps_solid(grid, pos_x + sign, pos_y)) return 0;
-    if (!on_ground) return -1;
-
-    for (int up = 1; up <= MAX_STEP_HEIGHT; ++up) {
-        if (!overlaps_solid(grid, pos_x + sign, pos_y - up)) return up;
-    }
-    return -1;
-}
-
-void Player::move_x(const Grid& grid, int amount) {
-    const int sign = (amount > 0) ? 1 : -1;
-
-    for (int i = 0; i < std::abs(amount); ++i) {
-        const int climbed = climb_for(grid, sign);
-
-        if (climbed < 0) {
-            // A real wall. Drop the leftover sub-cell motion too, otherwise it
-            // accumulates while held against the wall and fires the instant the wall
-            // is removed.
-            vel_x = 0;
-            rem_x = 0;
-            return;
-        }
-
-        pos_x += sign;
-        pos_y -= climbed;
-    }
-}
-
-void Player::move_y(const Grid& grid, int amount) {
-    const int sign = (amount > 0) ? 1 : -1;
-
-    for (int i = 0; i < std::abs(amount); ++i) {
-        if (overlaps_solid(grid, pos_x, pos_y + sign)) {
-            // Landed on something, or hit a ceiling. Either way the fall (or the
-            // jump) is over.
-            vel_y = 0;
-            rem_y = 0;
-            return;
-        }
-        pos_y += sign;
-    }
 }
 
 // The player is not a grid cell, so the grid does not know it is there and will
@@ -138,11 +79,11 @@ int Player::overlap_depth(const Grid& grid, int px, int py) const {
 // the body is buried at all.
 bool Player::escape_is_reachable(const Grid& grid, int dx, int dy) const {
     const int steps = std::max(std::abs(dx), std::abs(dy));
-    int depth = overlap_depth(grid, pos_x, pos_y);
+    int depth = overlap_depth(grid, body.x, body.y);
 
     for (int k = 1; k <= steps; ++k) {
-        const int here = overlap_depth(grid, pos_x + (dx * k) / steps,
-                                       pos_y + (dy * k) / steps);
+        const int here = overlap_depth(grid, body.x + (dx * k) / steps,
+                                       body.y + (dy * k) / steps);
         if (here > depth) return false;
         depth = here;
     }
@@ -150,7 +91,7 @@ bool Player::escape_is_reachable(const Grid& grid, int dx, int dy) const {
 }
 
 bool Player::resolve_overlap(const Grid& grid) {
-    if (!overlaps_solid(grid, pos_x, pos_y)) return false;
+    if (!overlaps_solid(grid, body.x, body.y)) return false;
 
     for (int r = 1; r <= MAX_UNSTUCK_RADIUS; ++r) {
         for (int dy = -r; dy <= r; ++dy) {
@@ -163,14 +104,14 @@ bool Player::resolve_overlap(const Grid& grid) {
                 const int dx = (i % 2 == 0) ? (i / 2) : -(i / 2 + 1);
 
                 if (std::max(std::abs(dx), std::abs(dy)) != r) continue;  // ring only
-                if (overlaps_solid(grid, pos_x + dx, pos_y + dy)) continue;
+                if (overlaps_solid(grid, body.x + dx, body.y + dy)) continue;
                 if (!escape_is_reachable(grid, dx, dy)) continue;
 
-                pos_x += dx;
-                pos_y += dy;
-                rem_x = 0;
-                rem_y = 0;
-                vel_y = 0;
+                body.x += dx;
+                body.y += dy;
+                body.rem_x = 0;
+                body.rem_y = 0;
+                body.vel_y = 0;
                 return true;
             }
         }
@@ -178,7 +119,7 @@ bool Player::resolve_overlap(const Grid& grid) {
 
     // Buried deeper than the search reaches. Climb, unless doing so would push the
     // body out through the top of the world.
-    if (pos_y > 0) pos_y -= 1;
+    if (body.y > 0) body.y -= 1;
     return true;
 }
 
@@ -216,14 +157,14 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // recognise a landing. See the fall-damage block at the bottom of this function
     // for why the obvious test -- did the downward move get blocked -- is not the
     // one used.
-    const bool was_on_ground = on_ground;
+    const bool was_on_ground = body.on_ground;
 
     // No acceleration curve: horizontal speed is a direct function of input.
     // Barebones on purpose -- acceleration, friction and air control are feel work,
     // and feel work is worth doing once there is something to feel.
-    vel_x = 0;
-    if (input.left)  vel_x -= MOVE_SPEED;
-    if (input.right) vel_x += MOVE_SPEED;
+    body.vel_x = 0;
+    if (input.left)  body.vel_x -= MOVE_SPEED;
+    if (input.right) body.vel_x += MOVE_SPEED;
 
     // Flapping, not jumping: the key beats wings on a fixed interval whether the
     // body is grounded or not.
@@ -241,78 +182,20 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // player, at this scale, that the bird is working.
     if (flap_timer > 0) --flap_timer;
     if (input.jump && flap_timer == 0) {
-        if (on_ground) {
-            vel_y = -JUMP_SPEED;
+        if (body.on_ground) {
+            body.vel_y = -JUMP_SPEED;
         } else {
-            vel_y -= FLAP_IMPULSE;
-            if (vel_y < -FLAP_MAX_CLIMB) vel_y = -FLAP_MAX_CLIMB;
+            body.vel_y -= FLAP_IMPULSE;
+            if (body.vel_y < -FLAP_MAX_CLIMB) body.vel_y = -FLAP_MAX_CLIMB;
         }
         flap_timer = FLAP_INTERVAL_STEPS;
         did_flap = true;
     }
 
-    // Standing on the floor otherwise lets gravity pile up unbounded, which makes
-    // velocity_y() meaningless and gives a one-frame lurch when the floor is
-    // removed.
-    //
-    // rem_y has to go with it. The remainder is pending, collision-untested motion,
-    // so cancelling the velocity that produced it while leaving it in place keeps
-    // exactly the movement that was just decided against. Standing still, that is a
-    // slow sink: gravity re-adds a step's worth every step, rem_y grows, and move_y
-    // is not called at all until it crosses a whole cell -- at which point the floor
-    // test finally runs, blocks, and snaps the body back. The result is a continuous
-    // bob, invisible only while the renderer truncates the fraction away.
-    if (on_ground && vel_y > 0) {
-        vel_y = 0;
-        rem_y = 0;
-    }
-
-    // One step's worth of GRAVITY, folded at compile time. Writing GRAVITY * dt
-    // recomputes the same product every step; this is the same number, decided once,
-    // and it is exactly the same number on every machine -- which the product was
-    // not.
-    vel_y += fx::per_step(GRAVITY);
-    if (vel_y > MAX_FALL_SPEED) vel_y = MAX_FALL_SPEED;
-
-    // The same rule on the other three sides, applied before the remainder is
-    // accumulated rather than after it has already carried the body into geometry.
-    // Without these, a body held against a surface drifts up to a full cell into it
-    // before a whole-cell step is ever attempted, which is seen as phasing into
-    // walls, sand and wood. climb_for rather than a bare overlap test, so walking up
-    // a one-cell step is still a move rather than a wall.
-    if (vel_x != 0 && climb_for(grid, vel_x > 0 ? 1 : -1) < 0) {
-        vel_x = 0;
-        rem_x = 0;
-    }
-    if (vel_y < 0 && overlaps_solid(grid, pos_x, pos_y - 1)) {
-        vel_y = 0;
-        rem_y = 0;
-    }
-
-    // Axes are resolved separately, horizontal first, so that sliding along a
-    // surface works: being blocked vertically must not also cancel the horizontal
-    // move. fx::trunc truncates toward zero, which is what the remainder scheme
-    // needs in both directions and is why it is not a shift.
-    rem_x += fx::per_step(vel_x);
-    const int step_x = fx::trunc(rem_x);
-    rem_x = fx::frac(rem_x);
-    if (step_x != 0) move_x(grid, step_x);
-
-    // Read before the move, because the move is what destroys it: move_y zeroes
-    // vel_y the moment it hits something. This is the speed the body was actually
-    // travelling at when it arrived, to within the one step of gravity applied
-    // above.
-    const fx::v impact_speed = vel_y;
-
-    rem_y += fx::per_step(vel_y);
-    const int step_y = fx::trunc(rem_y);
-    rem_y = fx::frac(rem_y);
-    if (step_y != 0) move_y(grid, step_y);
-
-    // Asked once, at the end, against the world the body actually ended up in.
-    // Deriving it from "did the downward move get blocked" instead would report
-    // false on any step slow enough not to attempt a whole cell of movement.
-    on_ground = overlaps_solid(grid, pos_x, pos_y + 1);
+    // The box's motion, shared with every enemy (box_body.h). What comes back is
+    // the speed the body was travelling at when it arrived, read before the move
+    // that zeroes it -- to within the one step of gravity just applied.
+    const fx::v impact_speed = body.integrate(grid, BOX, GRAVITY, MAX_FALL_SPEED);
 
     // Fall damage. A landing is on_ground going from false to true, not move_y
     // reporting a block, and the difference is a whole class of missed landings: a
@@ -332,7 +215,7 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // of the health bar for doing nothing. It is a property of how the world is set
     // up, so it is spent here rather than worked around by moving the spawn, which
     // Run cannot place on terrain it does not know about.
-    if (!was_on_ground && on_ground) {
+    if (!was_on_ground && body.on_ground) {
         if (has_landed && impact_speed > SAFE_FALL_SPEED) {
             hurt(fx::trunc(impact_speed - SAFE_FALL_SPEED) / FALL_DAMAGE_DIVISOR);
         }

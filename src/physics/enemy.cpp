@@ -38,8 +38,8 @@ void Enemy::spawn(int x, int y, const Species& k) {
     *this = Enemy{};
     kind = &k;
     alive = true;
-    pos_x = prev_x = x;
-    pos_y = prev_y = y;
+    body.x = prev_x = x;
+    body.y = prev_y = y;
     const body_art::Art& art = *kind->art;
     for (int fy = 0; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
@@ -54,28 +54,18 @@ void Enemy::spawn(int x, int y, const Species& k) {
 }
 
 bool Enemy::overlaps_solid(const Grid& grid, int px, int py) const {
-    // Powder only counts at the feet. A body that comes apart drops its own grains
-    // inside its own box -- a chest hit, or an arm cut off at the shoulder -- and
-    // counting a grain falling past the ribs as terrain made the body hop up out
-    // of every hit it took. At the feet a pile is still ground: it is stood on,
-    // climbed as a step and walked into as a wall, as for the player.
-    const int footing_top = py + kind->height - kind->footing_rows();
-    for (int cy = py; cy < py + kind->height; ++cy) {
-        for (int cx = px; cx < px + kind->width; ++cx) {
-            const ElementType t = grid.get_element(cx, cy).type;
-            if (!is_solid(t)) continue;
-            // A wading species sees no powder at all: it stands on what is under
-            // the drift and pushes the drift aside -- see shove_powder.
-            if (material_of(t).move == MoveKind::Powder && (kind->wades || cy < footing_top))
-                continue;
-            return true;
-        }
-    }
-    return false;
+    // Powder only counts at the feet (BoxRule::powder_rows). A body that comes
+    // apart drops its own grains inside its own box -- a chest hit, or an arm cut
+    // off at the shoulder -- and counting a grain falling past the ribs as terrain
+    // made the body hop up out of every hit it took. At the feet a pile is still
+    // ground: it is stood on, climbed as a step and walked into as a wall, as for
+    // the player. A wading species sees no powder at all: it stands on what is
+    // under the drift and pushes the drift aside -- see shove_powder.
+    return body.overlaps(grid, rule(), px, py);
 }
 
 int Enemy::world_column(int frame_x) const {
-    const int left = pos_x - kind->offset_x();
+    const int left = body.x - kind->offset_x();
     return face_left ? left + (kind->frame_w() - 1 - frame_x) : left + frame_x;
 }
 
@@ -86,7 +76,7 @@ void Enemy::world_of(int x, int y, int& wx, int& wy) const {
                                          : rig::part_of(art, kind->rig, x, y);
     const rig::Point p = pose.forward(part, x, y);
     wx = world_column(rig::nearest(p.x));
-    wy = pos_y - kind->offset_y() + rig::nearest(p.y);
+    wy = body.y - kind->offset_y() + rig::nearest(p.y);
 }
 
 int Enemy::posed_pixel(int px, int py) const {
@@ -111,8 +101,8 @@ int Enemy::posed_pixel(int px, int py) const {
 
 int Enemy::pixel_at(int wx, int wy) const {
     if (!alive) return -1;
-    const int py = wy - (pos_y - kind->offset_y());
-    int px = wx - (pos_x - kind->offset_x());
+    const int py = wy - (body.y - kind->offset_y());
+    int px = wx - (body.x - kind->offset_x());
     if (face_left) px = kind->frame_w() - 1 - px;
     return posed_pixel(px, py);
 }
@@ -259,57 +249,23 @@ int Enemy::shatter(Grid& grid, int wx, int wy, int radius) {
     return before - remaining;
 }
 
-int Enemy::climb_for(const Grid& grid, int sign) const {
-    if (!overlaps_solid(grid, pos_x + sign, pos_y)) return 0;
-    if (!on_ground) return -1;
-    for (int up = 1; up <= kind->max_step_height; ++up)
-        if (!overlaps_solid(grid, pos_x + sign, pos_y - up)) return up;
-    return -1;
-}
-
 bool Enemy::drop_ahead_is_deep(const Grid& grid, int sign) const {
     // The column just past the leading edge, from the feet down. One column, not
     // the box's width: the question is whether the next step lands on anything,
     // and the next step is one cell.
-    const int x = sign > 0 ? pos_x + kind->width : pos_x - 1;
+    const int x = sign > 0 ? body.x + kind->width : body.x - 1;
     for (int dy = 0; dy <= kind->ledge_drop; ++dy)
-        if (is_solid(grid.get_element(x, pos_y + kind->height + dy).type)) return false;
+        if (is_solid(grid.get_element(x, body.y + kind->height + dy).type)) return false;
     return true;
-}
-
-void Enemy::move_x(const Grid& grid, int amount) {
-    const int sign = amount > 0 ? 1 : -1;
-    for (int i = 0; i < std::abs(amount); ++i) {
-        const int climbed = climb_for(grid, sign);
-        if (climbed < 0) {
-            vel_x = 0;
-            rem_x = 0;
-            return;
-        }
-        pos_x += sign;
-        pos_y -= climbed;
-    }
-}
-
-void Enemy::move_y(const Grid& grid, int amount) {
-    const int sign = amount > 0 ? 1 : -1;
-    for (int i = 0; i < std::abs(amount); ++i) {
-        if (overlaps_solid(grid, pos_x, pos_y + sign)) {
-            vel_y = 0;
-            rem_y = 0;
-            return;
-        }
-        pos_y += sign;
-    }
 }
 
 bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     if (!alive) return false;
 
-    prev_x = pos_x;
-    prev_y = pos_y;
-    prev_rem_x = rem_x;
-    prev_rem_y = rem_y;
+    prev_x = body.x;
+    prev_y = body.y;
+    prev_rem_x = body.rem_x;
+    prev_rem_y = body.rem_y;
     if (flinch > 0) --flinch;
     breath = (breath + 1) % kind->rig.breathe_steps;
 
@@ -367,18 +323,18 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     // only ever stuck in something static; the powder in its box is shoved out
     // of it here, every step, before anything else looks at the box.
     if (kind->wades) shove_powder(grid);
-    if (overlaps_solid(grid, pos_x, pos_y)) {
+    if (overlaps_solid(grid, body.x, body.y)) {
         for (int up = 1; up <= kind->max_step_height; ++up) {
-            if (!overlaps_solid(grid, pos_x, pos_y - up)) {
-                pos_y -= up;
+            if (!overlaps_solid(grid, body.x, body.y - up)) {
+                body.y -= up;
                 break;
             }
         }
-        vel_x = 0;
-        vel_y = 0;
-        rem_x = 0;
-        rem_y = 0;
-        on_ground = overlaps_solid(grid, pos_x, pos_y + 1);
+        body.vel_x = 0;
+        body.vel_y = 0;
+        body.rem_x = 0;
+        body.rem_y = 0;
+        body.on_ground = overlaps_solid(grid, body.x, body.y + 1);
     } else {
         // --- deciding where to go ---
         //
@@ -404,53 +360,27 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
             want = face_left ? -1 : 1;
         }
         if (want != 0) face_left = want < 0;
-        vel_x = want * (chasing ? kind->chase_speed : kind->patrol_speed);
+        body.vel_x = want * (chasing ? kind->chase_speed : kind->patrol_speed);
 
-        if (want != 0 && on_ground) {
-            const int climb = climb_for(grid, want);
+        if (want != 0 && body.on_ground) {
+            const int climb = body.climb_for(grid, rule(), want);
             if (climb < 0) {
                 // A wall. A chase hops at it; a wander turns round.
                 if (chasing) {
-                    vel_y = -kind->jump_speed;
+                    body.vel_y = -kind->jump_speed;
                 } else {
                     face_left = !face_left;
-                    vel_x = 0;
+                    body.vel_x = 0;
                 }
             } else if (!chasing && drop_ahead_is_deep(grid, want)) {
                 face_left = !face_left;
-                vel_x = 0;
+                body.vel_x = 0;
             }
         }
 
-        // From here on it is Player::update's motion, minus the wings: the same
-        // order and the same reasons, which player.cpp gives at length.
-        if (on_ground && vel_y > 0) {
-            vel_y = 0;
-            rem_y = 0;
-        }
-        vel_y += fx::per_step(GRAVITY);
-        if (vel_y > MAX_FALL_SPEED) vel_y = MAX_FALL_SPEED;
-
-        if (vel_x != 0 && climb_for(grid, vel_x > 0 ? 1 : -1) < 0) {
-            vel_x = 0;
-            rem_x = 0;
-        }
-        if (vel_y < 0 && overlaps_solid(grid, pos_x, pos_y - 1)) {
-            vel_y = 0;
-            rem_y = 0;
-        }
-
-        rem_x += fx::per_step(vel_x);
-        const int step_x = fx::trunc(rem_x);
-        rem_x = fx::frac(rem_x);
-        if (step_x != 0) move_x(grid, step_x);
-
-        rem_y += fx::per_step(vel_y);
-        const int step_y = fx::trunc(rem_y);
-        rem_y = fx::frac(rem_y);
-        if (step_y != 0) move_y(grid, step_y);
-
-        on_ground = overlaps_solid(grid, pos_x, pos_y + 1);
+        // The box's motion: the player's, from box_body.h, with this species'
+        // rule.
+        body.integrate(grid, rule(), GRAVITY, MAX_FALL_SPEED);
     }
     advance_gait();
 
@@ -465,8 +395,8 @@ void Enemy::advance_gait() {
     // by a climb, it steps slower. Off the ground the gait holds where it was and
     // compute_pose gives the legs their airborne spread instead.
     const fx::v cycle = fx::from_int(kind->rig.stride);
-    const fx::v moved = std::abs(fx::from_int(pos_x - prev_x) + rem_x - prev_rem_x);
-    if (moved > 0 && on_ground) {
+    const fx::v moved = std::abs(fx::from_int(body.x - prev_x) + body.rem_x - prev_rem_x);
+    if (moved > 0 && body.on_ground) {
         gait = (gait + moved) % cycle;
         return;
     }
@@ -518,7 +448,7 @@ void Enemy::compute_pose() {
 
     // Moving, not merely unsupported: a body just spawned in the air has not
     // started to fall yet and is shown at rest.
-    if (!on_ground && vel_y != 0) {
+    if (!body.on_ground && body.vel_y != 0) {
         // In the air: the legs spread, front one reaching for the landing, and
         // the arms come up a little.
         front_leg = -r.leg_swing;
@@ -629,13 +559,13 @@ void Enemy::shove_powder(Grid& grid) {
     // room within a box's width either side keeps its grain, and the lift below
     // decides whether the body is still stuck.
     const int w = grid.get_width();
-    const int mid = pos_x + kind->width / 2;
-    for (int cy = pos_y; cy < pos_y + kind->height; ++cy) {
-        for (int cx = pos_x; cx < pos_x + kind->width; ++cx) {
+    const int mid = body.x + kind->width / 2;
+    for (int cy = body.y; cy < body.y + kind->height; ++cy) {
+        for (int cx = body.x; cx < body.x + kind->width; ++cx) {
             const Element e = grid.get_element(cx, cy);
             if (material_of(e.type).move != MoveKind::Powder) continue;
             const int dir = cx < mid ? -1 : 1;
-            int tx = dir < 0 ? pos_x - 1 : pos_x + kind->width;
+            int tx = dir < 0 ? body.x - 1 : body.x + kind->width;
             for (int d = 0; d < kind->width; ++d, tx += dir) {
                 if (tx < 0 || tx >= w) break;
                 const ElementType there = grid.get_element(tx, cy).type;
@@ -656,14 +586,14 @@ bool Enemy::target_in_reach(int target_x, int target_y) const {
     // either side of the box. For a slam, the front only: the club comes down
     // where it is facing, and the space behind a troll is the safe place to be.
     const int reach = kind->reach;
-    int left = pos_x - reach;
-    int right = pos_x + kind->width + reach;  // one past
+    int left = body.x - reach;
+    int right = body.x + kind->width + reach;  // one past
     if (kind->attack == Attack::Slam) {
-        if (face_left) right = pos_x + kind->width;
-        else left = pos_x;
+        if (face_left) right = body.x + kind->width;
+        else left = body.x;
     }
     return target_x < right && target_x + Player::WIDTH > left &&
-           target_y < pos_y + kind->height && target_y + Player::HEIGHT > pos_y;
+           target_y < body.y + kind->height && target_y + Player::HEIGHT > body.y;
 }
 
 bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
@@ -698,7 +628,7 @@ bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
     // club. It turns to face the target first, so a player who has slipped
     // behind it is slammed at rather than ignored -- which is still escapable,
     // because the turn costs the whole wind-up.
-    if (!target_alive || attack_timer > 0 || !on_ground || !has_arms()) return false;
+    if (!target_alive || attack_timer > 0 || !body.on_ground || !has_arms()) return false;
     const int dx = (target_x + Player::WIDTH / 2) - center_x();
     const bool was_left = face_left;
     if (dx != 0) face_left = dx < 0;
@@ -716,8 +646,8 @@ void Enemy::impact_point(int& x, int& y) const {
     // the debris thrown back toward the troll lands clear of its own feet -- see
     // slam() -- rather than in its footing rows, where it would lift the body.
     const int out = kind->reach - kind->crush_radius - 1;
-    x = face_left ? pos_x - 1 - out : pos_x + kind->width + out;
-    y = pos_y + kind->height;
+    x = face_left ? body.x - 1 - out : body.x + kind->width + out;
+    y = body.y + kind->height;
 }
 
 void Enemy::slam(Grid& grid) {
