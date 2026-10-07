@@ -26,11 +26,16 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
     // comment in run.h.
 }
 
-bool Run::spawn_enemy(int x, int y) {
+bool Run::spawn_enemy(int x, int y, const Species& kind) {
     for (Enemy& e : enemies) {
         if (e.is_alive()) continue;
-        if (e.overlaps_solid(grid, x, y)) return false;
-        e.spawn(x, y);
+        // Asked of the slot as the new species: the test is the box, and the box
+        // is the species'.
+        e.spawn(x, y, kind);
+        if (e.overlaps_solid(grid, x, y)) {
+            e = Enemy{};
+            return false;
+        }
         return true;
     }
     return false;
@@ -72,7 +77,15 @@ bool Run::step(const Input& input) {
     // The spawn first of all, before the brush and the grid, for the brush's own
     // reason: what is put into the world on a step should not also move on it.
     if (input.spawn_enemy) {
-        spawn_enemy(input.cursor_x - Enemy::WIDTH / 2, input.cursor_y - Enemy::HEIGHT / 2);
+        spawn_enemy(input.cursor_x - species::GHOUL.width / 2,
+                    input.cursor_y - species::GHOUL.height / 2);
+    }
+    // A troll stands on the cursor rather than being centred on it: its box is
+    // three bodies tall, and centred on a cursor over the ground it would start
+    // half buried and be refused.
+    if (input.spawn_troll) {
+        spawn_enemy(input.cursor_x - species::TROLL.width / 2,
+                    input.cursor_y - species::TROLL.height, species::TROLL);
     }
 
     if (input.brush_active) {
@@ -123,7 +136,7 @@ bool Run::step(const Input& input) {
     for (Enemy& e : enemies) {
         if (!e.is_alive()) continue;
         if (e.update(grid, player.cell_x(), player.cell_y(), player.is_alive())) {
-            player.take_hit(Enemy::SWIPE_DAMAGE);
+            player.take_hit(e.species().damage);
         }
     }
 

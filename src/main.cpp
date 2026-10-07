@@ -496,7 +496,9 @@ int main(int argc, char* argv[]) {
     player_anim::State anim_state;
 
     // The enemies' bodies, one frame-sized slot per Run::enemies slot, rebuilt from
-    // each body's surviving pixels every frame they are on screen.
+    // each body's surviving pixels every frame they are on screen. A slot is the
+    // largest species' frame (Enemy::MAX_FRAME_*), so any slot can hold a troll;
+    // a ghoul uses the top-left corner of its slot.
     //
     // Built rather than loaded, because there is no fixed picture to load: an enemy
     // looks like whatever is left of it, and the pixel mask is simulation state
@@ -507,8 +509,8 @@ int main(int argc, char* argv[]) {
     // for nothing measurable.
     SDL_Texture* enemy_atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                                  SDL_TEXTUREACCESS_STREAMING,
-                                                 Enemy::FRAME_W * Run::MAX_ENEMIES,
-                                                 Enemy::FRAME_H);
+                                                 Enemy::MAX_FRAME_W * Run::MAX_ENEMIES,
+                                                 Enemy::MAX_FRAME_H);
     if (enemy_atlas) {
         SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
     } else {
@@ -519,7 +521,7 @@ int main(int argc, char* argv[]) {
                              "enemies will not be drawn.\n", SDL_GetError());
     }
     std::vector<uint32_t> enemy_atlas_pixels(
-        static_cast<size_t>(Enemy::FRAME_W) * Run::MAX_ENEMIES * Enemy::FRAME_H, 0u);
+        static_cast<size_t>(Enemy::MAX_FRAME_W) * Run::MAX_ENEMIES * Enemy::MAX_FRAME_H, 0u);
     std::vector<frame::EnemySprite> enemy_sprites;
     std::vector<frame::ArrowSprite> arrow_sprites;
     enemy_sprites.reserve(Run::MAX_ENEMIES);
@@ -970,7 +972,8 @@ int main(int argc, char* argv[]) {
         // player is; after the props only because that is the order the launch
         // lines have always come out in.
         const boot::EnemyPlanting enemies_planted = boot::plant_enemies(run);
-        std::printf("Enemies: %d placed\n", enemies_planted.placed);
+        std::printf("Enemies: %d placed (%d troll%s)\n", enemies_planted.placed,
+                    enemies_planted.trolls, enemies_planted.trolls == 1 ? "" : "s");
 
         // The world is new, so a log of inputs into the old one is not a log of
         // anything.
@@ -992,6 +995,7 @@ int main(int argc, char* argv[]) {
     ElementType current_brush = ElementType::Sand;
     int brush_size = 3;
     bool spawn_requested = false;
+    bool troll_requested = false;
 
     // The settings menu is a state, not an overlay with a flag: while it is open
     // the fixed-step loop below does not run, so the world is frozen rather than
@@ -1265,6 +1269,8 @@ int main(int argc, char* argv[]) {
                 // so it has to arrive through Input and be in the recording. See the
                 // step loop below for why it is consumed by the first step only.
                 if (e.key.keysym.sym == SDLK_n && !repeat) spawn_requested = true;
+                // A troll at the cursor, standing on it -- point at the ground.
+                if (e.key.keysym.sym == SDLK_t && !repeat) troll_requested = true;
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
@@ -1458,6 +1464,7 @@ int main(int argc, char* argv[]) {
         // is already on W.
         input.shoot = !debug.free_camera && keys[SDL_SCANCODE_E];
         input.spawn_enemy = spawn_requested;
+        input.spawn_troll = troll_requested;
 
         // The camera is centred and stays centred; nothing per-frame is left to do to
         // it besides the follow further down.
@@ -1486,6 +1493,8 @@ int main(int argc, char* argv[]) {
         auto consume_spawn = [&]() {
             input.spawn_enemy = false;
             spawn_requested = false;
+            input.spawn_troll = false;
+            troll_requested = false;
         };
         for (int i = 0; i < steps; ++i) {
             advance_one_step(input);
@@ -1654,11 +1663,31 @@ int main(int argc, char* argv[]) {
             const Enemy& en = run.enemies[static_cast<size_t>(slot)];
             if (!en.is_alive()) continue;
             any_enemy = true;
-            for (int y = 0; y < Enemy::FRAME_H; ++y) {
-                for (int x = 0; x < Enemy::FRAME_W; ++x) {
-                    const size_t at = static_cast<size_t>(y) * Enemy::FRAME_W * Run::MAX_ENEMIES +
-                                      static_cast<size_t>(slot) * Enemy::FRAME_W + x;
-                    enemy_atlas_pixels[at] = en.has_pixel(x, y) ? enemy_art::color_at(x, y) : 0u;
+            const Species& kind = en.species();
+            const body_art::Art& art = *kind.art;
+
+            // The slam's telegraph: the eyes heat from their own colour toward
+            // white-hot over the wind-up, so the thing about to land is readable
+            // from the face, which is where the player is aiming anyway. Drawn
+            // here, from the windup count the body exposes, and nowhere in the
+            // simulation -- it changes nothing an arrow can hit.
+            uint32_t eye_heat = 0;
+            if (en.windup_left() > 0 && kind.windup_steps > 0) {
+                eye_heat = static_cast<uint32_t>(
+                    255 * (kind.windup_steps - en.windup_left()) / kind.windup_steps);
+            }
+            for (int y = 0; y < art.h; ++y) {
+                for (int x = 0; x < art.w; ++x) {
+                    const size_t at = static_cast<size_t>(y) * Enemy::MAX_FRAME_W * Run::MAX_ENEMIES +
+                                      static_cast<size_t>(slot) * Enemy::MAX_FRAME_W + x;
+                    uint32_t c = en.has_pixel(x, y) ? art.color_at(x, y) : 0u;
+                    if (c != 0u && eye_heat > 0 && art.is_head(x, y)) {
+                        const uint32_t g = (c >> 8) & 0xFFu, b = c & 0xFFu;
+                        c = 0xFFFF0000u |
+                            ((g + (255u - g) * eye_heat / 255u) << 8) |
+                            (b + (255u - b) * eye_heat / 255u);
+                    }
+                    enemy_atlas_pixels[at] = c;
                 }
             }
             const pacer::Interpolated at = pacer::interpolate(
@@ -1667,12 +1696,12 @@ int main(int argc, char* argv[]) {
                 static_cast<float>(en.cell_x()) + fx::to_float(en.remainder_x()),
                 static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha);
             enemy_sprites.push_back(frame::EnemySprite{
-                SDL_Rect{slot * Enemy::FRAME_W, 0, Enemy::FRAME_W, Enemy::FRAME_H},
-                at.x, at.y, en.facing_left()});
+                SDL_Rect{slot * Enemy::MAX_FRAME_W, 0, art.w, art.h},
+                at.x, at.y, kind.offset_x(), kind.offset_y(), en.facing_left()});
         }
         if (any_enemy && enemy_atlas) {
             SDL_UpdateTexture(enemy_atlas, nullptr, enemy_atlas_pixels.data(),
-                              Enemy::FRAME_W * Run::MAX_ENEMIES * static_cast<int>(sizeof(uint32_t)));
+                              Enemy::MAX_FRAME_W * Run::MAX_ENEMIES * static_cast<int>(sizeof(uint32_t)));
         }
 
         arrow_sprites.clear();

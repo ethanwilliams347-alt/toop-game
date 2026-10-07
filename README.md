@@ -192,7 +192,21 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   both legs are cut through, or when less than 40% of them is left. Then the
   whole body collapses into a heap of sand. Fire burns them away from
   wherever the flame touches, feet first.
-- **`N`** (development tool): Spawn an enemy at the cursor.
+- **Trolls.** One stands at the far end of each scene with room for it: a
+  hunched giant nearly three times your height, with a club. It walks slowly,
+  and when you are in front of it within reach it stops, its eyes heat white
+  for most of a second, and the club comes down for 30 damage -- breaking the
+  ground into a crater and a spray of debris. Walk out from under it, then
+  shoot while it stands spent.
+- **Trolls come apart locally too.** An arrow takes a five-cell bite out of a
+  troll, not a limb: its arms are too thick to sever in one shot, so you chip
+  through a shoulder with two or three, and then the whole arm (and the club,
+  if it is that arm) drops as a heap of sand. It needs one arrow in each eye,
+  not one between them. With both arms gone it has nothing to slam with. It
+  wades through sand, so the pile of its own arm does not trap it.
+- **`N`** (development tool): Spawn a ghoul at the cursor.
+- **`T`** (development tool): Spawn a troll standing on the cursor -- point at
+  the ground.
 - The HUD shows `FOES:` (alive) and `KILLS:`.
 
 **World (development tools)**

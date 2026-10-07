@@ -240,49 +240,85 @@ inline PlantingReport plant_props(const Grid& grid,
 // instead of burying them. Deterministic in the grid: the same scene plants the
 // same enemies in the same places, which is what keeps a session log's start
 // state reproducible from the scene alone.
-inline constexpr int ENEMY_MIN_SPACING = 12 * Enemy::WIDTH;
+inline constexpr int ENEMY_MIN_SPACING = 12 * species::GHOUL.width;
 inline constexpr int ENEMIES_ACROSS = 8;
-inline constexpr int ENEMY_EDGE_MARGIN = 2 * Enemy::WIDTH;
+inline constexpr int ENEMY_EDGE_MARGIN = 2 * species::GHOUL.width;
 
 // From the player's start, box centre to box centre. Past the notice range by a
 // body, so nothing planted starts the run already chasing.
-inline constexpr int ENEMY_CLEARANCE = Enemy::NOTICE_X + Enemy::WIDTH;
+constexpr int clearance_for(const Species& kind) { return kind.notice_x + kind.width; }
+inline constexpr int ENEMY_CLEARANCE = clearance_for(species::GHOUL);
 
 // What the planter did, for the launch line main.cpp prints.
 struct EnemyPlanting {
-    int placed = 0;
+    int placed = 0;   // every species
+    int trolls = 0;   // of which trolls
     int skipped = 0;  // columns under water, or where the pool was full
 };
+
+// Where a body of `kind` would stand with its box's left column at x: the y of
+// its box's top, or -1 if it cannot stand there -- not enough headroom above the
+// surface, or the box is not open air. terrain_surface sees through water,
+// because water is not solid, so without the open-air test a column over a pond
+// plants an enemy standing on the pond's floor -- alive, underwater, and
+// invisible.
+inline int standing_y(const Grid& grid, int x, const Species& kind) {
+    // Highest, not lowest, for the reason stand_player_on_ground gives: a body
+    // stops on the first thing its footprint meets. A column with no terrain at
+    // all stands on the world's bottom border, which is solid -- that is the
+    // whole of the `floor` scenes, and a body dropped there would land there
+    // anyway.
+    int surface = highest_surface_under(grid, x, kind.width);
+    if (surface < 0) surface = grid.get_height();
+    if (surface < kind.height) return -1;
+    const int y = surface - kind.height;
+    for (int cy = y; cy < surface; ++cy)
+        for (int cx = x; cx < x + kind.width; ++cx)
+            if (grid.get_element(cx, cy).type != ElementType::Empty) return -1;
+    return y;
+}
 
 inline EnemyPlanting plant_enemies(Run& run) {
     EnemyPlanting report;
     const int w = run.grid.get_width();
-    const int h = run.grid.get_height();
+    const int player_cx = run.player.center_x();
+
+    // --- one troll, as far from the start as it will stand ---
+    //
+    // One, because it is the thing at the far end of the level rather than a
+    // population; as far as possible, because a troll is noticed from a long way
+    // off and the run should get to see it before it sees them. Planted first so
+    // the ghouls are spaced around it rather than it being squeezed in among
+    // them. A world too narrow to keep it out of notice range of the start --
+    // the smallest shipped scenes -- gets none, rather than one that is already
+    // coming when the run begins.
+    const Species& troll = species::TROLL;
+    int troll_x = -1, troll_y = -1, best = -1;
+    for (int x = ENEMY_EDGE_MARGIN; x + troll.width + ENEMY_EDGE_MARGIN <= w; x += troll.width / 2) {
+        const int dist = std::abs(x + troll.width / 2 - player_cx);
+        if (dist < clearance_for(troll) || dist <= best) continue;
+        const int y = standing_y(run.grid, x, troll);
+        if (y < 0) continue;
+        troll_x = x;
+        troll_y = y;
+        best = dist;
+    }
+    if (troll_x >= 0 && run.spawn_enemy(troll_x, troll_y, troll)) {
+        ++report.placed;
+        ++report.trolls;
+    }
+
+    // --- ghouls, spread across the rest ---
+    const Species& ghoul = species::GHOUL;
     const int spacing = std::max(ENEMY_MIN_SPACING, w / ENEMIES_ACROSS);
-    for (int x = ENEMY_EDGE_MARGIN; x + Enemy::WIDTH <= w; x += spacing) {
-        if (std::abs(x + Enemy::WIDTH / 2 - run.player.center_x()) < ENEMY_CLEARANCE) continue;
-
-        // Highest, not lowest, for the reason stand_player_on_ground gives: a body
-        // stops on the first thing its footprint meets. A column with no terrain
-        // at all stands on the world's bottom border, which is solid -- that is
-        // the whole of the `floor` scenes, and a body dropped there would land
-        // there anyway.
-        int surface = highest_surface_under(run.grid, x, Enemy::WIDTH);
-        if (surface < 0) surface = h;
-        if (surface < Enemy::HEIGHT) {
-            ++report.skipped;
+    for (int x = ENEMY_EDGE_MARGIN; x + ghoul.width <= w; x += spacing) {
+        if (std::abs(x + ghoul.width / 2 - player_cx) < ENEMY_CLEARANCE) continue;
+        // Not inside the troll, nor so close that they start the run overlapping.
+        if (report.trolls > 0 && x + ghoul.width + ghoul.width > troll_x &&
+            x < troll_x + troll.width + ghoul.width)
             continue;
-        }
-
-        // The box has to be open air. terrain_surface sees through water, because
-        // water is not solid, so without this a column over a pond plants an enemy
-        // standing on the pond's floor -- alive, underwater, and invisible.
-        const int y = surface - Enemy::HEIGHT;
-        bool open = true;
-        for (int cy = y; cy < surface && open; ++cy)
-            for (int cx = x; cx < x + Enemy::WIDTH && open; ++cx)
-                if (run.grid.get_element(cx, cy).type != ElementType::Empty) open = false;
-        if (!open || !run.spawn_enemy(x, y)) {
+        const int y = standing_y(run.grid, x, ghoul);
+        if (y < 0 || !run.spawn_enemy(x, y, ghoul)) {
             ++report.skipped;
             continue;
         }

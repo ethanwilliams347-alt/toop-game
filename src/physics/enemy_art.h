@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "body_art.h"
 
 // The enemy's body, one character per pixel and one pixel per world cell.
 //
@@ -25,7 +26,7 @@
 namespace enemy_art {
 
 // Frame size, matching the player's sheet: the enemy is the same kind of thing
-// as the player at the same scale, and the collision box (Enemy::WIDTH/HEIGHT)
+// as the player at the same scale, and the collision box (species::GHOUL in enemy.h)
 // is the player's. The arms hang outside the box exactly as the player's
 // sleeves do -- a sleeve over a wall is art, an arm over a wall is still an arm
 // an arrow can hit.
@@ -93,10 +94,7 @@ inline constexpr const char* ROWS[H] = {
 // The eyes are the one colour from outside it, and the one that has to be: two
 // amber points are what a player reads first at four screen pixels per cell, and
 // they are what tells you where the head is in a dark scene.
-struct Ink {
-    char ch;
-    uint32_t argb;
-};
+using body_art::Ink;
 inline constexpr Ink PALETTE[] = {
     {'K', 0xFF101410},  // outline, a hair off black so it is still moss
     {'D', 0xFF182016},  // tree_shadow
@@ -121,120 +119,50 @@ inline constexpr int FOOT_ROWS = 2;
 inline constexpr int ARM_TOP = 11;
 
 // Which columns the collision box covers, in frame space. The same arithmetic as
-// Enemy::OFFSET_X, stated here because the art is what has to agree with it and
+// species::GHOUL.offset_x(), stated here because the art is what has to agree with it and
 // this header cannot include the one that includes it.
 inline constexpr int BOX_LEFT = 3;
 inline constexpr int BOX_RIGHT = W - BOX_LEFT;  // one past the last box column
 
-// The pixel's colour, or 0 (transparent) for '.' and for anything not in the
-// palette -- the second case cannot survive to runtime, see art_is_well_formed.
-constexpr uint32_t color_at(int x, int y) {
-    const char c = ROWS[y][x];
-    for (int i = 0; i < PALETTE_COUNT; ++i)
-        if (PALETTE[i].ch == c) return PALETTE[i].argb;
-    return 0;
-}
+// The ghoul as body_art reads it. Everything Enemy does with a body, it does
+// through one of these, which is what lets the troll be a second table rather
+// than a second class.
+inline constexpr body_art::Art ART{ROWS, W, H, PALETTE, PALETTE_COUNT, "E", "ml",
+                                   BOX_LEFT, ARM_TOP, FOOT_ROWS};
 
-constexpr bool is_body(int x, int y) { return ROWS[y][x] != '.'; }
-constexpr bool is_head(int x, int y) { return ROWS[y][x] == 'E'; }
-constexpr bool is_heart(int x, int y) { return ROWS[y][x] == 'm' || ROWS[y][x] == 'l'; }
-constexpr bool is_foot(int x, int y) {
-    return is_body(x, y) && y >= H - FOOT_ROWS && x >= BOX_LEFT && x < BOX_RIGHT;
-}
-constexpr bool is_arm(int x, int y) {
-    return is_body(x, y) && y >= ARM_TOP && (x < BOX_LEFT || x >= BOX_RIGHT);
-}
+// The ghoul's own names for the rules, kept because the tests read the ghoul's
+// frame through them.
+constexpr uint32_t color_at(int x, int y) { return ART.color_at(x, y); }
+constexpr bool is_body(int x, int y) { return ART.is_body(x, y); }
+constexpr bool is_head(int x, int y) { return ART.is_head(x, y); }
+constexpr bool is_heart(int x, int y) { return ART.is_heart(x, y); }
+constexpr bool is_foot(int x, int y) { return ART.is_foot(x, y); }
+constexpr bool is_arm(int x, int y) { return ART.is_arm(x, y); }
 
 // --- the art has to be a body, and the compiler checks that it is ----------
 //
-// Every relationship below is one an edit to the grid can break without the
-// edit looking wrong, and every one of them would present at runtime as a
-// behaviour bug rather than as an art bug.
-namespace detail {
-
-constexpr int length(const char* s) {
-    int n = 0;
-    while (s[n] != '\0') ++n;
-    return n;
-}
-
-constexpr bool art_is_well_formed() {
-    for (int y = 0; y < H; ++y) {
-        if (length(ROWS[y]) != W) return false;
-        for (int x = 0; x < W; ++x)
-            if (is_body(x, y) && color_at(x, y) == 0) return false;
-    }
-    return true;
-}
-
-constexpr int count_where(bool (*pred)(int, int)) {
-    int n = 0;
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x)
-            if (pred(x, y)) ++n;
-    return n;
-}
-
-// Every pixel reachable from the heart through 8-connected body pixels. If this
-// failed, a freshly spawned enemy would lose the unreachable pixels to the
-// severing pass on the first hit anywhere -- a stray hand dropping off when the
-// arrow landed in the other leg.
-constexpr bool art_is_connected() {
-    bool seen[W * H] = {};
-    int queue[W * H] = {};
-    int head = 0, tail = 0;
-    for (int i = 0; i < W * H; ++i) {
-        if (is_heart(i % W, i / W)) {
-            seen[i] = true;
-            queue[tail++] = i;
-        }
-    }
-    while (head < tail) {
-        const int i = queue[head++];
-        const int x = i % W, y = i / W;
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                const int nx = x + dx, ny = y + dy;
-                if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-                const int n = ny * W + nx;
-                if (seen[n] || !is_body(nx, ny)) continue;
-                seen[n] = true;
-                queue[tail++] = n;
-            }
-        }
-    }
-    for (int i = 0; i < W * H; ++i)
-        if (is_body(i % W, i / W) && !seen[i]) return false;
-    return true;
-}
-
-constexpr bool feet_reach_bottom_row() {
-    for (int x = 0; x < W; ++x)
-        if (is_body(x, H - 1)) return true;
-    return false;
-}
-
-}  // namespace detail
-
-static_assert(detail::art_is_well_formed(),
+// The checks themselves are body_art's, shared with the troll; what each one
+// guards against is in the message.
+static_assert(body_art::well_formed(ART),
               "enemy_art::ROWS has a row of the wrong width or a character with no "
               "PALETTE entry");
-static_assert(detail::count_where(is_head) > 0 && detail::count_where(is_heart) > 0,
+static_assert(body_art::count_where(ART, &body_art::Art::is_head) > 0 &&
+                  body_art::count_where(ART, &body_art::Art::is_heart) > 0,
               "the enemy art needs at least one HEAD ('E') and one HEART ('m'/'l') "
               "pixel, or it is born dead");
-static_assert(detail::count_where(is_foot) > 0,
+static_assert(body_art::count_where(ART, &body_art::Art::is_foot) > 0,
               "the enemy art has nothing in its FOOT_ROWS inside the box, so it is "
               "born footless and collapses on its first hit");
-static_assert(detail::count_where(is_arm) > 0,
+static_assert(body_art::count_where(ART, &body_art::Art::is_arm) > 0,
               "the enemy art has no pixels outside the box below ARM_TOP, so it is "
               "born armless and can never swipe");
-static_assert(detail::art_is_connected(),
+static_assert(body_art::connected<W * H>(ART),
               "some enemy pixel is not 8-connected to the heart; it would fall off "
               "as sand the first time the enemy is hit anywhere");
-static_assert(detail::feet_reach_bottom_row(),
+static_assert(body_art::stands_on_bottom_row(ART),
               "the enemy art floats: its bottom row is empty, so it would be drawn "
               "standing a cell above every floor");
 
-inline constexpr int PIXEL_COUNT = detail::count_where(is_body);
+inline constexpr int PIXEL_COUNT = body_art::count_where(ART, &body_art::Art::is_body);
 
 }  // namespace enemy_art

@@ -31,11 +31,14 @@ struct Prop {
 // still hit. `src` is that slot.
 //
 // Position is the collision box's top-left, interpolated, in world cells -- the
-// same convention as the player -- and the frame anchors it bottom-centre with
-// Enemy::OFFSET_X/Y, like player_sprite::OFFSET_X/Y does for the owl.
+// same convention as the player -- and the frame anchors it bottom-centre by
+// `offset_x`/`offset_y` (the species' Species::offset_x/y), like
+// player_sprite::OFFSET_X/Y does for the owl. The frame's size is `src`'s: a
+// troll's slot holds a bigger frame than a ghoul's, so the sprite says which.
 struct EnemySprite {
     SDL_Rect src;
     float x, y;
+    int offset_x, offset_y;
     bool facing_left;
 };
 

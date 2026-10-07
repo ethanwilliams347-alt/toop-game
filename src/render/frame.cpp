@@ -5,7 +5,6 @@
 #include "render/backdrop_layers.h"
 #include "render/backdrop_wrap.h"
 #include "render/player_sprite.h"
-#include "physics/enemy.h"
 
 namespace frame {
 namespace {
@@ -539,10 +538,10 @@ void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
     apply_grade(p.enemy_atlas, g);
     for (const EnemySprite& e : *p.enemies) {
         const SDL_FRect body{
-            camera.world_to_screen_x(e.x - Enemy::OFFSET_X),
-            camera.world_to_screen_y(e.y - Enemy::OFFSET_Y),
-            static_cast<float>(camera.scale_length(Enemy::FRAME_W)),
-            static_cast<float>(camera.scale_length(Enemy::FRAME_H))
+            camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
+            camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
+            static_cast<float>(camera.scale_length(e.src.w)),
+            static_cast<float>(camera.scale_length(e.src.h))
         };
         SDL_RenderCopyExF(renderer, p.enemy_atlas, &e.src, &body, 0.0, nullptr,
                           e.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);

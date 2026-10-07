@@ -90,7 +90,8 @@ bool write(const char* path, const Log& log, std::string* error) {
                                                     (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
                                                     (in.brush_active ? 16 : 0) |
                                                     (in.shoot ? 32 : 0) |
-                                                    (in.spawn_enemy ? 64 : 0));
+                                                    (in.spawn_enemy ? 64 : 0) |
+                                                    (in.spawn_troll ? 128 : 0));
         put8(buf, buttons);
         put8(buf, static_cast<uint8_t>(in.brush_type));
         put8(buf, static_cast<uint8_t>(in.brush_size));
@@ -162,6 +163,7 @@ bool read(const char* path, Log& log, std::string* error) {
         in.brush_active = (buttons & 16) != 0;
         in.shoot = (buttons & 32) != 0;
         in.spawn_enemy = (buttons & 64) != 0;
+        in.spawn_troll = (buttons & 128) != 0;
 
         const uint8_t type = buf[off++];
         // A brush type outside the table would index MATERIALS out of range on the

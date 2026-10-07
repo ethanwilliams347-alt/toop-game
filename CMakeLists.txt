@@ -18,6 +18,17 @@ set(SDL_SHARED OFF CACHE BOOL "Build SDL shared library" FORCE)
 set(SDL_STATIC ON CACHE BOOL "Build SDL static library" FORCE)
 FetchContent_MakeAvailable(SDL2)
 
+# The enemy art is checked at compile time -- every pixel connected to the
+# heart, every row the right width (src/physics/body_art.h) -- and the troll's
+# 52x70 frame makes that the largest constant expression in the build. MSVC
+# stops evaluating a constant expression after 100,000 steps by default, well
+# short of a flood fill over 3,640 pixels, and reports the static_assert as "not
+# a constant expression" rather than as the art being wrong. GCC and Clang's
+# defaults are far higher. Set after SDL so it applies to this project only.
+if(MSVC)
+    add_compile_options(/constexpr:steps10000000)
+endif()
+
 # The five source sets below are kept apart on purpose. Each one draws a
 # boundary the code is not allowed to cross, and the separation is what makes a
 # crossing a build error rather than a habit: the day something under

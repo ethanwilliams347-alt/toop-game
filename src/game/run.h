@@ -49,6 +49,11 @@ struct Input {
     // directly because it changes the world, and every change to the world has to
     // be in the recorded stream or a replay of the session is a different session.
     bool spawn_enemy = false;
+
+    // The same, for a troll. Its own bit rather than a species field, because
+    // Input is recorded as button bits and a species field would be a byte the
+    // log carries on every step for a key pressed a handful of times a session.
+    bool spawn_troll = false;
 };
 
 // Everything one play session needs, held as a single object instead of three
@@ -171,10 +176,11 @@ public:
     // development tool.
     static constexpr int MAX_ENEMIES = 24;
 
-    // Brings a dead slot to life with the box's top-left at (x, y). Refused, and
-    // false, when every slot is taken or the box would start inside something
-    // solid -- an enemy spawned into a wall would spend its life stuck there.
-    bool spawn_enemy(int x, int y);
+    // Brings a dead slot to life as `kind`, with the box's top-left at (x, y).
+    // Refused, and false, when every slot is taken or the box would start inside
+    // something solid -- an enemy spawned into a wall would spend its life stuck
+    // there.
+    bool spawn_enemy(int x, int y, const Species& kind = species::GHOUL);
 
     int enemies_alive() const;
 

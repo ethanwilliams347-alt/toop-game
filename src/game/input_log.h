@@ -47,7 +47,11 @@ namespace input_log {
 //    bit was ever set -- but a version-2 log read by a version-1 build would drop
 //    every shot and every spawn and replay as a different session, so the bump is
 //    for the reader that cannot know what it is missing.
-constexpr uint32_t FORMAT_VERSION = 2;
+//
+// 3: the troll spawn key (`spawn_troll`), as button bit 128 -- the last free bit
+//    in the byte, so the next button grows the record. Bumped for the reason 2
+//    was.
+constexpr uint32_t FORMAT_VERSION = 3;
 
 struct Header {
     uint32_t version = FORMAT_VERSION;
