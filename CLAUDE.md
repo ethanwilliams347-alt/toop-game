@@ -79,8 +79,9 @@ turn them into `add_test()`.
   the `light/fire` and `light/dark` rows.
 - **Perf claims** need back-to-back `grid_bench` numbers; run-to-run noise on the
   heavy rows is about ±10%.
-- **Feel constants:** update `TUNING.md` in the same commit (value, line number,
-  and a `History` entry with the reason). `tuning_test` checks it against source.
+- **Feel constants:** update `TUNING.md` in the same commit (value, the file that
+  declares it, and a `History` entry with the reason). Rows link files, never
+  lines; `tuning_test` finds each constant by name and rejects `#L` anchors.
 
 ## Code conventions
 

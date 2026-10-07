@@ -7,12 +7,18 @@
 // cannot be static_asserted, so this suite is the next best thing: it parses the
 // document and fails when the document and the code disagree.
 //
-// Two checks, of different strength:
+// Three checks, of different strength:
 //
-//   1. Every row whose Line column is a link, in any table, must name a constant
-//      that is actually declared on the linked line. This catches both a removed
-//      constant and a stale line number, which is how the drift started.
-//   2. Every src/physics/player.h row must state the value the code holds, and
+//   1. Every row whose File column is a link, in any table, must name a
+//      constant that the linked file actually declares ("NAME =" as a whole
+//      identifier, on any line). This catches a removed or renamed constant,
+//      which is how the drift started.
+//   2. No link in the document may carry a line anchor (#L...). Rows used to
+//      link the declaring line, and the line numbers went stale with every edit
+//      above them; worse, every branch that re-pointed them conflicted with every
+//      other branch that did. The file is enough to find a constant by name, and
+//      check 1 is what keeps the name honest.
+//   3. Every src/physics/player.h row must state the value the code holds, and
 //      every constant listed in PLAYER_KNOBS below must have a row. Only player.h
 //      rows are value-checked: they are the feel constants with plain numeric
 //      values. Other tables describe values in words ("3 body heights") that
@@ -150,23 +156,20 @@ int main() {
         if (name.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos)
             continue;  // `idle` etc. in the animation table: not a constant
 
-        // [N](path#LN)
+        // [file](path)
         const std::string& link = cells[1];
         const size_t open = link.find("](");
-        const size_t hash = link.find("#L", open == std::string::npos ? 0 : open);
-        const size_t close = link.find(')', hash == std::string::npos ? 0 : hash);
+        const size_t close = link.find(')', open == std::string::npos ? 0 : open);
         if (link.empty() || link.front() != '[' || open == std::string::npos ||
-            hash == std::string::npos || close == std::string::npos)
-            continue;  // unlinked row: nothing to check a line against
-        const std::string path = link.substr(open + 2, hash - open - 2);
-        const int line_no = std::atoi(link.substr(hash + 2, close - hash - 2).c_str());
+            close == std::string::npos)
+            continue;  // unlinked row: nothing to check a declaration against
+        const std::string path = link.substr(open + 2, close - open - 2);
         linked_rows++;
 
-        const std::vector<std::string> src = read_lines(path);
-        const bool on_line = line_no >= 1 && line_no <= static_cast<int>(src.size()) &&
-                             declares(src[line_no - 1], name);
-        check(("`" + name + "` is declared at " + path + ":" + std::to_string(line_no)).c_str(),
-              on_line, on_line ? "" : "stale line number, or the constant does not exist");
+        bool declared = false;
+        for (const std::string& line : read_lines(path)) declared |= declares(line, name);
+        check(("`" + name + "` is declared in " + path).c_str(), declared,
+              "the constant was renamed or removed, or the row links the wrong file");
 
         if (path != "src/physics/player.h") continue;
         documented_player.push_back(name);
@@ -185,6 +188,13 @@ int main() {
               parsed ? "code holds raw fx " + std::to_string(knob->value) +
                            " (/65536), doc says raw " + std::to_string(stated)
                      : "Now column is not a plain decimal");
+    }
+
+    for (size_t i = 0; i < doc.size(); ++i) {
+        const bool anchored = doc[i].find(".h#L") != std::string::npos ||
+                              doc[i].find(".cpp#L") != std::string::npos;
+        check(("TUNING.md:" + std::to_string(i + 1) + " links a file, not a line").c_str(),
+              !anchored, "drop the #L anchor; rows link the declaring file only");
     }
 
     check("TUNING.md has linked rows at all", linked_rows > 0,
