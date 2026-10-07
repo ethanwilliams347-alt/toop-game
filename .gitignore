@@ -40,3 +40,6 @@ __pycache__/
 .env
 .env.*
 *.local
+
+# ASan build tree (just asan)
+/build-asan/

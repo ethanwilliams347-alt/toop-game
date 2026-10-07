@@ -1,0 +1,37 @@
+# clang-tidy checks for `just code_cleanup`, which runs them on the C++ files a
+# branch has changed (tools/code_cleanup.py). Picked for bugs and wasted work,
+# not style: style is .clang-format's job, and the code's own idioms (index
+# loops over fixed tables, int enums, long parameter lists of ints) are
+# deliberate and should not be argued with on every change.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-inc-dec-in-conditions,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.*,
+  performance-*,
+  -performance-enum-size,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-emplace,
+  modernize-make-unique,
+  readability-misleading-indentation,
+  misc-redundant-expression,
+  misc-unused-using-decls
+
+# Excluded above, and why:
+#   easily-swappable-parameters  every (x, y) pair in the engine trips it.
+#   narrowing-conversions,       the grid packs into uint8_t/int16_t on purpose
+#   implicit-widening-...        and MSVC's own warnings report the narrowings that matter.
+#   inc-dec-in-conditions        `swing >= 0 && ++swing >= N` is well-defined (&& sequences)
+#                                and is how the step counters are written.
+#   insecureAPI                  fopen/sscanf; MSVC's C4996 already says so.
+#   enum-size                    an enum's width is a layout decision made where
+#                                it matters (SceneMode : uint8_t), not everywhere.
+
+# Report findings in project headers, never SDL's. tools/code_cleanup.py narrows
+# this further, to the headers a branch changed, with --header-filter.
+HeaderFilterRegex: '.*[/\\](src|tests)[/\\].*'

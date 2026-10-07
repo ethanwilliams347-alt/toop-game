@@ -69,9 +69,24 @@ ctest --test-dir build -C Release -R grid_test --output-on-failure
 .\build\Release\water_probe.exe
 .\build\Release\preview_light.exe                    # headless frame dump
 python tools/rawpng.py out.raw out.png 804 604
+
+just code_cleanup                                    # pre-PR pass, see below
+just code_check                                      # same, changes nothing
+just asan                                            # ASan build in build-asan\, all suites
 ```
 
 ## Verification workflow — mandatory
+
+**Before opening or updating any PR:** `just code_cleanup` (needs `just`, LLVM's
+clang-format/clang-tidy, and `ruff`). It runs `tools/code_cleanup.py`:
+clang-format on the **changed lines**, clang-tidy on the **changed C++ files**,
+ruff format + check on the **changed Python files**, then the Release build and
+ctest. Formatting is limited to changed lines on purpose: the tree predates
+`.clang-format`, and a whole-file reformat inside a feature branch buries the real
+change and conflicts with every other open branch. Do not run `clang-format -i`
+over whole files. A tidy finding is fixed, or silenced at that line with
+`// NOLINT(check-name)` plus a comment saying why — never by editing `.clang-tidy`
+to make one change pass.
 
 **Any change under `src/physics/`:**
 1. `ctest ... --output-on-failure` — all 19 must pass. `grid_test`, `player_test`,

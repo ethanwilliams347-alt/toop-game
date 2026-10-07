@@ -74,6 +74,11 @@ ctest --test-dir build -C Release -R golden_frame_test --output-on-failure
 Run in this order. Do not report success having skipped a stage.
 
 ```
+0. CLEANUP     just code_cleanup
+               -> clang-format on changed lines, clang-tidy on changed C++
+               files, ruff on changed Python, then build + ctest. Never
+               reformat whole files: the tree predates .clang-format.
+
 1. UNIT        ctest --test-dir build -C Release --output-on-failure
                -> 19/19. No exceptions.
 
