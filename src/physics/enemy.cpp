@@ -710,15 +710,20 @@ bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
     return false;
 }
 
-void Enemy::slam(Grid& grid) {
+void Enemy::impact_point(int& x, int& y) const {
     // Where the club lands: as far out along its reach as keeps the whole crater
     // inside it, on the row the feet stand on top of. Far enough out, too, that
     // the debris thrown back toward the troll lands clear of its own feet -- see
-    // below -- rather than in its footing rows, where it would lift the body.
+    // slam() -- rather than in its footing rows, where it would lift the body.
+    const int out = kind->reach - kind->crush_radius - 1;
+    x = face_left ? pos_x - 1 - out : pos_x + kind->width + out;
+    y = pos_y + kind->height;
+}
+
+void Enemy::slam(Grid& grid) {
     const int r = kind->crush_radius;
-    const int out = kind->reach - r - 1;
-    const int ix = face_left ? pos_x - 1 - out : pos_x + kind->width + out;
-    const int iy = pos_y + kind->height;
+    int ix = 0, iy = 0;
+    impact_point(ix, iy);
     const int w = grid.get_width(), h = grid.get_height();
 
     // The ground in a disc around the impact breaks. Static structural cells

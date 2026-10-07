@@ -445,6 +445,10 @@ public:
     bool has_pixel(int x, int y) const { return pixels[y * kind->frame_w() + x] != 0; }
     int pixel_count() const { return remaining; }
 
+    // Where this body's slam lands: the crater's centre, given where it stands
+    // and faces now. Public so the run can say where a wind-up is aimed.
+    void impact_point(int& x, int& y) const;
+
     bool has_arms() const;
     bool has_feet() const;
 

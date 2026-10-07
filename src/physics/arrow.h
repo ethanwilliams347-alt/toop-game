@@ -10,6 +10,17 @@
 // The tip is what matters, and it is a whole cell plus an `fx` remainder for the
 // reason Player's position is -- collision only ever asks about whole cells, so an
 // arrow is never a fraction of a cell into a wall.
+// Where an arrow ended its flight this step: in a body (enemy >= 0, with the
+// pixels its bite took) or stuck in terrain (enemy == -1). Recorded by the quiver
+// so the run can report it (game/events.h) without the physics knowing who is
+// listening.
+struct ArrowImpact {
+    int x = 0;
+    int y = 0;
+    int enemy = -1;
+    int pixels = 0;
+};
+
 struct Arrow {
     bool live = false;
 
@@ -96,11 +107,18 @@ public:
 
     const std::array<Arrow, CAPACITY>& arrows() const { return pool; }
 
+    // This step's impacts, from the last update_arrows. One per arrow at most --
+    // an arrow ends on the first body or wall it meets -- so CAPACITY holds them.
+    int impact_count() const { return impacts_n; }
+    const ArrowImpact& impact(int i) const { return impacts[static_cast<size_t>(i)]; }
+
     // Ready means the next held step fires.
     bool is_ready() const { return draw <= 0; }
 
 private:
     std::array<Arrow, CAPACITY> pool{};
+    std::array<ArrowImpact, CAPACITY> impacts{};
+    int impacts_n = 0;
     int draw = 0;
 
     // Whether the arrow should stop in the cell it has just entered, and why.

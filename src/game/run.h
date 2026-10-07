@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include "game/events.h"
 #include "physics/arrow.h"
 #include "physics/enemy.h"
 #include "physics/grid.h"
@@ -210,6 +211,10 @@ public:
     // the readout, and the readout wants the number.
     int kills() const { return kill_count; }
 
+    // What the last step() did -- see game/events.h. Cleared at the start of each
+    // step, so a frame that runs several steps reads each step's events after it.
+    const EventLog& events() const { return events_; }
+
     Grid grid;
     Player player;
     DigTool dig_tool;
@@ -223,6 +228,7 @@ private:
     // must not have the answer flicker back.
     Outcome run_outcome = Outcome::Playing;
     int kill_count = 0;
+    EventLog events_;
 
     // The objective survives reset(), and this is the second documented exception to
     // "reset restores a fresh Run", after Grid::vent_radius. It is a property of the

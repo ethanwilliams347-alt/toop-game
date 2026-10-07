@@ -258,6 +258,8 @@ int main() {
         shoot.cursor_x = e.center_x();
         shoot.cursor_y = e.center_y();
         run.step(shoot);
+        check("events: loosing an arrow is reported",
+              run.events().count(Event::Kind::ArrowLoosed) == 1);
 
         int live = 0;
         for (const Arrow& a : run.quiver.arrows()) if (a.live) ++live;
@@ -266,10 +268,20 @@ int main() {
         int steps = 0;
         const int before = e.pixel_count();
         Input idle;
+        int hit_events = 0, hit_pixels = 0;
         while (steps < 120 && run.enemies[0].pixel_count() == before) {
             run.step(idle);
             ++steps;
+            for (const Event& ev : run.events()) {
+                if (ev.kind != Event::Kind::ArrowHit) continue;
+                ++hit_events;
+                hit_pixels += ev.b;
+            }
         }
+        check("events: the hit is one ArrowHit, with the pixels it took",
+              hit_events == 1 && (hit_pixels == before - run.enemies[0].pixel_count() ||
+                                  !run.enemies[0].is_alive()),
+              "events=" + std::to_string(hit_events) + " px=" + std::to_string(hit_pixels));
         check("the arrow reaches the enemy and takes pixels out of it",
               run.enemies[0].pixel_count() < before, "steps=" + std::to_string(steps));
         check("those pixels are in the grid as sand",
@@ -426,6 +438,32 @@ int main() {
             return h ^ static_cast<uint64_t>(run.kills());
         };
         check("two runs from the same inputs end in the same world", play() == play());
+
+        // The same volley, reading the events: every kill the run counts is one
+        // EnemyKilled, naming the slot that died.
+        Run run(WORLD_W, WORLD_H, 7);
+        for (int y = FLOOR_Y; y < WORLD_H; ++y)
+            for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
+        run.player = Player(40, FLOOR_Y - Player::HEIGHT);
+        run.spawn_enemy(150, FLOOR_Y - G.height);
+        run.spawn_enemy(230, FLOOR_Y - G.height);
+        int killed = 0;
+        bool slots_dead = true;
+        for (int i = 0; i < 400; ++i) {
+            Input in;
+            in.shoot = (i % 3) == 0;
+            in.cursor_x = 150 + (i % 90);
+            in.cursor_y = FLOOR_Y - 15 + (i % 7);
+            run.step(in);
+            for (const Event& ev : run.events()) {
+                if (ev.kind != Event::Kind::EnemyKilled) continue;
+                ++killed;
+                slots_dead &= !run.enemies[static_cast<size_t>(ev.a)].is_alive();
+            }
+        }
+        check("events: one EnemyKilled per kill, naming a dead slot",
+              run.kills() > 0 && killed == run.kills() && slots_dead,
+              "kills=" + std::to_string(run.kills()) + " events=" + std::to_string(killed));
     }
 
     // ================= the troll =================
@@ -570,9 +608,20 @@ int main() {
         Run run = troll_arena(100 + T.width + 4);
         const int walls = count_type(run.grid, ElementType::Wall);
         int wound_up_at = -1, hit_at = -1, x_at_windup = 0;
+        int windup_event_at = -1, slam_event_at = -1, hurt_events = 0, hurt_amount = 0,
+            hurt_source = -2;
         bool moved_while_winding = false;
         for (int i = 0; i < 300 && hit_at < 0; ++i) {
             run.step(Input{});
+            for (const Event& ev : run.events()) {
+                if (ev.kind == Event::Kind::SlamWindup) windup_event_at = i;
+                if (ev.kind == Event::Kind::Slam) slam_event_at = i;
+                if (ev.kind == Event::Kind::PlayerHurt) {
+                    ++hurt_events;
+                    hurt_amount = ev.a;
+                    hurt_source = ev.b;
+                }
+            }
             const Enemy& e = run.enemies[0];
             if (wound_up_at < 0 && e.windup_left() > 0) {
                 wound_up_at = i;
@@ -590,6 +639,14 @@ int main() {
         check("for the troll's damage",
               run.player.health() == Player::MAX_HEALTH - T.damage,
               "hp=" + std::to_string(run.player.health()));
+        check("events: the wind-up and the blow are each reported on their step",
+              windup_event_at == wound_up_at && slam_event_at == hit_at,
+              "windup ev=" + std::to_string(windup_event_at) + " slam ev=" +
+                  std::to_string(slam_event_at));
+        check("events: ...and the hit as one PlayerHurt naming the troll and its damage",
+              hurt_events == 1 && hurt_amount == T.damage &&
+                  hurt_source == species::index_of(species::TROLL));
+        check("events: nothing is dropped", run.events().dropped() == 0);
         const int broken = walls - count_type(run.grid, ElementType::Wall);
         check("and the ground where it lands breaks into sand",
               broken > 20 && count_type(run.grid, ElementType::Sand) == broken,
@@ -600,18 +657,22 @@ int main() {
         // The same, but the player walks out from under it once it starts.
         Run run = troll_arena(100 + T.width + 4);
         bool started = false, landed = false;
-        int hurt = 0;
+        int hurt = 0, slams = 0, hurt_events = 0;
         for (int i = 0; i < 300 && !landed; ++i) {
             Input in;
             in.right = started;
             const bool winding = run.enemies[0].windup_left() > 0;
             run.step(in);
+            slams += run.events().count(Event::Kind::Slam);
+            hurt_events += run.events().count(Event::Kind::PlayerHurt);
             if (run.enemies[0].windup_left() > 0) started = true;
             if (winding && run.enemies[0].windup_left() == 0) landed = true;
             if (run.player.damage_this_step() > 0) ++hurt;
         }
         check("a slam you walk out from under misses", landed && hurt == 0,
               "landed=" + std::to_string(landed) + " hurt=" + std::to_string(hurt));
+        check("events: a missed slam is still a Slam, with no PlayerHurt",
+              slams == 1 && hurt_events == 0);
     }
     {
         // Both arms shot off: it has nothing to slam with.

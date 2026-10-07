@@ -71,7 +71,9 @@ void Quiver::step_one(Arrow& a, Grid& grid, Enemy* enemies, int enemy_count, int
         // and the ribs, between the legs -- and an arrow passes through them.
         for (int e = 0; e < enemy_count; ++e) {
             if (enemies[e].pixel_at(cx, cy) < 0) continue;
-            hit_pixels += enemies[e].shatter(grid, cx, cy, BITE_RADIUS);
+            const int taken = enemies[e].shatter(grid, cx, cy, BITE_RADIUS);
+            hit_pixels += taken;
+            impacts[static_cast<size_t>(impacts_n++)] = ArrowImpact{cx, cy, e, taken};
             // Spent. An arrow that has just turned the thing it was stuck in into
             // sand has nothing left to be stuck in.
             a.live = false;
@@ -85,6 +87,7 @@ void Quiver::step_one(Arrow& a, Grid& grid, Enemy* enemies, int enemy_count, int
             a.rem_y = 0;
             a.stuck = true;
             a.life = STUCK_STEPS;
+            impacts[static_cast<size_t>(impacts_n++)] = ArrowImpact{cx, cy, -1, 0};
             return;
         }
         a.x = cx;
@@ -94,6 +97,7 @@ void Quiver::step_one(Arrow& a, Grid& grid, Enemy* enemies, int enemy_count, int
 
 int Quiver::update_arrows(Grid& grid, Enemy* enemies, int enemy_count) {
     int hit_pixels = 0;
+    impacts_n = 0;
     for (Arrow& a : pool) {
         if (!a.live) continue;
         a.prev_x = a.x;
