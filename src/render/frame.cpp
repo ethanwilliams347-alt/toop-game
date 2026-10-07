@@ -84,7 +84,7 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
     apply_grade(l.texture, l.grade);
 
     const Camera& camera = *p.camera;
-    const Backdrop& b = p.backdrop;
+    const Backdrop& b = *p.backdrop;  // non-null: only called from the two passes below
     const int scale = camera.scale();
     const int window_w = p.padded_w * scale;
     const int window_h = p.padded_h * scale;
@@ -169,12 +169,14 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
 // The backdrop, in two passes either side of the world. Each layer brings its
 // own Grade, which is why these rows of the table carry PLAIN and ignore theirs.
 void draw_backdrop(SDL_Renderer* renderer, const Params& p, const Grade&) {
-    for (const ParallaxLayer& l : p.backdrop.layers)
+    if (!p.backdrop) return;
+    for (const ParallaxLayer& l : p.backdrop->layers)
         if (!l.is_foreground) draw_layer(renderer, p, l);
 }
 
 void draw_foreground(SDL_Renderer* renderer, const Params& p, const Grade&) {
-    for (const ParallaxLayer& l : p.backdrop.layers)
+    if (!p.backdrop) return;
+    for (const ParallaxLayer& l : p.backdrop->layers)
         if (l.is_foreground) draw_layer(renderer, p, l);
 }
 

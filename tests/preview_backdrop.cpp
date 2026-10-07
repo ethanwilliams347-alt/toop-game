@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
         fp.padded_h = PADDED_H;
         fp.world_w = world_w;
         fp.world_h = world_h;
-        fp.backdrop = backdrop;
+        fp.backdrop = &backdrop;
         fp.cells = cells;
         fp.time_s = t;
         frame::compose(renderer, fp);

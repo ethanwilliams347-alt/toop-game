@@ -75,7 +75,7 @@ into `src/render/player_sprite.h`.
 ## Running the Tests
 
 The simulation has no SDL dependency, so it is tested headlessly. There are
-twenty-two suites, one per concern — `grid_test` for the cellular automata,
+twenty-three suites, one per concern — `grid_test` for the cellular automata,
 `player_test` for the character physics, `tool_test` for digging,
 `collapse_test` for structural support, `run_test` for the three of them driven
 together through one `Run::step()`, `scene_test` for the level loader,
@@ -102,7 +102,9 @@ at — and it runs the *shipped* scene, so the two lines a launch used to be
 checked by are assertions instead. `level_test` covers the level file and
 `level::start`, the one function the game, the replay bench and the tests all
 build a world with, and starts every shipped scene the way the game does.
-`shell_test` covers the decisions the shell
+`present_test` covers what the frame shows, worked out from the run -- above
+all that every enemy pixel painted into the atlas lands on a cell an arrow would
+hit. `shell_test` covers the decisions the shell
 takes every frame and every keypress — how much simulated time a frame buys,
 what freezing the world means, where between two steps the picture falls, and
 the settings menu's navigation and selection. CTest runs all of them.

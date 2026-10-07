@@ -1,3 +1,16 @@
+// The game: the frame loop, the input pump, and the wiring between the parts
+// that do the work. What used to live here and no longer does, and where it went:
+//
+//   game/level.h        putting a world together for a scene (headless; level_test)
+//   present/present.h   what the frame shows, from a const Run (present_test)
+//   shell/shell.h       render targets, display modes, textures from assets
+//   render/frame.h      the world layers, in order (golden_frame_test)
+//
+// The SDL event switch is still here. It is dispatch to state this function owns
+// -- the menu, the debug keys, the recorder, the scene index -- and moving it
+// behind a function would mean handing all of that over by reference, which is
+// the lambda soup in another file. Its decisions are already in
+// game/settings_menu.h and game/debug_view.h, which have suites.
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -20,12 +33,13 @@
 #include "render/light.h"
 #include "render/overlay.h"
 #include "render/player_anim.h"
-#include "scene/bmp.h"
+#include "present/present.h"
 #include "scene/level_files.h"
 #include "scene/props.h"
 #include "scene/scene.h"
 #include "scene/scene_list.h"
 #include "scene/sprites.h"
+#include "shell/shell.h"
 #include "ui/text.h"
 #include "ui/hotbar.h"
 
@@ -47,153 +61,10 @@ constexpr int GRID_HEIGHT = boot::GRID_HEIGHT;
 // at any grid size and any camera offset. The texture is sized to the viewport
 // rather than to the whole grid, so upload cost does not scale with world size.
 
-// Loads a plain (non-scene) authored BMP as a texture -- the backdrop and prop
-// art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see
-// tools/pixel_art.py) as transparent before the surface becomes a texture, which
-// is how a sprite with an irregular silhouette gets transparency out of a 24-bit
-// BMP with no alpha channel at all: SDL_CreateTextureFromSurface bakes a
-// colour-keyed surface's key into the resulting texture's alpha, so nothing
-// downstream has to know the trick happened. Backdrop layers (opaque,
-// full-rect) pass colorkey=false and get a plain opaque texture.
-SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool colorkey) {
-    SDL_Surface* surf = SDL_LoadBMP(path);
-    if (!surf) {
-        std::fprintf(stderr, "Failed to load %s: %s\n", path, SDL_GetError());
-        return nullptr;
-    }
-    if (colorkey) {
-        const Uint32 key = SDL_MapRGB(surf->format, 0xFF, 0x00, 0xFF);
-        SDL_SetColorKey(surf, SDL_TRUE, key);
-    }
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
-    SDL_FreeSurface(surf);
-    if (!tex) {
-        std::fprintf(stderr, "Failed to create texture from %s: %s\n", path, SDL_GetError());
-        return nullptr;
-    }
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    return tex;
-}
-
 // The props layer, defined in render/frame.h with the layer ordering it is part
 // of. Aliased rather than qualified everywhere below: the planting scan further
 // down is scene setup, not rendering.
 using frame::Prop;
-
-// Everything whose size is a function of the display mode, and nothing else.
-//
-// The list is short because the pixel buffer is grid-sized rather than
-// viewport-sized, and Camera is told the viewport's size as an argument to
-// follow() rather than storing it. Neither had anything to do with resolution
-// switching when they were written; both are why switching is a matter of
-// rebuilding two textures instead of rebuilding the renderer.
-struct RenderTargets {
-    SDL_Texture* cells = nullptr;  // the world's ARGB streaming texture
-    SDL_Texture* light_texture = nullptr;
-    LightField light{1, 1};  // replaced wholesale on every mode change
-};
-
-// Builds the render targets for `mode` and, on success, swaps them in and
-// resizes the window.
-//
-// Constructs everything new before releasing anything old, which is why this
-// returns a bool instead of exiting. At startup a failed texture allocation can
-// reasonably end the process; a hundred frames into a session it cannot, because
-// the player still has a world open and the only thing that went wrong is a
-// setting they can change back. On failure nothing has been destroyed and
-// nothing reassigned, so the caller keeps playing at the mode it already had.
-//
-// `scale` joins `mode` because the render targets are sized in cells, and how
-// many cells a window holds is a question about both. It is therefore called on
-// a scene change as well as a mode change; the window resize at the bottom is
-// idempotent when only the scale moved.
-bool apply_mode(SDL_Window* window, SDL_Renderer* renderer,
-                const DisplayMode& mode, int scale, RenderTargets& targets) {
-    SDL_Texture* cells = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        mode.padded_w(scale), mode.padded_h(scale));
-    if (!cells) {
-        std::fprintf(stderr, "Could not create a %dx%d cell texture: %s\n",
-                     mode.padded_w(scale), mode.padded_h(scale), SDL_GetError());
-        return false;
-    }
-
-    LightField light(mode.padded_w(scale), mode.padded_h(scale));
-    SDL_Texture* light_texture = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        light.cols(), light.rows());
-    if (!light_texture) {
-        std::fprintf(stderr, "Could not create a %dx%d light texture: %s\n",
-                     light.cols(), light.rows(), SDL_GetError());
-        SDL_DestroyTexture(cells);
-        return false;
-    }
-
-    // Both blend modes and the light's filtering are re-applied here, not set
-    // once at startup, because they are properties of a texture and these are
-    // new textures. Each of the three is load-bearing and none is obvious from
-    // the create call:
-    //
-    // BLEND on the cells. Empty is 0x00000000 in MATERIALS, so an empty cell
-    // is transparent rather than black -- but only if the texture is
-    // composited rather than blitted. Without this line the alpha is carried
-    // to the screen and then ignored, which looks exactly like opaque black.
-    //
-    // ADD, not BLEND, on the light. Light is something the scene gains, not
-    // something laid over it: an alpha blend towards orange would wash the
-    // terrain's colour out towards the flame's, where addition brightens
-    // whatever is already there and leaves a lit grey wall reading as a grey
-    // wall. It also means black is free -- an unlit block adds nothing --
-    // which is what lets the same texture cover the whole viewport rather
-    // than needing a mask.
-    //
-    // Linear filtering is the entire reason a downsampled light grid is
-    // acceptable; at nearest-neighbour it is BLOCK-sized squares of flat
-    // colour. Set per-texture rather than through
-    // SDL_HINT_RENDER_SCALE_QUALITY, which is read at creation time and is
-    // global -- routing this through a global would make the cell texture's
-    // sharpness depend on the order the two are created in.
-    SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureBlendMode(light_texture, SDL_BLENDMODE_ADD);
-    SDL_SetTextureScaleMode(light_texture, SDL_ScaleModeLinear);
-
-    // A streaming texture is created with undefined contents, and the upload each
-    // frame only ever writes the rect the grid actually covers. A world smaller than
-    // the viewport on either axis leaves the remainder holding whatever the driver's
-    // allocation contained, which shows as garbage along the edge rather than as the
-    // backdrop. Once per texture, since it can only ever be wrong once.
-    {
-        const std::vector<uint32_t> blank(
-            static_cast<size_t>(mode.padded_w(scale)) * mode.padded_h(scale), 0);
-        SDL_UpdateTexture(cells, nullptr, blank.data(), mode.padded_w(scale) * sizeof(uint32_t));
-    }
-
-    if (targets.cells) SDL_DestroyTexture(targets.cells);
-    if (targets.light_texture) SDL_DestroyTexture(targets.light_texture);
-    targets.cells = cells;
-    targets.light_texture = light_texture;
-    targets.light = std::move(light);
-
-    SDL_SetWindowSize(window, mode.window_w, mode.window_h);
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    return true;
-}
-
-// Whether a mode's window actually fits on the display the window is on.
-//
-// A window larger than the desktop is one SDL will happily create, with the
-// bottom and right of the game off-screen -- including the settings menu the
-// player would use to change it back. Usable bounds rather than raw bounds, so a
-// taskbar counts.
-bool mode_fits(const DisplayMode& mode, int display_index) {
-    SDL_Rect usable;
-    if (SDL_GetDisplayUsableBounds(display_index, &usable) != 0) {
-        // No answer is not the same as "no". A driver that cannot report its own
-        // bounds should not be able to hide every mode in the menu.
-        return true;
-    }
-    return mode.window_w <= usable.w && mode.window_h <= usable.h;
-}
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -212,7 +83,7 @@ int main(int argc, char* argv[]) {
     // can run without two monitors.
     bool mode_available[DISPLAY_MODE_COUNT];
     for (int i = 0; i < DISPLAY_MODE_COUNT; ++i)
-        mode_available[i] = mode_fits(DISPLAY_MODES[i], 0);
+        mode_available[i] = shell::mode_fits(DISPLAY_MODES[i], 0);
 
     const int stored_mode = load_display_mode();
     const ModeChoice choice =
@@ -273,8 +144,8 @@ int main(int argc, char* argv[]) {
     // to the viewport rather than to the whole grid, and both rebuilt by this
     // same call whenever the mode changes. Here a failure is fatal, unlike in
     // the menu: there is no earlier mode to fall back to.
-    RenderTargets targets;
-    if (!apply_mode(window, renderer, mode, view_scale, targets)) {
+    shell::RenderTargets targets;
+    if (!shell::apply_mode(window, renderer, mode, view_scale, targets)) {
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -294,8 +165,9 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "         every sprite falls back to its shipped file.\n");
     }
 
-    // The loaded scene's backdrop (render/backdrop_set.h). Filled by
-    // load_backdrop when a scene is activated; empty until then, and for a scene
+    // The loaded scene's backdrop (render/backdrop_set.h), owned here and by
+    // nothing else, so every path that changes scene goes through
+    // shell::load_backdrop. Empty until a scene is activated, and for a scene
     // that names none.
     frame::Backdrop backdrop;
     backdrop_set::Anchor backdrop_anchor = backdrop_set::Anchor::Corner;
@@ -322,7 +194,7 @@ int main(int argc, char* argv[]) {
         // which drawing that is becomes a swap you can make from the command
         // line.
         const std::string path = sprites.path_for(sprite, sprite + ".bmp");
-        SDL_Texture* tex = load_art_texture(renderer, path.c_str(), true);
+        SDL_Texture* tex = shell::load_art_texture(renderer, path.c_str(), true);
         if (!tex) {
             std::fprintf(stderr, "WARNING: prop sprite '%s' did not load; "
                                  "every prop naming '%s' is skipped.\n",
@@ -357,7 +229,7 @@ int main(int argc, char* argv[]) {
     // just draws the wrong rectangles.
     const std::string player_sheet_path =
         sprites.path_for("player_sheet", "player_sheet_fly.bmp");
-    SDL_Texture* player_tex = load_art_texture(renderer, player_sheet_path.c_str(), true);
+    SDL_Texture* player_tex = shell::load_art_texture(renderer, player_sheet_path.c_str(), true);
     if (player_tex) {
         int sheet_w = 0, sheet_h = 0;
         SDL_QueryTexture(player_tex, nullptr, nullptr, &sheet_w, &sheet_h);
@@ -378,32 +250,12 @@ int main(int argc, char* argv[]) {
     }
     player_anim::State anim_state;
 
-    // The enemies' bodies, one slot per Run::enemies slot, redrawn every frame
-    // from each body's surviving pixels in its current pose. A slot is the largest
-    // species' frame plus the most any pose reaches outside it (Enemy::MAX_POSE_PAD)
-    // on every side -- a troll's club raised over its head is well above its
-    // frame -- so any slot can hold any species in any pose. The slots sit in a
-    // grid rather than one row, which at that size would be wider than the
-    // smallest texture limit SDL promises.
-    //
-    // Built rather than loaded, because there is no fixed picture to load: an enemy
-    // looks like whatever is left of it, posed however it is standing, and both
-    // are simulation state (see physics/enemy_art.h and physics/rig.h). Every
-    // frame rather than on change, and only the rectangle each pose covers is
-    // written and uploaded: a few thousand pixels a body, against a cache keyed
-    // on which body is in which slot in which pose, which is a correctness
-    // problem in exchange for nothing measurable.
-    constexpr int ENEMY_SLOT_W = Enemy::MAX_FRAME_W + 2 * Enemy::MAX_POSE_PAD;
-    constexpr int ENEMY_SLOT_H = Enemy::MAX_FRAME_H + 2 * Enemy::MAX_POSE_PAD;
-    constexpr int ENEMY_SLOT_COLS = 6;
-    constexpr int ENEMY_SLOT_ROWS = (Run::MAX_ENEMIES + ENEMY_SLOT_COLS - 1) / ENEMY_SLOT_COLS;
-    constexpr int ENEMY_ATLAS_W = ENEMY_SLOT_W * ENEMY_SLOT_COLS;
-    constexpr int ENEMY_ATLAS_H = ENEMY_SLOT_H * ENEMY_SLOT_ROWS;
-    static_assert(ENEMY_ATLAS_W <= 2048 && ENEMY_ATLAS_H <= 2048,
-                  "the enemy atlas outgrew the texture size every SDL renderer supports");
+    // The enemies' bodies, painted every frame by present::paint_enemies into a
+    // buffer this texture mirrors; present/present.h has the layout and why it is
+    // built rather than loaded.
     SDL_Texture* enemy_atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                                  SDL_TEXTUREACCESS_STREAMING,
-                                                 ENEMY_ATLAS_W, ENEMY_ATLAS_H);
+                                                 present::ENEMY_ATLAS_W, present::ENEMY_ATLAS_H);
     if (enemy_atlas) {
         SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
     } else {
@@ -414,7 +266,7 @@ int main(int argc, char* argv[]) {
                              "enemies will not be drawn.\n", SDL_GetError());
     }
     std::vector<uint32_t> enemy_atlas_pixels(
-        static_cast<size_t>(ENEMY_ATLAS_W) * ENEMY_ATLAS_H, 0u);
+        static_cast<size_t>(present::ENEMY_ATLAS_W) * present::ENEMY_ATLAS_H, 0u);
     std::vector<frame::EnemySprite> enemy_sprites;
     std::vector<frame::ArrowSprite> arrow_sprites;
     enemy_sprites.reserve(Run::MAX_ENEMIES);
@@ -594,92 +446,9 @@ int main(int argc, char* argv[]) {
 
     // Declared above the scene lambdas rather than below them, and that is a
     // requirement rather than a tidy-up: they capture by reference, so
-    // activate_scene can only tell the camera a scene's scale, and
-    // load_backdrop can only read it back, if the camera is already in scope
-    // where those lambdas are written.
-
-    // --- the backdrop ------------------------------------------------------
-    //
-    // frame::Backdrop::layers is owned here and by nothing else, so every path that
-    // changes scene goes through these two. The clear destroys before it empties,
-    // which is the whole reason it is a function: cycling scenes with a
-    // layers.clear() that only dropped the pointers would leak a set's textures a
-    // cycle with nothing on screen ever saying so.
-    auto clear_backdrop = [&]() {
-        for (frame::ParallaxLayer& l : backdrop.layers)
-            if (l.texture) SDL_DestroyTexture(l.texture);
-        backdrop = frame::Backdrop{};
-        backdrop_anchor = backdrop_set::Anchor::Corner;
-    };
-
-    // The scene's backdrop set, read from assets/<dir>/backdrop.txt -- the one
-    // loader for every set. Everything a layer is, and the argument for each
-    // number, is in that file and in render/backdrop_set.h; what is left here is
-    // turning records into textures.
-    //
-    // One art pixel is one world cell, so a layer's on-screen size is the art's
-    // native size times the scale and nothing else -- no fitting to the window.
-    // Read off the camera rather than off def.scale so that a scene whose requested
-    // scale could not be applied draws its backdrop at the scale actually in use.
-    auto load_backdrop = [&](const scene_list::SceneDef& def) {
-        clear_backdrop();
-        if (def.backdrop.empty()) {
-            std::printf("Backdrop: none\n");
-            return;
-        }
-        const std::string dir = "assets/" + def.backdrop + "/";
-        std::string error;
-        const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &error);
-        if (!error.empty()) {
-            // Reported and drawn without, the way every parser here degrades: the
-            // whole set is refused rather than drawn with the layer it could not read.
-            std::fprintf(stderr, "ERROR: %s\n         scene '%s' draws no backdrop.\n",
-                         error.c_str(), def.name.c_str());
-            return;
-        }
-
-        const int scale = camera.scale();
-        backdrop.layers.reserve(set.layers.size());
-        int missing = 0;
-        for (const backdrop_set::Layer& sp : set.layers) {
-            const std::string path = set.dir + sp.file;
-            SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
-            if (!tex) { ++missing; continue; }
-            frame::ParallaxLayer l;
-            l.texture = tex;
-            l.w = set.native_w * scale;
-            l.h = set.native_h * scale;
-            l.tex_h = set.native_h;
-            l.parallax_x = backdrop_set::factor_of(set, sp);
-            l.parallax_y = backdrop_set::vertical_factor_of(set, sp);
-            l.bands = sp.bands;
-            l.line_scroll = sp.plane;
-            l.on_plane = sp.on_plane;
-            l.ripple_row0 = sp.ripple_row0;
-            l.ripple_row1 = sp.ripple_row1;
-            l.drift = sp.drift;
-            l.grade = frame::Grade{};  // identity; the art carries its own depth
-            l.is_foreground = sp.foreground;
-            backdrop.layers.push_back(l);
-        }
-        backdrop.rig = set.rig;
-        backdrop.ripple_amplitude = set.ripple_amplitude;
-        backdrop_anchor = set.anchor;
-
-        // Printed for the same reason Scene: and Props: are -- a backdrop that
-        // half-loaded is otherwise a frame you have to recognise by eye.
-        std::printf("Backdrop: %d of %d %s layers at %dx, anchored at the %s",
-                    static_cast<int>(backdrop.layers.size()),
-                    static_cast<int>(set.layers.size()), def.backdrop.c_str(), scale,
-                    set.anchor == backdrop_set::Anchor::Corner ? "corner" : "standing camera");
-        if (set.has_rig)
-            std::printf(", rig horizon %d contact %d", set.rig.horizon_row, set.rig.contact_row);
-        std::printf("\n");
-        if (missing)
-            std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun that "
-                                 "set's generator and rebuild.\n",
-                         missing, def.backdrop.c_str());
-    };
+    // activate_scene can only tell the camera a scene's scale, and hand that scale
+    // to shell::load_backdrop, if the camera is already in scope where those
+    // lambdas are written.
 
     // Everything building a world is, in the order it has to happen, and the only
     // caller of the steps above. Boot calls it once, the scene key calls it to
@@ -723,7 +492,7 @@ int main(int argc, char* argv[]) {
         if (resolved.scale_changed) {
             const int previous = view_scale;
             view_scale = resolved.scale;
-            if (!apply_mode(window, renderer, mode, view_scale, targets)) {
+            if (!shell::apply_mode(window, renderer, mode, view_scale, targets)) {
                 std::fprintf(stderr, "WARNING: could not rebuild render targets at %dx "
                                      "for scene '%s'; staying at %dx.\n",
                              view_scale, def.name.c_str(), previous);
@@ -737,7 +506,7 @@ int main(int argc, char* argv[]) {
         // After the size and the scale, and before anything is stamped: the stack
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
-        load_backdrop(def);
+        backdrop_anchor = shell::load_backdrop(renderer, def, camera.scale(), backdrop);
 
         // The world itself: one call, shared with the replay bench and the tests,
         // so there is no second path that puts a world together. See game/level.h
@@ -811,17 +580,6 @@ int main(int argc, char* argv[]) {
     int frames_this_second = 0;
     double title_timer = 0.0;
     int fps_display = 0;
-
-    // Rebuilt every frame rather than cached for a second. The brush name and the
-    // awake-chunk count are not periodic readouts like the frame rate, they are
-    // answers to "what did that key just do" and "has the world settled yet" --
-    // cached, pressing a hotbar key leaves the HUD naming the old brush for up to a
-    // second, which reads as the input being sluggish. Only the frame rate is
-    // genuinely a once-a-second quantity, so only the frame rate is cached.
-    //
-    // This is an instrument, and an instrument that lags makes every measurement
-    // taken with it suspect.
-    std::string hud_text;
 
     // Previous frame's sub-cell player position, for render interpolation. The
     // simulation steps at 60 Hz and the display may run far faster, so each
@@ -964,7 +722,7 @@ int main(int argc, char* argv[]) {
                     // switch, on a window, and report which way it went.
                     if (out.act == menu::Act::ApplyMode) {
                         const DisplayMode& wanted = DISPLAY_MODES[out.mode];
-                        if (apply_mode(window, renderer, wanted, view_scale, targets)) {
+                        if (shell::apply_mode(window, renderer, wanted, view_scale, targets)) {
                             mode = wanted;
                             mode_index = out.mode;
                             // Persisted at the point it takes effect, not on the way out
@@ -1313,52 +1071,12 @@ int main(int argc, char* argv[]) {
                                mode.padded_w(view_scale), mode.padded_h(view_scale), world_w, world_h, world_infinite);
         }
 
-        // Upload only the visible rect, not the whole grid, starting from the
-        // camera's current view rather than always (0, 0). Clamped to the grid's own
-        // size so this stays correct if the grid is ever smaller than the viewport;
-        // the case this exists for is the opposite one, where the clamp is a no-op
-        // and the rect is the full viewport every frame.
-        //
-        // Straight from the grid's own buffer at the grid's pitch, so SDL reads the
-        // right columns out of each row and skips the rest -- no copy. Only when the
-        // window lies wholly inside the grid, though: a scene with the horizontal
-        // clamp dropped can put the window past its edge, and those cells have to
-        // be cleared rather than read from outside the buffer. That case copies.
-        //
-        // (A near-terrain tint pass used to sit here, compiled in and switched off,
-        // blending terrain toward the generated ground plane. It went with that
-        // backdrop; render/backdrop_set.h has the account.)
-        const std::vector<uint32_t>& pixels = run.grid.get_pixels();
+        // The camera's view of the grid, into the cell texture. Clamped to the grid's
+        // own size so this stays correct if the grid is ever smaller than the
+        // viewport; shell::upload_cells has the rest.
         const int visible_w = std::min(mode.padded_w(view_scale), run.grid.get_width());
         const int visible_h = std::min(mode.padded_h(view_scale), run.grid.get_height());
-        const SDL_Rect visible_rect{0, 0, visible_w, visible_h};
-        const int grid_w = run.grid.get_width();
-        const int grid_h = run.grid.get_height();
-        const int view_x = camera.view_x(), view_y = camera.view_y();
-        const bool window_inside_grid = view_x >= 0 && view_y >= 0 &&
-                                        view_x + visible_w <= grid_w &&
-                                        view_y + visible_h <= grid_h;
-        if (window_inside_grid) {
-            SDL_UpdateTexture(targets.cells, &visible_rect,
-                              pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
-                              grid_w * static_cast<int>(sizeof(uint32_t)));
-        } else {
-            const size_t window_cells =
-                static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
-            cell_window.assign(window_cells, 0u);
-            for (int wy = 0; wy < visible_h; ++wy) {
-                const int gy = view_y + wy;
-                if (gy < 0 || gy >= grid_h) continue;
-                for (int wx = 0; wx < visible_w; ++wx) {
-                    const int gx = view_x + wx;
-                    if (gx < 0 || gx >= grid_w) continue;
-                    cell_window[static_cast<size_t>(wy) * visible_w + wx] =
-                        pixels[static_cast<size_t>(gy) * grid_w + gx];
-                }
-            }
-            SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
-                              visible_w * static_cast<int>(sizeof(uint32_t)));
-        }
+        shell::upload_cells(targets.cells, run.grid, camera, visible_w, visible_h, cell_window);
 
         // Computed against the same view origin the cell upload just used, and after
         // camera.follow for the same reason that upload is: a light field built from
@@ -1385,93 +1103,16 @@ int main(int argc, char* argv[]) {
         // and anything drawn after it is deliberately not lit.
         // --- the enemies and the arrows, at this frame's alpha ---
         //
-        // Interpolated between the last two steps like the body is, and with the
-        // same teleport clamp for the enemies -- climbing out of its own dust can
-        // lift one a few cells in a step. Not for the arrows: they cover several
-        // cells every step by design, and the clamp would make every arrow in
-        // flight strobe.
-        enemy_sprites.clear();
-        for (int slot = 0; slot < Run::MAX_ENEMIES; ++slot) {
-            const Enemy& en = run.enemies[static_cast<size_t>(slot)];
-            if (!en.is_alive()) continue;
-            const Species& kind = en.species();
-            const body_art::Art& art = *kind.art;
-
-            // The slam's telegraph: the eyes heat from their own colour toward
-            // white-hot over the wind-up, so the thing about to land is readable
-            // from the face, which is where the player is aiming anyway. Drawn
-            // here, from the windup count the body exposes, and nowhere in the
-            // simulation -- it changes nothing an arrow can hit.
-            uint32_t eye_heat = 0;
-            if (en.windup_left() > 0 && kind.windup_steps > 0) {
-                eye_heat = static_cast<uint32_t>(
-                    255 * (kind.windup_steps - en.windup_left()) / kind.windup_steps);
-            }
-            // The pose's rectangle, painted cell by cell from the same question an
-            // arrow asks (Enemy::posed_pixel), so what is drawn in a cell is what
-            // is hit there. Whatever the pose cannot reach is left as it was:
-            // nothing samples outside the rectangle.
-            const rig::Box b = en.pose_bounds();
-            const int bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-            if (bw <= 0 || bh <= 0) continue;
-            const int slot_x = (slot % ENEMY_SLOT_COLS) * ENEMY_SLOT_W;
-            const int slot_y = (slot / ENEMY_SLOT_COLS) * ENEMY_SLOT_H;
-            for (int y = 0; y < bh; ++y) {
-                uint32_t* row = enemy_atlas_pixels.data() +
-                                static_cast<size_t>(slot_y + y) * ENEMY_ATLAS_W + slot_x;
-                for (int x = 0; x < bw; ++x) {
-                    const int index = en.posed_pixel(b.x0 + x, b.y0 + y);
-                    uint32_t c = 0u;
-                    if (index >= 0) {
-                        const int ax = index % art.w, ay = index / art.w;
-                        c = art.color_at(ax, ay);
-                        if (eye_heat > 0 && art.is_head(ax, ay)) {
-                            const uint32_t g = (c >> 8) & 0xFFu, bl = c & 0xFFu;
-                            c = 0xFFFF0000u |
-                                ((g + (255u - g) * eye_heat / 255u) << 8) |
-                                (bl + (255u - bl) * eye_heat / 255u);
-                        }
-                    }
-                    row[x] = c;
-                }
-            }
-            const SDL_Rect src{slot_x, slot_y, bw, bh};
-            if (enemy_atlas) {
-                SDL_UpdateTexture(enemy_atlas, &src,
+        // Painted by the presenter; only the upload is SDL, one rectangle per body.
+        present::paint_enemies(run, alpha, enemy_atlas_pixels, enemy_sprites);
+        if (enemy_atlas) {
+            for (const frame::EnemySprite& es : enemy_sprites)
+                SDL_UpdateTexture(enemy_atlas, &es.src,
                                   enemy_atlas_pixels.data() +
-                                      static_cast<size_t>(slot_y) * ENEMY_ATLAS_W + slot_x,
-                                  ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
-            }
-            const pacer::Interpolated at = pacer::interpolate(
-                static_cast<float>(en.prev_cell_x()) + fx::to_float(en.prev_remainder_x()),
-                static_cast<float>(en.prev_cell_y()) + fx::to_float(en.prev_remainder_y()),
-                static_cast<float>(en.cell_x()) + fx::to_float(en.remainder_x()),
-                static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha);
-            // The rectangle's own anchor. Posed column x lands on frame column x
-            // facing right and on (w-1-x) facing left, and SDL's flip mirrors the
-            // rectangle about its own middle -- so facing left, the rectangle's
-            // left edge in the frame is w - x1, not x0. This is Enemy::pixel_at's
-            // flip written for a rectangle; the two must agree or what is drawn is
-            // a cell off what is hit.
-            const int left_in_frame = en.facing_left() ? art.w - b.x1 : b.x0;
-            enemy_sprites.push_back(frame::EnemySprite{
-                src, at.x, at.y, kind.offset_x() - left_in_frame, kind.offset_y() - b.y0,
-                en.facing_left()});
+                                      static_cast<size_t>(es.src.y) * present::ENEMY_ATLAS_W + es.src.x,
+                                  present::ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
         }
-
-        arrow_sprites.clear();
-        for (const Arrow& a : run.quiver.arrows()) {
-            if (!a.live) continue;
-            const float px = static_cast<float>(a.prev_x) + fx::to_float(a.prev_rem_x);
-            const float py = static_cast<float>(a.prev_y) + fx::to_float(a.prev_rem_y);
-            const float nx = static_cast<float>(a.x) + fx::to_float(a.rem_x);
-            const float ny = static_cast<float>(a.y) + fx::to_float(a.rem_y);
-            const float vx = fx::to_float(a.vel_x), vy = fx::to_float(a.vel_y);
-            const float len = std::sqrt(vx * vx + vy * vy);
-            arrow_sprites.push_back(frame::ArrowSprite{
-                px + (nx - px) * alpha, py + (ny - py) * alpha,
-                len > 0.0f ? vx / len : 0.0f, len > 0.0f ? vy / len : 0.0f});
-        }
+        present::arrows(run, alpha, arrow_sprites);
 
         frame::Params fp;
         fp.camera = &camera;
@@ -1480,7 +1121,7 @@ int main(int argc, char* argv[]) {
         fp.is_infinite = world_infinite;
         fp.world_w = world_w;
         fp.world_h = world_h;
-        fp.backdrop = backdrop;
+        fp.backdrop = &backdrop;
         fp.props = &props;
         fp.cells = targets.cells;
         fp.has_objective = run.has_objective();
@@ -1500,20 +1141,12 @@ int main(int argc, char* argv[]) {
         fp.light = &targets.light;
         fp.light_texture = targets.light_texture;
 
-        // The rig's anchor is where the camera sits with the player standing on the
-        // contact row: there the stack is exactly the painting. Per frame and not
-        // at load, because it depends on the viewport, which the display mode can
-        // change under a loaded scene. Horizontally the world's centre -- every rig
-        // layer wraps, so this only chooses which columns line up where.
-        //
-        // A corner-anchored set (the bg1 family) is the painting at the world's
-        // top-left instead, which is an anchor of (0, 0).
-        if (backdrop_anchor == backdrop_set::Anchor::Standing) {
-            fp.backdrop.anchor_x =
-                0.5f * static_cast<float>(std::max(0, world_w - fp.padded_w));
-            fp.backdrop.anchor_y = depth_rig::standing_anchor_y(
-                fp.backdrop.rig, Player::HEIGHT, fp.padded_h, Camera::VERTICAL_ANCHOR, world_h);
-        }
+        // Where the backdrop is exactly the painting. Per frame, because a standing
+        // anchor depends on the viewport, which the display mode can change under a
+        // loaded scene; a corner-anchored set (the bg1 family) is the painting at the
+        // world's top-left, which is an anchor of (0, 0).
+        if (backdrop_anchor == backdrop_set::Anchor::Standing)
+            present::stand_backdrop_anchor(backdrop, fp.padded_w, fp.padded_h, world_w, world_h);
         // Wall clock, for drifting clouds and rippling water. Render-only; see
         // Params::time_s. Not wrapped: any wrap period that is not a whole number of
         // cloud tiles makes the clouds jump at the wrap, and a float second count
@@ -1547,42 +1180,9 @@ int main(int argc, char* argv[]) {
         op.in_range =
             (dx_cells * dx_cells + dy_cells * dy_cells) <= DigTool::RANGE * DigTool::RANGE;
 
-        hud_text = "FPS:" + std::to_string(fps_display) +
-                   " BRUSH:" + material_of(current_brush).name + "(" + std::to_string(brush_size) + ")" +
-                   " CHUNKS:" + std::to_string(run.grid.active_chunk_count());
-        // CHUNKS:0 does not mean the world has stopped, and this suffix is the
-        // correction arriving on screen. A falling structural piece is carried by the
-        // support queue rather than by the chunk rects, so a slab can fall the height
-        // of the world with this counter reading zero the whole way. Shown as a flag
-        // rather than a count because the queue's length is a number of seeds, not of
-        // pieces, and would read as far more work than it is.
-        if (run.grid.has_pending_support_checks()) hud_text += "+FALLING";
-
-        // --- the run's readout ---
-        //
-        // HP goes first, ahead of the three diagnostics. The rest of this line is an
-        // instrument for whoever is building the engine; this is the one thing on it a
-        // player is playing against, and reading it should not mean scanning past a
-        // frame rate.
-        //
-        // GOAL is a bearing, and it is text on the line that already exists rather
-        // than an arrow at the screen edge. The objective starts well off-screen, so
-        // without this the run is "walk east until you find it", which is not a
-        // difficulty but a missing instrument. Distance is to the body's centre, in
-        // cells.
-        std::string status = "HP:" + std::to_string(run.player.health());
-        if (run.has_objective()) {
-            const int gdx = run.objective_x() - run.player.center_x();
-            const int gdy = run.objective_y() - run.player.center_y();
-            const int gdist = static_cast<int>(std::sqrt(
-                static_cast<double>(gdx) * gdx + static_cast<double>(gdy) * gdy));
-            status += "  GOAL:" + std::to_string(gdist) + (gdx < 0 ? "W" : "E");
-        }
-        // The enemies' line: how many are left and how many are down. Beside HP
-        // because it is the other number the player is playing against.
-        status += "  FOES:" + std::to_string(run.enemies_alive()) +
-                  "  KILLS:" + std::to_string(run.kills());
-        op.hud_text = status + "  " + hud_text;
+        // HP and the run's numbers first, then the engine's instruments.
+        op.hud_text = present::run_readout(run) + "  " +
+                      present::diagnostics(run, fps_display, current_brush, brush_size);
 
         // The lines under the readout, pushed in the order they are drawn. A list
         // rather than three calls at three sites, for the reason the cursor in
@@ -1666,7 +1266,7 @@ int main(int argc, char* argv[]) {
     // `props` holding several borrowed copies of each is not a double free.
     for (auto& entry : prop_textures)
         if (entry.second) SDL_DestroyTexture(entry.second);
-    clear_backdrop();
+    shell::clear_backdrop(backdrop);
     SDL_DestroyTexture(targets.light_texture);
     SDL_DestroyTexture(targets.cells);
     SDL_DestroyRenderer(renderer);

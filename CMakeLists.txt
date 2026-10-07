@@ -110,7 +110,24 @@ set(FRAME_SOURCES
     src/ui/hotbar.cpp
 )
 
-add_executable(SlopPhysics src/main.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES} ${FRAME_SOURCES})
+# The presenter: what the frame shows, worked out from a const Run -- the enemy
+# atlas's pixels, the sprite lists, the HUD's words. Its own variable because it
+# is the one place allowed to read both sides: the simulation (which nothing in
+# src/render/ may) and the frame's record types (which nothing in src/physics/ or
+# src/game/ may). It makes no SDL call, so present_test needs no window.
+set(PRESENT_SOURCES
+    src/present/present.cpp
+)
+
+# The SDL shell: render targets, display modes, textures from asset files, the
+# cell upload. Only the game executable links it -- everything here calls SDL,
+# and every decision it used to make inline now lives behind a suite.
+set(SHELL_SOURCES
+    src/shell/shell.cpp
+)
+
+add_executable(SlopPhysics src/main.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES}
+               ${FRAME_SOURCES} ${PRESENT_SOURCES} ${SHELL_SOURCES})
 
 target_include_directories(SlopPhysics PRIVATE src)
 
@@ -266,6 +283,15 @@ if(BUILD_TESTING)
     target_include_directories(golden_frame_test PRIVATE src tests)
     target_link_libraries(golden_frame_test PRIVATE SDL2-static)
     add_test(NAME golden_frame_test COMMAND golden_frame_test)
+
+    # The presenter, headless: the enemy atlas painted from a stepped Run and
+    # checked cell by cell against what an arrow would hit there, the arrow
+    # sprites, and the HUD's words. Links SDL2-static only for frame.h's record
+    # types and include path; it opens nothing.
+    add_executable(present_test tests/test_present.cpp ${ENGINE_SOURCES} ${PRESENT_SOURCES})
+    target_include_directories(present_test PRIVATE src tests)
+    target_link_libraries(present_test PRIVATE SDL2-static)
+    add_test(NAME present_test COMMAND present_test)
 
     # The startup decisions: the terrain scans that plant the objective and the
     # props, and which display mode to open at. Every check in it used to run

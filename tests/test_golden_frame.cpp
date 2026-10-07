@@ -270,24 +270,26 @@ int main() {
         l.parallax_y = depth_rig::vertical_factor(rig, fx);
         return l;
     };
-    p.backdrop.rig = rig;
-    p.backdrop.ripple_amplitude = 0.6f;
-    p.backdrop.anchor_x = 0.5f * static_cast<float>(WORLD_W - PADDED_W);
-    p.backdrop.anchor_y = depth_rig::standing_anchor_y(rig, 20, PADDED_H,
+    frame::Backdrop backdrop;
+    p.backdrop = &backdrop;
+    backdrop.rig = rig;
+    backdrop.ripple_amplitude = 0.6f;
+    backdrop.anchor_x = 0.5f * static_cast<float>(WORLD_W - PADDED_W);
+    backdrop.anchor_y = depth_rig::standing_anchor_y(rig, 20, PADDED_H,
                                                        Camera::VERTICAL_ANCHOR, WORLD_H);
-    p.backdrop.layers.push_back(layer(sky_pattern, 0.04f));
-    p.backdrop.layers.push_back(layer(mountain_pattern, depth_rig::factor_at(rig, 116.0f)));
+    backdrop.layers.push_back(layer(sky_pattern, 0.04f));
+    backdrop.layers.push_back(layer(mountain_pattern, depth_rig::factor_at(rig, 116.0f)));
     {
         frame::ParallaxLayer plane = layer(plane_pattern, 0.0f);
         plane.line_scroll = true;
         plane.ripple_row0 = HORIZON + 4;
         plane.ripple_row1 = HORIZON + 20;
-        p.backdrop.layers.push_back(plane);
+        backdrop.layers.push_back(plane);
     }
     {
         frame::ParallaxLayer reeds = layer(reeds_pattern, 1.3f);
         reeds.is_foreground = true;
-        p.backdrop.layers.push_back(reeds);
+        backdrop.layers.push_back(reeds);
     }
     p.cells = cells;
 
@@ -318,8 +320,8 @@ int main() {
     p.light_texture = light_tex;
 
     check("every fixture texture created",
-          p.backdrop.layers[0].texture && p.backdrop.layers[1].texture &&
-              p.backdrop.layers[2].texture && p.backdrop.layers[3].texture && prop_tex &&
+          backdrop.layers[0].texture && backdrop.layers[1].texture &&
+              backdrop.layers[2].texture && backdrop.layers[3].texture && prop_tex &&
               p.player_tex && light_tex,
           SDL_GetError());
 
@@ -396,12 +398,12 @@ int main() {
     {
         const char* names[] = {"the sky", "the standing silhouette", "the plane",
                                "the foreground"};
-        for (size_t i = 0; i < p.backdrop.layers.size(); ++i) {
-            SDL_Texture* real = p.backdrop.layers[i].texture;
-            p.backdrop.layers[i].texture = nullptr;
+        for (size_t i = 0; i < backdrop.layers.size(); ++i) {
+            SDL_Texture* real = backdrop.layers[i].texture;
+            backdrop.layers[i].texture = nullptr;
             frame::compose(renderer, p);
             const uint64_t without = hash_surface(surface);
-            p.backdrop.layers[i].texture = real;
+            backdrop.layers[i].texture = real;
             check((std::string(names[i]) + " actually reaches the fixture's window").c_str(),
                   without != first,
                   "removing the layer's texture changed no pixel, so the golden "
@@ -415,15 +417,14 @@ int main() {
     // surface -- the bg1 family. Its own checksum, so a change to one model's
     // placement cannot hide inside the other's number.
     {
-        frame::Backdrop rig_backdrop = p.backdrop;
         frame::Backdrop corner;
-        corner.layers.push_back(rig_backdrop.layers[0]);  // the sky, at 0.04
+        corner.layers.push_back(backdrop.layers[0]);  // the sky, at 0.04
         corner.layers[0].parallax_y = 1.0f;
         frame::ParallaxLayer ground = layer(banded_pattern, 0.0f);
         ground.parallax_y = 1.0f;
         ground.bands = {{0, 130, 0.30f}, {130, 160, 0.70f}, {160, WORLD_H, 1.00f}};
         corner.layers.push_back(ground);
-        p.backdrop = corner;
+        p.backdrop = &corner;
         frame::compose(renderer, p);
         const uint64_t banded = hash_surface(surface);
 
@@ -435,13 +436,13 @@ int main() {
         check("the corner-anchored banded frame matches its golden checksum",
               banded == CORNER_GOLDEN, cd);
 
-        SDL_Texture* real = p.backdrop.layers[1].texture;
-        p.backdrop.layers[1].texture = nullptr;
+        SDL_Texture* real = corner.layers[1].texture;
+        corner.layers[1].texture = nullptr;
         frame::compose(renderer, p);
         check("the banded surface actually reaches the fixture's window",
               hash_surface(surface) != banded);
         SDL_DestroyTexture(real);
-        p.backdrop = rig_backdrop;
+        p.backdrop = &backdrop;
         frame::compose(renderer, p);
         check("restoring the rig backdrop restores the golden frame",
               hash_surface(surface) == first);
@@ -665,7 +666,7 @@ int main() {
 
     SDL_DestroyTexture(p.player_tex);
     SDL_DestroyTexture(prop_tex);
-    for (frame::ParallaxLayer& l : p.backdrop.layers) SDL_DestroyTexture(l.texture);
+    for (frame::ParallaxLayer& l : backdrop.layers) SDL_DestroyTexture(l.texture);
     SDL_DestroyTexture(light_tex);
     SDL_DestroyTexture(cells);
     SDL_DestroyRenderer(renderer);

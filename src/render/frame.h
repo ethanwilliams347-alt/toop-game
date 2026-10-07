@@ -159,7 +159,10 @@ struct Params {
     int world_w = 1920;
     int world_h = 1080;
 
-    Backdrop backdrop;
+    // Borrowed, and may be null for no backdrop. A pointer rather than a copy:
+    // the caller owns the backdrop for the whole scene, and copying it into every
+    // frame's Params copied each layer's band vector sixty times a second.
+    const Backdrop* backdrop = nullptr;
     const std::vector<Prop>* props = nullptr;
 
     // The world's ARGB streaming texture, already uploaded for this frame.
