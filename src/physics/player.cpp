@@ -82,8 +82,7 @@ bool Player::escape_is_reachable(const Grid& grid, int dx, int dy) const {
     int depth = overlap_depth(grid, body.x, body.y);
 
     for (int k = 1; k <= steps; ++k) {
-        const int here = overlap_depth(grid, body.x + (dx * k) / steps,
-                                       body.y + (dy * k) / steps);
+        const int here = overlap_depth(grid, body.x + (dx * k) / steps, body.y + (dy * k) / steps);
         if (here > depth) return false;
         depth = here;
     }
@@ -163,7 +162,7 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // Barebones on purpose -- acceleration, friction and air control are feel work,
     // and feel work is worth doing once there is something to feel.
     body.vel_x = 0;
-    if (input.left)  body.vel_x -= MOVE_SPEED;
+    if (input.left) body.vel_x -= MOVE_SPEED;
     if (input.right) body.vel_x += MOVE_SPEED;
 
     // Flapping, not jumping: the key beats wings on a fixed interval whether the

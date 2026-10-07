@@ -196,7 +196,8 @@ bool Run::step(const Input& input) {
     if (run_outcome == Outcome::Playing) {
         if (!player.is_alive()) {
             run_outcome = Outcome::Lost;
-            events_.push(Event{Event::Kind::PlayerDied, player.center_x(), player.center_y(), 0, 0});
+            events_.push(
+                Event{Event::Kind::PlayerDied, player.center_x(), player.center_y(), 0, 0});
         } else if (objective_set) {
             // Distance from the objective to the nearest point of the body's box,
             // clamped per axis -- the standard box/point distance, in integers,

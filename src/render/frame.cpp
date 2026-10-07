@@ -120,8 +120,8 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
             if (band.row1 <= band.row0) continue;
             const float top = flat_edge(band.row0);
             const SDL_Rect src{0, band.row0, tex_w, band.row1 - band.row0};
-            draw_span(depth_rig::origin(cam_x, b.anchor_x, band.parallax_x, scale) + drift_px,
-                      &src, top, flat_edge(band.row1) - top);
+            draw_span(depth_rig::origin(cam_x, b.anchor_x, band.parallax_x, scale) + drift_px, &src,
+                      top, flat_edge(band.row1) - top);
         }
         return;
     }
@@ -140,7 +140,8 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
     const int row1 = l.line_scroll ? l.tex_h : std::min(l.ripple_row1, l.tex_h);
     const auto edge = [&](int row) {
         return plane_rows
-                   ? std::floor(depth_rig::plane_edge_y(b.rig, row, cam_y, b.anchor_y, row_px) + 0.5f)
+                   ? std::floor(depth_rig::plane_edge_y(b.rig, row, cam_y, b.anchor_y, row_px) +
+                                0.5f)
                    : flat_edge(row);
     };
 
@@ -320,12 +321,10 @@ void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
     const Camera& camera = *p.camera;
     apply_grade(p.enemy_atlas, g);
     for (const EnemySprite& e : *p.enemies) {
-        const SDL_FRect body{
-            camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
-            camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
-            static_cast<float>(camera.scale_length(e.src.w)),
-            static_cast<float>(camera.scale_length(e.src.h))
-        };
+        const SDL_FRect body{camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
+                             camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
+                             static_cast<float>(camera.scale_length(e.src.w)),
+                             static_cast<float>(camera.scale_length(e.src.h))};
         SDL_RenderCopyExF(renderer, p.enemy_atlas, &e.src, &body, 0.0, nullptr,
                           e.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
     }
@@ -448,17 +447,17 @@ constexpr Grade PLAIN{};  // 255,255,255 - drawn as authored
 // from a sky of nearly the same luminance. It went with the generated backdrop;
 // see render/backdrop_set.h.)
 constexpr Layer TABLE[] = {
-    {"clear",      Lighting::Lit,   PLAIN, draw_clear},
-    {"backdrop",   Lighting::Lit,   PLAIN, draw_backdrop},
-    {"props",      Lighting::Lit,   PLAIN, draw_props},
-    {"cells",      Lighting::Lit,   PLAIN, draw_cells},
-    {"objective",  Lighting::Lit,   PLAIN, draw_objective},
-    {"enemies",    Lighting::Lit,   PLAIN, draw_enemies},
-    {"player",     Lighting::Lit,   PLAIN, draw_player},
-    {"arrows",     Lighting::Lit,   PLAIN, draw_arrows},
-    {"foreground", Lighting::Lit,   PLAIN, draw_foreground},
-    {"grade",      Lighting::Grade, PLAIN, draw_grade},
-    {"light",      Lighting::Light, PLAIN, draw_light},
+    {"clear", Lighting::Lit, PLAIN, draw_clear},
+    {"backdrop", Lighting::Lit, PLAIN, draw_backdrop},
+    {"props", Lighting::Lit, PLAIN, draw_props},
+    {"cells", Lighting::Lit, PLAIN, draw_cells},
+    {"objective", Lighting::Lit, PLAIN, draw_objective},
+    {"enemies", Lighting::Lit, PLAIN, draw_enemies},
+    {"player", Lighting::Lit, PLAIN, draw_player},
+    {"arrows", Lighting::Lit, PLAIN, draw_arrows},
+    {"foreground", Lighting::Lit, PLAIN, draw_foreground},
+    {"grade", Lighting::Grade, PLAIN, draw_grade},
+    {"light", Lighting::Light, PLAIN, draw_light},
     // Nothing Unlit yet, and that is not an omission: the UI drawn after the
     // light pass lives elsewhere. The value exists so that the first thing to
     // cross the boundary declares which side it is on instead of inheriting a

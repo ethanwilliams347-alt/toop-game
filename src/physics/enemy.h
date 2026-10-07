@@ -169,39 +169,40 @@ inline constexpr Species GHOUL{
     // pixels per cell; arms held out in front once it has seen you, which is the
     // read that says "it is coming for you" from across the screen; and a swipe
     // that is a slash from overhead down past its hip.
-    .rig = rig::Rig{
-        .hip_row = 21,
-        .leg_split = 7,
-        .neck_row = 10,
-        .waist = {7, 20},
-        .neck = {7, 9},
-        .rear_shoulder = {2, 11},
-        .front_shoulder = {11, 11},
-        .rear_hip = {5, 20},
-        .front_hip = {9, 20},
+    .rig =
+        rig::Rig{
+            .hip_row = 21,
+            .leg_split = 7,
+            .neck_row = 10,
+            .waist = {7, 20},
+            .neck = {7, 9},
+            .rear_shoulder = {2, 11},
+            .front_shoulder = {11, 11},
+            .rear_hip = {5, 20},
+            .front_hip = {9, 20},
         // A body length and a half per cycle: at the patrol speed a cycle and a
         // half a second, a shuffle; at the chase, three, a scurry.
-        .stride = 14,
-        .leg_swing = rig::deg(28),
-        .arm_swing = rig::deg(24),
-        .bob = 1,
-        .chase_lean = rig::deg(8),
-        .chase_arms = rig::deg(-80),
-        .breathe_steps = 96,
-        .breathe = rig::deg(3),
+            .stride = 14,
+            .leg_swing = rig::deg(28),
+            .arm_swing = rig::deg(24),
+            .bob = 1,
+            .chase_lean = rig::deg(8),
+            .chase_arms = rig::deg(-80),
+            .breathe_steps = 96,
+            .breathe = rig::deg(3),
         // From up over its head and forward, down and past the hip: a big arc for
         // a small body, because the swipe itself has no wind-up to read and the
         // stroke is the whole of what the player sees of it.
-        .raise = rig::deg(-160),
-        .strike = rig::deg(25),
-        .strike_steps = 8,
-        .windup_lean = 0,
-        .strike_lean = rig::deg(10),
-        .flinch_steps = 12,
-        .flinch = rig::deg(-14),
+            .raise = rig::deg(-160),
+            .strike = rig::deg(25),
+            .strike_steps = 8,
+            .windup_lean = 0,
+            .strike_lean = rig::deg(10),
+            .flinch_steps = 12,
+            .flinch = rig::deg(-14),
         // An arm's length (nine cells) plus the lean, rounded up.
-        .pad = 14,
-    },
+            .pad = 14,
+        },
 };
 
 // The troll: nearly three times the player's height, slow, and hitting hard
@@ -265,40 +266,41 @@ inline constexpr Species TROLL{
     // troll does it: the club goes back and up over the head as it leans away,
     // hangs, and comes over and down in the last tenth of a second, the body
     // following it forward.
-    .rig = rig::Rig{
-        .hip_row = 57,
-        .leg_split = 26,
+    .rig =
+        rig::Rig{
+            .hip_row = 57,
+            .leg_split = 26,
         // No separate head: it is sunk into the shoulders, and a head that
         // turned on its own would tear the hair from the hump.
-        .neck_row = 0,
-        .waist = {26, 56},
-        .neck = {26, 0},
-        .rear_shoulder = {9, 23},
-        .front_shoulder = {43, 23},
-        .rear_hip = {19, 56},
-        .front_hip = {32, 56},
-        .stride = 34,
-        .leg_swing = rig::deg(20),
-        .arm_swing = rig::deg(8),
-        .bob = 1,
-        .chase_lean = rig::deg(6),
-        .chase_arms = 0,
-        .breathe_steps = 150,
-        .breathe = rig::deg(2),
+            .neck_row = 0,
+            .waist = {26, 56},
+            .neck = {26, 0},
+            .rear_shoulder = {9, 23},
+            .front_shoulder = {43, 23},
+            .rear_hip = {19, 56},
+            .front_hip = {32, 56},
+            .stride = 34,
+            .leg_swing = rig::deg(20),
+            .arm_swing = rig::deg(8),
+            .bob = 1,
+            .chase_lean = rig::deg(6),
+            .chase_arms = 0,
+            .breathe_steps = 150,
+            .breathe = rig::deg(2),
         // Back over the shoulder until the club's head is behind the troll's
         // own, then through to a little past straight down: the club lands
         // forward of the hand, in the crater Enemy::slam digs.
-        .raise = rig::deg(150),
-        .strike = rig::deg(-14),
-        .strike_steps = 6,
-        .windup_lean = rig::deg(-8),
-        .strike_lean = rig::deg(10),
-        .flinch_steps = 12,
-        .flinch = rig::deg(-5),
+            .raise = rig::deg(150),
+            .strike = rig::deg(-14),
+            .strike_steps = 6,
+            .windup_lean = rig::deg(-8),
+            .strike_lean = rig::deg(10),
+            .flinch_steps = 12,
+            .flinch = rig::deg(-5),
         // The club arm is 46 cells from shoulder to club-foot, and the lean
         // carries the shoulder six more.
-        .pad = 56,
-    },
+            .pad = 56,
+        },
 };
 
 // Every species, in a fixed order. The order is an index the session log
@@ -308,7 +310,10 @@ inline constexpr const Species* ALL[] = {&GHOUL, &TROLL};
 inline constexpr int COUNT = static_cast<int>(sizeof(ALL) / sizeof(ALL[0]));
 
 constexpr bool same_name(const char* a, const char* b) {
-    while (*a && *a == *b) { ++a; ++b; }
+    while (*a && *a == *b) {
+        ++a;
+        ++b;
+    }
     return *a == *b;
 }
 

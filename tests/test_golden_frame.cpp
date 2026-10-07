@@ -275,8 +275,8 @@ int main() {
     backdrop.rig = rig;
     backdrop.ripple_amplitude = 0.6f;
     backdrop.anchor_x = 0.5f * static_cast<float>(WORLD_W - PADDED_W);
-    backdrop.anchor_y = depth_rig::standing_anchor_y(rig, 20, PADDED_H,
-                                                       Camera::VERTICAL_ANCHOR, WORLD_H);
+    backdrop.anchor_y =
+        depth_rig::standing_anchor_y(rig, 20, PADDED_H, Camera::VERTICAL_ANCHOR, WORLD_H);
     backdrop.layers.push_back(layer(sky_pattern, 0.04f));
     backdrop.layers.push_back(layer(mountain_pattern, depth_rig::factor_at(rig, 116.0f)));
     {
@@ -320,9 +320,8 @@ int main() {
     p.light_texture = light_tex;
 
     check("every fixture texture created",
-          backdrop.layers[0].texture && backdrop.layers[1].texture &&
-              backdrop.layers[2].texture && backdrop.layers[3].texture && prop_tex &&
-              p.player_tex && light_tex,
+          backdrop.layers[0].texture && backdrop.layers[1].texture && backdrop.layers[2].texture &&
+              backdrop.layers[3].texture && prop_tex && p.player_tex && light_tex,
           SDL_GetError());
 
     // The layer table's shape, asserted here rather than only in the compiler.
@@ -396,8 +395,7 @@ int main() {
     // So each layer's presence is asserted rather than assumed, by the only
     // instrument that can: compose again without it and require a different frame.
     {
-        const char* names[] = {"the sky", "the standing silhouette", "the plane",
-                               "the foreground"};
+        const char* names[] = {"the sky", "the standing silhouette", "the plane", "the foreground"};
         for (size_t i = 0; i < backdrop.layers.size(); ++i) {
             SDL_Texture* real = backdrop.layers[i].texture;
             backdrop.layers[i].texture = nullptr;

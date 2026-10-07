@@ -48,24 +48,24 @@ SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool col
 // many cells a window holds is a question about both. It is therefore called on
 // a scene change as well as a mode change; the window resize at the bottom is
 // idempotent when only the scale moved.
-bool apply_mode(SDL_Window* window, SDL_Renderer* renderer,
-                const DisplayMode& mode, int scale, RenderTargets& targets) {
-    SDL_Texture* cells = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        mode.padded_w(scale), mode.padded_h(scale));
+bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& mode, int scale,
+                RenderTargets& targets) {
+    SDL_Texture* cells =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                          mode.padded_w(scale), mode.padded_h(scale));
     if (!cells) {
-        std::fprintf(stderr, "Could not create a %dx%d cell texture: %s\n",
-                     mode.padded_w(scale), mode.padded_h(scale), SDL_GetError());
+        std::fprintf(stderr, "Could not create a %dx%d cell texture: %s\n", mode.padded_w(scale),
+                     mode.padded_h(scale), SDL_GetError());
         return false;
     }
 
     LightField light(mode.padded_w(scale), mode.padded_h(scale));
-    SDL_Texture* light_texture = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        light.cols(), light.rows());
+    SDL_Texture* light_texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                          light.cols(), light.rows());
     if (!light_texture) {
-        std::fprintf(stderr, "Could not create a %dx%d light texture: %s\n",
-                     light.cols(), light.rows(), SDL_GetError());
+        std::fprintf(stderr, "Could not create a %dx%d light texture: %s\n", light.cols(),
+                     light.rows(), SDL_GetError());
         SDL_DestroyTexture(cells);
         return false;
     }
@@ -164,8 +164,8 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
     const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &error);
     if (!error.empty()) {
         // Reported and drawn without, the way every parser here degrades.
-        std::fprintf(stderr, "ERROR: %s\n         scene '%s' draws no backdrop.\n",
-                     error.c_str(), def.name.c_str());
+        std::fprintf(stderr, "ERROR: %s\n         scene '%s' draws no backdrop.\n", error.c_str(),
+                     def.name.c_str());
         return backdrop_set::Anchor::Corner;
     }
 
@@ -174,7 +174,10 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
     for (const backdrop_set::Layer& sp : set.layers) {
         const std::string path = set.dir + sp.file;
         SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
-        if (!tex) { ++missing; continue; }
+        if (!tex) {
+            ++missing;
+            continue;
+        }
         frame::ParallaxLayer l;
         l.texture = tex;
         l.w = set.native_w * scale;
@@ -205,8 +208,9 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
         std::printf(", rig horizon %d contact %d", set.rig.horizon_row, set.rig.contact_row);
     std::printf("\n");
     if (missing)
-        std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun that set's "
-                             "generator and rebuild.\n",
+        std::fprintf(stderr,
+                     "WARNING: %d %s layer(s) failed to load - rerun that set's "
+                     "generator and rebuild.\n",
                      missing, def.backdrop.c_str());
     return set.anchor;
 }
@@ -233,8 +237,8 @@ void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, in
     const int grid_w = grid.get_width();
     const int grid_h = grid.get_height();
     const int view_x = camera.view_x(), view_y = camera.view_y();
-    const bool inside = view_x >= 0 && view_y >= 0 && view_x + visible_w <= grid_w &&
-                        view_y + visible_h <= grid_h;
+    const bool inside =
+        view_x >= 0 && view_y >= 0 && view_x + visible_w <= grid_w && view_y + visible_h <= grid_h;
     if (inside) {
         SDL_UpdateTexture(cells, &visible_rect,
                           pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,

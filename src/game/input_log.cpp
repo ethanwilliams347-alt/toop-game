@@ -123,10 +123,9 @@ bool write(const char* path, const Log& log, std::string* error) {
     put32(buf, static_cast<uint32_t>(log.steps.size()));
 
     for (const Input& in : log.steps) {
-        const uint8_t buttons = static_cast<uint8_t>((in.left ? 1 : 0) | (in.right ? 2 : 0) |
-                                                    (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
-                                                    (in.brush_active ? 16 : 0) |
-                                                    (in.shoot ? 32 : 0));
+        const uint8_t buttons = static_cast<uint8_t>(
+            (in.left ? 1 : 0) | (in.right ? 2 : 0) | (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
+            (in.brush_active ? 16 : 0) | (in.shoot ? 32 : 0));
         put8(buf, buttons);
         put8(buf, static_cast<uint8_t>(in.command.kind));
         put8(buf, in.command.arg);

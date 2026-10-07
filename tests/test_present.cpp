@@ -43,7 +43,8 @@ void test_drawn_is_hit() {
     const int columns[] = {40, 170, 205};
     for (int i = 0; i < 3; ++i) {
         const int y = boot::standing_y(run.grid, columns[i], *kinds[i]);
-        check("present: the fixture's enemies stand", y >= 0 && run.spawn_enemy(columns[i], y, *kinds[i]));
+        check("present: the fixture's enemies stand",
+              y >= 0 && run.spawn_enemy(columns[i], y, *kinds[i]));
     }
     // Long enough for each to see the player and turn to it, and to walk -- so
     // poses are not the rest frame and both facings are on screen.
@@ -71,24 +72,26 @@ void test_drawn_is_hit() {
                   es.src.w <= present::ENEMY_SLOT_W && es.src.h <= present::ENEMY_SLOT_H);
         for (int sy = 0; sy < es.src.h; ++sy) {
             for (int sx = 0; sx < es.src.w; ++sx) {
-                const uint32_t px = atlas[static_cast<size_t>(es.src.y + sy) * present::ENEMY_ATLAS_W +
-                                          static_cast<size_t>(es.src.x + sx)];
+                const uint32_t px =
+                    atlas[static_cast<size_t>(es.src.y + sy) * present::ENEMY_ATLAS_W +
+                          static_cast<size_t>(es.src.x + sx)];
                 int wx = 0, wy = 0;
                 drawn_cell(en, es, sx, sy, wx, wy);
                 const bool hit = en.pixel_at(wx, wy) >= 0;
                 painted_any |= px != 0u;
                 if ((px != 0u) != hit && agree) {
                     agree = false;
-                    where = "slot " + std::to_string(slot) + " atlas (" + std::to_string(sx) + ", " +
-                            std::to_string(sy) + ") -> world (" + std::to_string(wx) + ", " +
-                            std::to_string(wy) + "): " + (hit ? "hit but not drawn" : "drawn but not hit");
+                    where = "slot " + std::to_string(slot) + " atlas (" + std::to_string(sx) +
+                            ", " + std::to_string(sy) + ") -> world (" + std::to_string(wx) + ", " +
+                            std::to_string(wy) +
+                            "): " + (hit ? "hit but not drawn" : "drawn but not hit");
                 }
             }
         }
     }
     check("present: the atlas has bodies in it", painted_any);
-    check("present: every painted cell is a cell an arrow hits, and every other is not",
-          agree, where);
+    check("present: every painted cell is a cell an arrow hits, and every other is not", agree,
+          where);
     check("present: the fixture shows both facings", seen_left && seen_right);
 }
 
@@ -117,7 +120,8 @@ void test_arrows_and_words() {
     const std::string readout = present::run_readout(run);
     check("present: the readout leads with HP", readout.rfind("HP:", 0) == 0, readout);
     check("present: ...bears on the objective, west of the body",
-          readout.find("GOAL:") != std::string::npos && readout.find("W  FOES:1") != std::string::npos,
+          readout.find("GOAL:") != std::string::npos &&
+              readout.find("W  FOES:1") != std::string::npos,
           readout);
     const std::string diag = present::diagnostics(run, 60, ElementType::Sand, 3);
     check("present: the diagnostics name the frame rate and the brush",

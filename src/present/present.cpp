@@ -26,8 +26,8 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
         // changes nothing an arrow can hit.
         uint32_t eye_heat = 0;
         if (en.windup_left() > 0 && kind.windup_steps > 0) {
-            eye_heat = static_cast<uint32_t>(
-                255 * (kind.windup_steps - en.windup_left()) / kind.windup_steps);
+            eye_heat = static_cast<uint32_t>(255 * (kind.windup_steps - en.windup_left()) /
+                                             kind.windup_steps);
         }
         // The pose's rectangle, painted cell by cell from the same question an
         // arrow asks (Enemy::posed_pixel), so what is drawn in a cell is what is
@@ -72,8 +72,8 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
         // off what is hit.
         const int left_in_frame = en.facing_left() ? art.w - b.x1 : b.x0;
         out.push_back(frame::EnemySprite{SDL_Rect{slot_x, slot_y, bw, bh}, at.x, at.y,
-                                         kind.offset_x() - left_in_frame,
-                                         kind.offset_y() - b.y0, en.facing_left()});
+                                         kind.offset_x() - left_in_frame, kind.offset_y() - b.y0,
+                                         en.facing_left()});
     }
 }
 
@@ -113,8 +113,8 @@ std::string run_readout(const Run& run) {
     }
     // How many enemies are left and how many are down. Beside HP because it is
     // the other number the player is playing against.
-    status += "  FOES:" + std::to_string(run.enemies_alive()) +
-              "  KILLS:" + std::to_string(run.kills());
+    status +=
+        "  FOES:" + std::to_string(run.enemies_alive()) + "  KILLS:" + std::to_string(run.kills());
     return status;
 }
 
@@ -124,8 +124,8 @@ std::string diagnostics(const Run& run, int fps, ElementType brush, int brush_si
     // world settled yet"; cached, a hotbar key leaves the HUD naming the old brush
     // for up to a second. Only the frame rate is a once-a-second quantity, and
     // the caller caches that one.
-    std::string text = "FPS:" + std::to_string(fps) + " BRUSH:" + material_of(brush).name +
-                       "(" + std::to_string(brush_size) + ")" +
+    std::string text = "FPS:" + std::to_string(fps) + " BRUSH:" + material_of(brush).name + "(" +
+                       std::to_string(brush_size) + ")" +
                        " CHUNKS:" + std::to_string(run.grid.active_chunk_count());
     // CHUNKS:0 does not mean the world has stopped. A falling structural piece is
     // carried by the support queue rather than by the chunk rects, so a slab can
@@ -135,8 +135,8 @@ std::string diagnostics(const Run& run, int fps, ElementType brush, int brush_si
     return text;
 }
 
-void stand_backdrop_anchor(frame::Backdrop& backdrop, int padded_w, int padded_h,
-                           int world_w, int world_h) {
+void stand_backdrop_anchor(frame::Backdrop& backdrop, int padded_w, int padded_h, int world_w,
+                           int world_h) {
     // Horizontally the world's centre -- every layer of a standing-anchored set
     // wraps, so this only chooses which columns line up where.
     backdrop.anchor_x = 0.5f * static_cast<float>(std::max(0, world_w - padded_w));

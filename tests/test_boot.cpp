@@ -271,8 +271,7 @@ void test_shipped_fixture() {
     // nobody sees unless they are looking.
     const int column = boot::default_objective_column(run.grid.get_width());
     const boot::Objective obj = boot::place_objective(run, column);
-    check("fixture: the objective plants on the shipped scene",
-          obj.placed && obj.x == column,
+    check("fixture: the objective plants on the shipped scene", obj.placed && obj.x == column,
           "no ground under x=" + std::to_string(column));
     check("fixture: ...on ground rather than at the top of the world",
           obj.placed && obj.y > 0, std::to_string(obj.y));
@@ -422,8 +421,7 @@ void test_scene_resolve_shipped_rows() {
             // art is that size; this asserts the world is.
             check("resolve: 'bg1' is a 344x144 fixed world at 10x, one art "
                   "pixel to one world cell",
-                  r.world_w == 344 && r.world_h == 144 &&
-                      !r.infinite && r.scale == 10);
+                  r.world_w == 344 && r.world_h == 144 && !r.infinite && r.scale == 10);
         } else if (def.name == "bg1_ext") {
             // The same mapping and the same scale, over twice the world. The scale is
             // the assertion worth having: a row that resized the world and rescaled it
@@ -432,12 +430,10 @@ void test_scene_resolve_shipped_rows() {
             // extension.
             check("resolve: 'bg1_ext' is a 688x288 fixed world at bg1's 10x, "
                   "still one art pixel to one world cell",
-                  r.world_w == 688 && r.world_h == 288 &&
-                      !r.infinite && r.scale == 10);
+                  r.world_w == 688 && r.world_h == 288 && !r.infinite && r.scale == 10);
         } else if (def.name == "bg_gemini") {
             check("resolve: 'bg_gemini' is a 688x288 fixed world at 10x",
-                  r.world_w == 688 && r.world_h == 288 &&
-                      !r.infinite && r.scale == 10);
+                  r.world_w == 688 && r.world_h == 288 && !r.infinite && r.scale == 10);
         }
     }
 }

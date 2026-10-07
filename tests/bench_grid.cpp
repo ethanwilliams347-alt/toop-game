@@ -544,8 +544,8 @@ bool load_replay_world(const input_log::Log& log, ReplayWorld& out, std::string&
 // started in: same terrain, same bodies, same objective (input_log::fingerprint
 // of the whole Run, not just the grid).
 bool rebuild_matches(Run& run, const input_log::Log& log, const ReplayWorld& world, int& placed) {
-    placed = level::start(run, world.def, world.loaded.scene, world.loaded.level,
-                          log.header.seed).scene_cells;
+    placed = level::start(run, world.def, world.loaded.scene, world.loaded.level, log.header.seed)
+                 .scene_cells;
     return placed == log.header.scene_cells &&
            input_log::fingerprint(run) == log.header.start_fingerprint;
 }
@@ -605,10 +605,11 @@ void run_replay(const char* log_path) {
     // produces a number with nothing wrong-looking about it. Refused rather than
     // warned: there is no partial version of "this is the same world".
     if (!same_start) {
-        std::printf("  replay    not run: scene '%s' has changed since this log was recorded\n"
-                    "            (%d cells placed now, %d when recorded; the terrain, the bodies or\n"
-                    "            the objective differ). Re-record the session with F9 in the game.\n",
-                    world.def.name.c_str(), placed, log.header.scene_cells);
+        std::printf(
+            "  replay    not run: scene '%s' has changed since this log was recorded\n"
+            "            (%d cells placed now, %d when recorded; the terrain, the bodies or\n"
+            "            the objective differ). Re-record the session with F9 in the game.\n",
+            world.def.name.c_str(), placed, log.header.scene_cells);
         return;
     }
 
@@ -839,9 +840,10 @@ void run_replay_configs(const char* log_path, const char* what,
 
         int placed = 0;
         if (!rebuild_matches(run, log, world, placed)) {
-            std::printf("  %-9s not run: the scene has changed since this log was\n"
-                        "            recorded. Same refusal, and the same reason, as the row above.\n",
-                        what);
+            std::printf(
+                "  %-9s not run: the scene has changed since this log was\n"
+                "            recorded. Same refusal, and the same reason, as the row above.\n",
+                what);
             return;
         }
 

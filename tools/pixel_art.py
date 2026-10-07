@@ -32,8 +32,8 @@ map -- treat those with that weight.
 """
 
 import os
-import zlib
 import struct
+import zlib
 
 # --- where the repo is ------------------------------------------------------
 #
@@ -106,16 +106,14 @@ PALETTE = {
     # sky - cool, deep, no warm colour anywhere in this group. sky_deep is the top
     # of the frame and sky_horizon the bottom of the sky; deep is the brighter of
     # the two.
-    'sky_deep':     (0x53, 0x43, 0x8E),
-    'sky_horizon':  (0x38, 0x2C, 0x57),
-    'star':         (0xE8, 0xE4, 0xFF),
-
+    'sky_deep': (0x53, 0x43, 0x8E),
+    'sky_horizon': (0x38, 0x2C, 0x57),
+    'star': (0xE8, 0xE4, 0xFF),
     # mountains - one flat silhouette tone plus a peak rim. The rim is authored to
     # land brighter than the sky behind it, because it is the one lit edge in the
     # band and a rim at or below the sky is a rim nobody can see.
-    'mountain':     (0x42, 0x34, 0x63),
+    'mountain': (0x42, 0x34, 0x63),
     'mountain_rim': (0x69, 0x55, 0x9E),
-
     # the ground plane (drawn behind the world) - the one band in the frame that
     # recedes within itself, so it is authored as a ramp rather than as a tone.
     # ground_far is its horizon edge and ground_near its near edge; the tile dithers
@@ -147,26 +145,23 @@ PALETTE = {
     # ground_mark scales by the same factor as ground_near, so its contrast against
     # the ramp is unchanged as a ratio and grows as a difference toward the near
     # edge, which is the detail-energy ramp the reference carries.
-    'ground_far':   (0x32, 0x29, 0x4E),
-    'ground_near':  (0xB2, 0x97, 0xCD),
-    'ground_mark':  (0xC8, 0xA9, 0xDB),
-
+    'ground_far': (0x32, 0x29, 0x4E),
+    'ground_near': (0xB2, 0x97, 0xCD),
+    'ground_mark': (0xC8, 0xA9, 0xDB),
     # trees (props) - desaturated green, warmer than the sky, cooler than the
     # terrain rim, so it sits legibly between the two
-    'tree_shadow':  (0x18, 0x20, 0x16),
-    'tree_mid':     (0x2A, 0x38, 0x24),
-    'tree_lit':     (0x47, 0x59, 0x39),
-    'trunk':        (0x22, 0x1A, 0x13),
-
+    'tree_shadow': (0x18, 0x20, 0x16),
+    'tree_mid': (0x2A, 0x38, 0x24),
+    'tree_lit': (0x47, 0x59, 0x39),
+    'trunk': (0x22, 0x1A, 0x13),
     # terrain (simulated grid) - warm near-black fill per material, one shared rim
     # colour, one dithered hand-off band
-    'dirt_fill':    (0x1B, 0x16, 0x11),
-    'dirt_mid':     (0x29, 0x20, 0x16),
-    'wall_fill':    (0x1B, 0x16, 0x11),  # same family as dirt: reads as rock
-    'sand_fill':    (0x24, 0x1C, 0x10),
-    'wood_fill':    (0x17, 0x12, 0x0D),
-    'rim_grass':    (0x69, 0x78, 0x3A),  # the one bright accent in the layer
-
+    'dirt_fill': (0x1B, 0x16, 0x11),
+    'dirt_mid': (0x29, 0x20, 0x16),
+    'wall_fill': (0x1B, 0x16, 0x11),  # same family as dirt: reads as rock
+    'sand_fill': (0x24, 0x1C, 0x10),
+    'wood_fill': (0x17, 0x12, 0x0D),
+    'rim_grass': (0x69, 0x78, 0x3A),  # the one bright accent in the layer
     # The lit end of the same four, so the *_fill values above are the deep end of a
     # ramp rather than the material's one tone. A cell near its own surface no
     # longer gets the deep tone.
@@ -210,16 +205,15 @@ PALETTE = {
     #     wall   66.9 -> 52.1 -> 37.7 -> 22.9 (wall_fill)
     #     sand   77.9 -> 61.4 -> 45.4 -> 28.8 (sand_fill)
     #     wood   52.8 -> 41.6 -> 30.3 -> 18.9 (wood_fill)
-    'wall_lit':     (0x49, 0x42, 0x38),  # greyer than dirt at the same level: rock
-    'wall_mid':     (0x3A, 0x33, 0x2B),
-    'wall_shade':   (0x2A, 0x25, 0x1E),
-    'sand_lit':     (0x5C, 0x4C, 0x33),
-    'sand_mid':     (0x49, 0x3C, 0x27),
-    'sand_shade':   (0x37, 0x2C, 0x1C),
-    'wood_lit':     (0x3E, 0x33, 0x27),
-    'wood_mid':     (0x31, 0x28, 0x1E),
-    'wood_shade':   (0x24, 0x1D, 0x16),
-
+    'wall_lit': (0x49, 0x42, 0x38),  # greyer than dirt at the same level: rock
+    'wall_mid': (0x3A, 0x33, 0x2B),
+    'wall_shade': (0x2A, 0x25, 0x1E),
+    'sand_lit': (0x5C, 0x4C, 0x33),
+    'sand_mid': (0x49, 0x3C, 0x27),
+    'sand_shade': (0x37, 0x2C, 0x1C),
+    'wood_lit': (0x3E, 0x33, 0x27),
+    'wood_mid': (0x31, 0x28, 0x1E),
+    'wood_shade': (0x24, 0x1D, 0x16),
     # player (drawn between the props and the terrain's own layer - it is not a cell
     # and not a prop, it is the one sprite that moves under input).
     #
@@ -230,19 +224,21 @@ PALETTE = {
     # blue-grey -- the one hue family the terrain layer never uses -- which reads
     # against warm dirt and against green foliage without being brighter than
     # either. Value range stays inside the locked set's.
-    'char_base':    (0x1C, 0x20, 0x29),  # robe shadow; the darkest character tone
-    'char_mid':     (0x2A, 0x32, 0x40),  # main robe tone, cool enough to clear the foliage green
-    'char_light':   (0x3F, 0x4A, 0x5E),  # shoulder and hood highlight - the silhouette's edge
-    'char_belt':    (0x4A, 0x3B, 0x2A),  # rope belt and boots; warm brown, ties the figure to the ground layer
-    'char_mask':    (0x11, 0x11, 0x11),  # the mask's interior void, darker than any terrain fill
-    'char_accent':  (0x94, 0x51, 0x28),  # dull copper on the mask only - see the note below
-
+    'char_base': (0x1C, 0x20, 0x29),  # robe shadow; the darkest character tone
+    'char_mid': (0x2A, 0x32, 0x40),  # main robe tone, cool enough to clear the foliage green
+    'char_light': (0x3F, 0x4A, 0x5E),  # shoulder and hood highlight - the silhouette's edge
+    'char_belt': (
+        0x4A,
+        0x3B,
+        0x2A,
+    ),  # rope belt and boots; warm brown, ties the figure to the ground layer
+    'char_mask': (0x11, 0x11, 0x11),  # the mask's interior void, darker than any terrain fill
+    'char_accent': (0x94, 0x51, 0x28),  # dull copper on the mask only - see the note below
     # water is the deliberate exception: it keeps more saturation than anything else
     # in the terrain layer because it has to read as water up close, not just in
     # silhouette
-    'water_fill':   (0x1A, 0x29, 0x32),
-    'water_rim':    (0x2E, 0x49, 0x55),
-
+    'water_fill': (0x1A, 0x29, 0x32),
+    'water_rim': (0x2E, 0x49, 0x55),
     # bg_tarn - a mountain lake at golden hour (tools/generate_bg_tarn.py).
     #
     # Its own group rather than a reuse of the backdrop group above, because that
@@ -258,51 +254,51 @@ PALETTE = {
     # Far to near the body values fall and the rims brighten, the same ladder
     # bg_forest's README states: far is close to the sky, near is darker and more
     # contrasty.
-    'tarn_sky_top':     (0x0B, 0x4D, 0x5C),  # bg1's mountain teal, at the zenith
-    'tarn_sky_high':    (0x2F, 0x6F, 0x7A),
-    'tarn_sky_mid':     (0x7D, 0xA1, 0x95),  # bg1's sage sky band
-    'tarn_sky_low':     (0xC9, 0xB9, 0x8A),
+    'tarn_sky_top': (0x0B, 0x4D, 0x5C),  # bg1's mountain teal, at the zenith
+    'tarn_sky_high': (0x2F, 0x6F, 0x7A),
+    'tarn_sky_mid': (0x7D, 0xA1, 0x95),  # bg1's sage sky band
+    'tarn_sky_low': (0xC9, 0xB9, 0x8A),
     'tarn_sky_horizon': (0xE8, 0xA8, 0x62),  # the one warm band: under the sun
-    'tarn_sun_halo':    (0xF6, 0xD0, 0x80),
-    'tarn_sun':         (0xFF, 0xF3, 0xC8),
-    'tarn_cloud_lit':   (0xE0, 0x9E, 0x78),  # underside, lit from below by the sun
-    'tarn_cloud':       (0x8F, 0x9E, 0x8E),
+    'tarn_sun_halo': (0xF6, 0xD0, 0x80),
+    'tarn_sun': (0xFF, 0xF3, 0xC8),
+    'tarn_cloud_lit': (0xE0, 0x9E, 0x78),  # underside, lit from below by the sun
+    'tarn_cloud': (0x8F, 0x9E, 0x8E),
     'tarn_cloud_shade': (0x5E, 0x7A, 0x78),
-    'tarn_peak':        (0x3E, 0x6E, 0x78),  # far range: hazed toward the sky
-    'tarn_peak_shade':  (0x2E, 0x5A, 0x67),
-    'tarn_snow':        (0xD8, 0xE2, 0xD6),
-    'tarn_snow_shade':  (0x9C, 0xB8, 0xB6),
-    'tarn_peak_rim':    (0xF4, 0xC8, 0x82),
-    'tarn_ridge':       (0x58, 0x74, 0x6E),  # bg1's grey-green hill, hazed
+    'tarn_peak': (0x3E, 0x6E, 0x78),  # far range: hazed toward the sky
+    'tarn_peak_shade': (0x2E, 0x5A, 0x67),
+    'tarn_snow': (0xD8, 0xE2, 0xD6),
+    'tarn_snow_shade': (0x9C, 0xB8, 0xB6),
+    'tarn_peak_rim': (0xF4, 0xC8, 0x82),
+    'tarn_ridge': (0x58, 0x74, 0x6E),  # bg1's grey-green hill, hazed
     'tarn_ridge_shade': (0x45, 0x60, 0x5E),
-    'tarn_ridge_rim':   (0x63, 0xA0, 0x84),  # bg1's green rim, lifted
-    'tarn_mesa':        (0x8A, 0x5A, 0x46),  # bg1's red rock
-    'tarn_mesa_band':   (0x6E, 0x3E, 0x30),
-    'tarn_mesa_shade':  (0x5A, 0x38, 0x2E),
-    'tarn_mesa_lit':    (0xC0, 0x7E, 0x52),
-    'tarn_dune':        (0xA4, 0x98, 0x80),  # bg1's sand hill
-    'tarn_dune_shade':  (0x80, 0x6C, 0x47),
-    'tarn_dune_rim':    (0xD6, 0xAE, 0x5E),  # bg1's gold rim, in sunlight
-    'tarn_shore_far':   (0x2C, 0x3E, 0x2E),
-    'tarn_lake_deep':   (0x13, 0x34, 0x31),  # bg1's lake
-    'tarn_lake':        (0x1E, 0x4A, 0x46),
-    'tarn_lake_sky':    (0x6F, 0x9A, 0x92),  # the sky, reflected
-    'tarn_lake_warm':   (0xB0, 0x8A, 0x5E),  # the horizon, reflected
-    'tarn_glint':       (0xFF, 0xE6, 0xA6),
-    'tarn_glint_dim':   (0xE2, 0xA6, 0x62),
-    'tarn_meadow_far':  (0x2C, 0x3A, 0x12),
-    'tarn_meadow':      (0x1F, 0x2A, 0x0C),  # bg1's olive meadow
+    'tarn_ridge_rim': (0x63, 0xA0, 0x84),  # bg1's green rim, lifted
+    'tarn_mesa': (0x8A, 0x5A, 0x46),  # bg1's red rock
+    'tarn_mesa_band': (0x6E, 0x3E, 0x30),
+    'tarn_mesa_shade': (0x5A, 0x38, 0x2E),
+    'tarn_mesa_lit': (0xC0, 0x7E, 0x52),
+    'tarn_dune': (0xA4, 0x98, 0x80),  # bg1's sand hill
+    'tarn_dune_shade': (0x80, 0x6C, 0x47),
+    'tarn_dune_rim': (0xD6, 0xAE, 0x5E),  # bg1's gold rim, in sunlight
+    'tarn_shore_far': (0x2C, 0x3E, 0x2E),
+    'tarn_lake_deep': (0x13, 0x34, 0x31),  # bg1's lake
+    'tarn_lake': (0x1E, 0x4A, 0x46),
+    'tarn_lake_sky': (0x6F, 0x9A, 0x92),  # the sky, reflected
+    'tarn_lake_warm': (0xB0, 0x8A, 0x5E),  # the horizon, reflected
+    'tarn_glint': (0xFF, 0xE6, 0xA6),
+    'tarn_glint_dim': (0xE2, 0xA6, 0x62),
+    'tarn_meadow_far': (0x2C, 0x3A, 0x12),
+    'tarn_meadow': (0x1F, 0x2A, 0x0C),  # bg1's olive meadow
     'tarn_meadow_near': (0x0C, 0x27, 0x14),  # bg1's bottle green
-    'tarn_meadow_lit':  (0x5A, 0x62, 0x22),
-    'tarn_flower':      (0xC8, 0x9A, 0x48),
-    'tarn_pine_far':    (0x1E, 0x3C, 0x36),
+    'tarn_meadow_lit': (0x5A, 0x62, 0x22),
+    'tarn_flower': (0xC8, 0x9A, 0x48),
+    'tarn_pine_far': (0x1E, 0x3C, 0x36),
     'tarn_pine_far_rim': (0x8E, 0x8A, 0x52),
-    'tarn_pine':        (0x10, 0x2A, 0x1E),
-    'tarn_pine_shade':  (0x0A, 0x1E, 0x16),
-    'tarn_pine_rim':    (0xC4, 0x96, 0x4E),
-    'tarn_trunk':       (0x2A, 0x1D, 0x14),
-    'tarn_fg':          (0x08, 0x16, 0x0E),  # nearest of all: almost a silhouette
-    'tarn_fg_rim':      (0x6A, 0x5C, 0x2A),
+    'tarn_pine': (0x10, 0x2A, 0x1E),
+    'tarn_pine_shade': (0x0A, 0x1E, 0x16),
+    'tarn_pine_rim': (0xC4, 0x96, 0x4E),
+    'tarn_trunk': (0x2A, 0x1D, 0x14),
+    'tarn_fg': (0x08, 0x16, 0x0E),  # nearest of all: almost a silhouette
+    'tarn_fg_rim': (0x6A, 0x5C, 0x2A),
 }
 
 # char_accent is the brightest value in this entire palette, above what is
@@ -363,16 +359,19 @@ def assert_legend_matches_header():
             raise ValueError(
                 f'tools/pixel_art.py has {name} = {want}, which is not the row '
                 f'src/scene/legend.h carries. The legend is frozen; if it moved '
-                f'on purpose, update this file and regenerate every material map.')
+                f'on purpose, update this file and regenerate every material map.'
+            )
 
 
 def color_of(name):
     """Palette lookup that fails loudly. Catches typos and hardcoded colors
     early."""
     if name not in PALETTE:
-        raise KeyError(f"'{name}' is not in PALETTE (tools/pixel_art.py) - "
-                        f"add it there first - a generator names colours, "
-                        f"it does not hardcode them")
+        raise KeyError(
+            f"'{name}' is not in PALETTE (tools/pixel_art.py) - "
+            f"add it there first - a generator names colours, "
+            f"it does not hardcode them"
+        )
     return PALETTE[name]
 
 
@@ -384,10 +383,10 @@ def color_of(name):
 # Bayer matrix threshold, never smoothly interpolated and never a hard edge with
 # nothing between.
 _BAYER_4X4 = (
-    (0,  8,  2, 10),
-    (12, 4, 14,  6),
-    (3, 11,  1,  9),
-    (15, 7, 13,  5),
+    (0, 8, 2, 10),
+    (12, 4, 14, 6),
+    (3, 11, 1, 9),
+    (15, 7, 13, 5),
 )
 
 
@@ -413,8 +412,7 @@ def dither_mix(x, y, color_a, color_b, t):
 # authored per scene, not computed by the engine -- MATERIALS' colours are
 # untouched -- so this is a pre-process over the (material, albedo) buffers a
 # scene generator already builds, not new engine code.
-def apply_rim_light(mat, alb, width, height, empty_marker, rim_color,
-                     rim_depth=2):
+def apply_rim_light(mat, alb, width, height, empty_marker, rim_color, rim_depth=2):
     """Returns a new albedo buffer. For every filled cell (mat != empty_marker)
     whose cell directly above is empty or off-grid, paints it a rim colour.
     The next (rim_depth - 1) cells downward are ordered-dithered from the rim
@@ -453,8 +451,7 @@ def apply_rim_light(mat, alb, width, height, empty_marker, rim_color,
                 if d == 0:
                     out[idx] = top_color
                 else:
-                    out[idx] = dither_mix(x, yy, alb[idx], top_color,
-                                           1.0 - d / rim_depth)
+                    out[idx] = dither_mix(x, yy, alb[idx], top_color, 1.0 - d / rim_depth)
     return out
 
 
@@ -481,8 +478,7 @@ def apply_rim_light(mat, alb, width, height, empty_marker, rim_color,
 # smoothly: a transition is stepped through the Bayer matrix, never blended into
 # tones no editor's palette would contain. `steps` is therefore how many distinct
 # tones the ramp adds, and it is a small number on purpose.
-def apply_depth_ramp(mat, alb, width, height, empty_marker, ramp,
-                     lit_depth=4, fade_depth=24):
+def apply_depth_ramp(mat, alb, width, height, empty_marker, ramp, lit_depth=4, fade_depth=24):
     """Returns a new albedo buffer, brightened toward each cell's own surface.
 
     For every filled cell, the depth to the nearest empty cell **straight up**
@@ -598,15 +594,16 @@ def read_bmp(filename):
         raise ValueError(f"{filename}: not a BMP")
 
     pixel_offset = struct.unpack_from('<I', data, 10)[0]
-    header_size = struct.unpack_from('<I', data, 14)[0]
     width = struct.unpack_from('<i', data, 18)[0]
     height_raw = struct.unpack_from('<i', data, 22)[0]
     bpp = struct.unpack_from('<H', data, 28)[0]
     compression = struct.unpack_from('<I', data, 30)[0]
 
     if bpp != 24 or compression != 0:
-        raise ValueError(f"{filename}: only 24-bit uncompressed BMP is "
-                          f"supported (got {bpp}-bit, compression {compression})")
+        raise ValueError(
+            f"{filename}: only 24-bit uncompressed BMP is "
+            f"supported (got {bpp}-bit, compression {compression})"
+        )
 
     top_down = height_raw < 0
     height = abs(height_raw)
@@ -617,7 +614,7 @@ def read_bmp(filename):
         file_row = row if top_down else (height - 1 - row)
         offset = pixel_offset + file_row * row_size
         for x in range(width):
-            b, g, r = data[offset + x * 3:offset + x * 3 + 3]
+            b, g, r = data[offset + x * 3 : offset + x * 3 + 3]
             pixels[row * width + x] = (r, g, b)
 
     return width, height, pixels
@@ -675,16 +672,18 @@ def read_png(path):
     pos = 8
     while pos < len(data):
         length = struct.unpack_from('>I', data, pos)[0]
-        ctype = data[pos + 4:pos + 8]
-        payload = data[pos + 8:pos + 8 + length]
+        ctype = data[pos + 4 : pos + 8]
+        payload = data[pos + 8 : pos + 8 + length]
         if ctype == b'IHDR':
-            (width, height, bit_depth, color_type, _comp, _filt, interlace) = \
-                struct.unpack('>IIBBBBB', payload)
+            (width, height, bit_depth, color_type, _comp, _filt, interlace) = struct.unpack(
+                '>IIBBBBB', payload
+            )
         elif ctype == b'IDAT':
             idat += payload
         elif ctype == b'PLTE' and color_type == 3:
-            raise ValueError(f'{path}: palette PNGs are not supported - '
-                              f're-export as a truecolor PNG-24')
+            raise ValueError(
+                f'{path}: palette PNGs are not supported - re-export as a truecolor PNG-24'
+            )
         pos += 8 + length + 4  # length + type + data + crc
 
     if bit_depth != 8:
@@ -692,8 +691,9 @@ def read_png(path):
     if interlace:
         raise ValueError(f'{path}: interlaced PNGs are not supported - re-export non-interlaced')
     if color_type not in (2, 6):
-        raise ValueError(f'{path}: only RGB (2) or RGBA (6) PNGs are supported '
-                          f'(got color type {color_type})')
+        raise ValueError(
+            f'{path}: only RGB (2) or RGBA (6) PNGs are supported (got color type {color_type})'
+        )
 
     channels = 3 if color_type == 2 else 4
     raw = zlib.decompress(bytes(idat))
@@ -737,8 +737,12 @@ def read_png(path):
 
 
 def _png_chunk(tag, payload):
-    return (struct.pack('>I', len(payload)) + tag + payload +
-            struct.pack('>I', zlib.crc32(tag + payload) & 0xFFFFFFFF))
+    return (
+        struct.pack('>I', len(payload))
+        + tag
+        + payload
+        + struct.pack('>I', zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    )
 
 
 def write_png(filename, width, height, pixels_rgb):
@@ -756,8 +760,7 @@ def write_png(filename, width, height, pixels_rgb):
     if isinstance(pixels_rgb, (bytes, bytearray, memoryview)):
         flat = bytes(pixels_rgb)
         if len(flat) != width * height * 3:
-            raise ValueError(f'{filename}: expected {width * height * 3} bytes, '
-                              f'got {len(flat)}')
+            raise ValueError(f'{filename}: expected {width * height * 3} bytes, got {len(flat)}')
     else:
         flat = bytearray()
         for px in pixels_rgb:
@@ -767,7 +770,7 @@ def write_png(filename, width, height, pixels_rgb):
     scan = bytearray()
     for y in range(height):
         scan.append(0)  # filter type 0 (None)
-        scan += flat[y * width * 3:(y + 1) * width * 3]
+        scan += flat[y * width * 3 : (y + 1) * width * 3]
 
     png = b'\x89PNG\r\n\x1a\n'
     png += _png_chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))

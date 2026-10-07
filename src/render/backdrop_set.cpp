@@ -84,7 +84,8 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
         // until the size is known -- and a second statement of any set-wide record
         // is two authors who disagree.
         if (kind != "size" && !size_line)
-            return fail("`" + kind + "` before `size`; the size comes first, since "
+            return fail("`" + kind +
+                        "` before `size`; the size comes first, since "
                         "every row below is checked against it");
         auto once = [&](int& seen) -> bool {
             if (seen) return false;
@@ -95,16 +96,19 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
         if (kind == "size") {
             if (!once(size_line)) return fail("a second `size` line");
             std::string w, h;
-            if (!(fields >> w >> h) || !parse_int(w, set.native_w) ||
-                !parse_int(h, set.native_h) || set.native_w <= 0 || set.native_h <= 0)
+            if (!(fields >> w >> h) || !parse_int(w, set.native_w) || !parse_int(h, set.native_h) ||
+                set.native_w <= 0 || set.native_h <= 0)
                 return fail("`size` needs a width and a height, positive integers");
         } else if (kind == "anchor") {
             if (!once(anchor_line)) return fail("a second `anchor` line");
             std::string a;
             fields >> a;
-            if (a == "corner") set.anchor = Anchor::Corner;
-            else if (a == "standing") set.anchor = Anchor::Standing;
-            else return fail("`anchor` is `corner` or `standing`, not '" + a + "'");
+            if (a == "corner")
+                set.anchor = Anchor::Corner;
+            else if (a == "standing")
+                set.anchor = Anchor::Standing;
+            else
+                return fail("`anchor` is `corner` or `standing`, not '" + a + "'");
         } else if (kind == "rig") {
             if (!once(rig_line)) return fail("a second `rig` line");
             std::string h, c, k;
@@ -138,11 +142,13 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
                 const bool has_value = eq != std::string::npos;
 
                 if (key == "factor" && has_value) {
-                    if (!parse_float(value, l.factor)) return fail("factor='" + value + "' is not a number");
+                    if (!parse_float(value, l.factor))
+                        return fail("factor='" + value + "' is not a number");
                     l.has_factor = true;
                     ++ways;
                 } else if (key == "foot" && has_value) {
-                    if (!parse_int(value, l.foot_row) || l.foot_row < 0 || l.foot_row >= set.native_h)
+                    if (!parse_int(value, l.foot_row) || l.foot_row < 0 ||
+                        l.foot_row >= set.native_h)
                         return fail("foot='" + value + "' is not a row of the art");
                     ++ways;
                 } else if (key == "plane" && !has_value) {
@@ -164,8 +170,10 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
                             !parse_float(item.substr(c2 + 1), b.parallax_x))
                             return fail("band '" + item + "' is not row0:row1:factor");
                         if (b.row0 != next || b.row1 <= b.row0)
-                            return fail("band '" + item + "' does not start where the last "
-                                        "one ended (row " + std::to_string(next) + ")");
+                            return fail("band '" + item +
+                                        "' does not start where the last "
+                                        "one ended (row " +
+                                        std::to_string(next) + ")");
                         next = b.row1;
                         l.bands.push_back(b);
                     }
@@ -181,26 +189,30 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
                 } else if (key == "on_plane" && !has_value) {
                     l.on_plane = true;
                 } else if (key == "ripple" && has_value) {
-                    if (!parse_range(value, l.ripple_row0, l.ripple_row1) ||
-                        l.ripple_row0 < 0 || l.ripple_row1 <= l.ripple_row0 ||
-                        l.ripple_row1 > set.native_h)
+                    if (!parse_range(value, l.ripple_row0, l.ripple_row1) || l.ripple_row0 < 0 ||
+                        l.ripple_row1 <= l.ripple_row0 || l.ripple_row1 > set.native_h)
                         return fail("ripple='" + value + "' is not a range of the art's rows");
                 } else if (key == "drift" && has_value) {
-                    if (!parse_float(value, l.drift)) return fail("drift='" + value + "' is not a number");
+                    if (!parse_float(value, l.drift))
+                        return fail("drift='" + value + "' is not a number");
                 } else {
-                    return fail("'" + tok + "' is not a layer field (factor=, foot=, plane, "
+                    return fail("'" + tok +
+                                "' is not a layer field (factor=, foot=, plane, "
                                 "bands=, opaque, foreground, on_plane, ripple=, drift=)");
                 }
             }
 
             if (ways != 1)
-                return fail("layer '" + l.file + "' needs exactly one of factor=, foot=, "
+                return fail("layer '" + l.file +
+                            "' needs exactly one of factor=, foot=, "
                             "plane or bands=");
             if ((l.foot_row >= 0 || l.plane || l.on_plane) && !set.has_rig)
-                return fail("layer '" + l.file + "' stands on the plane, which needs a `rig` "
+                return fail("layer '" + l.file +
+                            "' stands on the plane, which needs a `rig` "
                             "line above it");
             if (l.on_plane && l.ripple_row1 <= l.ripple_row0)
-                return fail("layer '" + l.file + "' is on_plane, which is drawn over its "
+                return fail("layer '" + l.file +
+                            "' is on_plane, which is drawn over its "
                             "ripple= rows, and has none");
             // Bands are cut on flat paint so that one image can scroll at three
             // rates without a visible step. Vertical parallax would also have to
@@ -209,7 +221,8 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
             // same reason (one painted plane under every layer), so a banded layer
             // belongs to a locked set.
             if (!l.bands.empty() && set.has_rig && set.rig.vertical_strength != 0.0f)
-                return fail("layer '" + l.file + "' is banded in a set with vertical "
+                return fail("layer '" + l.file +
+                            "' is banded in a set with vertical "
                             "parallax; bands need `rig ... 0`, or no rig");
             set.layers.push_back(l);
         } else {
@@ -217,8 +230,14 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
         }
 
         std::string extra;
-        if (kind != "layer" && (fields >> extra))
-            return fail("unexpected '" + extra + "' after `" + kind + "`");
+        if (kind != "layer" && (fields >> extra)) {
+            std::string msg = "unexpected '";
+            msg += extra;
+            msg += "' after `";
+            msg += kind;
+            msg += "`";
+            return fail(msg);
+        }
     }
 
     line_no = 0;
@@ -227,4 +246,4 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
     return set;
 }
 
-} // namespace backdrop_set
+}  // namespace backdrop_set

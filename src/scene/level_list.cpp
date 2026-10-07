@@ -5,8 +5,7 @@
 
 namespace level_list {
 
-LevelDef load_level(const std::string& path, bool (*species_ok)(const char*),
-                    std::string* error) {
+LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), std::string* error) {
     LevelDef level;
     std::ifstream in(path);
     if (!in) return level;  // absent: every default applies, as with props
@@ -70,8 +69,7 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*),
         } else if (kind == "enemy") {
             EnemyDef e;
             e.line = line_no;
-            if (!(fields >> e.species))
-                return fail("`enemy` needs a species and a column");
+            if (!(fields >> e.species)) return fail("`enemy` needs a species and a column");
             if (!species_ok || !species_ok(e.species.c_str()))
                 return fail("'" + e.species + "' is not a species");
             if (!column(fields, e.x))
@@ -83,7 +81,8 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*),
 
         std::string extra;
         if (fields >> extra)
-            return fail("unexpected '" + extra + "' (nothing in a level has an authored y; "
+            return fail("unexpected '" + extra +
+                        "' (nothing in a level has an authored y; "
                         "it stands on the terrain under its column)");
     }
     return level;

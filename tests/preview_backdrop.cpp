@@ -150,10 +150,10 @@ int main(int argc, char** argv) {
     // Where the shots stand: the rig's standing camera, or for a set with no rig
     // the floor of the world, which is where a standing player's camera is.
     const float anchor_x = 0.5f * static_cast<float>(world_w - PADDED_W);
-    const float anchor_y =
-        set.has_rig ? depth_rig::standing_anchor_y(set.rig, BODY_H, PADDED_H,
-                                                   Camera::VERTICAL_ANCHOR, world_h)
-                    : static_cast<float>(world_h - PADDED_H);
+    const float anchor_y = set.has_rig
+                               ? depth_rig::standing_anchor_y(set.rig, BODY_H, PADDED_H,
+                                                              Camera::VERTICAL_ANCHOR, world_h)
+                               : static_cast<float>(world_h - PADDED_H);
     if (set.anchor == backdrop_set::Anchor::Standing) {
         backdrop.anchor_x = anchor_x;
         backdrop.anchor_y = anchor_y;

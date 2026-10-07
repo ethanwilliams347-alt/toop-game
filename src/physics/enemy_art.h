@@ -129,8 +129,8 @@ inline constexpr int BOX_RIGHT = W - BOX_LEFT;  // one past the last box column
 // The ghoul as body_art reads it. Everything Enemy does with a body, it does
 // through one of these, which is what lets the troll be a second table rather
 // than a second class.
-inline constexpr body_art::Art ART{ROWS, W, H, PALETTE, PALETTE_COUNT, "E", "ml",
-                                   BOX_LEFT, ARM_TOP, FOOT_ROWS};
+inline constexpr body_art::Art ART{ROWS, W,    H,        PALETTE, PALETTE_COUNT,
+                                   "E",  "ml", BOX_LEFT, ARM_TOP, FOOT_ROWS};
 
 // The ghoul's own names for the rules, kept because the tests read the ghoul's
 // frame through them.

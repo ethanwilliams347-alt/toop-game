@@ -33,25 +33,28 @@ level_list::LevelDef parse(const std::string& text, std::string* error) {
 
 void test_parser() {
     std::string err;
-    const level_list::LevelDef ok = parse(
-        "# a comment\n"
-        "player 80\n"
-        "\n"
-        "enemy ghoul 260.5   # trailing comment\n"
-        "enemy troll 560\n"
-        "objective 636\n",
-        &err);
+    const level_list::LevelDef ok = parse("# a comment\n"
+                                          "player 80\n"
+                                          "\n"
+                                          "enemy ghoul 260.5   # trailing comment\n"
+                                          "enemy troll 560\n"
+                                          "objective 636\n",
+                                          &err);
     check("level: a well-formed file parses", err.empty(), err);
     check("level: ...with its player column", ok.has_player && ok.player_x == 80.0f);
     check("level: ...its objective", ok.has_objective && ok.objective_x == 636);
     check("level: ...and both enemies, in order, with their lines",
-          ok.enemies.size() == 2 && ok.enemies[0].species == "ghoul" &&
-              ok.enemies[0].x == 260.5f && ok.enemies[0].line == 4 &&
-              ok.enemies[1].species == "troll" && ok.enemies[1].line == 5);
+          ok.enemies.size() == 2 && ok.enemies[0].species == "ghoul" && ok.enemies[0].x == 260.5f &&
+              ok.enemies[0].line == 4 && ok.enemies[1].species == "troll" &&
+              ok.enemies[1].line == 5);
 
     // Every malformed record rejects the whole file and names its line. A level
     // missing the line it could not read is missing the troll it was built around.
-    struct Bad { const char* what; const char* text; int line; };
+    struct Bad {
+        const char* what;
+        const char* text;
+        int line;
+    };
     const Bad bad[] = {
         {"an unknown species", "enemy ghoul 10\nenemy dragon 40\n", 2},
         {"an authored y", "objective 100 40\n", 1},
@@ -93,8 +96,10 @@ void test_scene_list_level_field() {
     std::string err;
     std::vector<scene_list::SceneDef> s =
         load("a m.bmp a.bmp - terrain fixed 10 10 4 level=a_level.txt\n", &err);
-    check("scene list: level= after the positional tail", s.size() == 1 && s[0].level ==
-          "a_level.txt" && s[0].custom_width == 10 && s[0].scale == 4, err);
+    check("scene list: level= after the positional tail",
+          s.size() == 1 && s[0].level == "a_level.txt" && s[0].custom_width == 10 &&
+              s[0].scale == 4,
+          err);
     s = load("a m.bmp a.bmp - terrain level=a_level.txt fixed 10 10\n", &err);
     check("scene list: ...or in the middle of it, which reads the same",
           s.size() == 1 && s[0].level == "a_level.txt" && s[0].custom_width == 10, err);
@@ -110,7 +115,8 @@ void test_scene_list_level_field() {
     check("scene list: backdrop= names a folder, alongside level=",
           s.size() == 1 && s[0].backdrop == "bg1" && s[0].level == "a_level.txt", err);
     s = load("a m.bmp a.bmp - terrain backdrop=../bg1\n", &err);
-    check("scene list: a backdrop= outside assets/ rejects the file", s.empty() && !err.empty(), err);
+    check("scene list: a backdrop= outside assets/ rejects the file", s.empty() && !err.empty(),
+          err);
     s = load("a m.bmp a.bmp - terrain backdrop=a backdrop=b\n", &err);
     check("scene list: backdrop= twice rejects the file", s.empty() && !err.empty(), err);
 }
@@ -124,7 +130,8 @@ Scene flat_scene(int w, int h, int floor_top) {
     sc.materials.assign(static_cast<size_t>(w) * h, ElementType::Empty);
     sc.albedo.assign(static_cast<size_t>(w) * h, 0xFF808080u);
     for (int y = floor_top; y < h; ++y)
-        for (int x = 0; x < w; ++x) sc.materials[static_cast<size_t>(y) * w + x] = ElementType::Wall;
+        for (int x = 0; x < w; ++x)
+            sc.materials[static_cast<size_t>(y) * w + x] = ElementType::Wall;
     return sc;
 }
 
@@ -144,16 +151,18 @@ void test_start() {
     {
         Run run(10, 10, 1);
         const level::Report r = level::start(run, def, sc, level_list::LevelDef{}, 7);
-        check("start: the world takes the art's size", r.world_w == 400 && r.world_h == 200 &&
-              run.grid.get_width() == 400);
+        check("start: the world takes the art's size",
+              r.world_w == 400 && r.world_h == 200 && run.grid.get_width() == 400);
         check("start: every cell of the art is stamped", r.scene_cells == 400 * 20);
-        check("start: the player stands on the floor", r.player_standing && r.player_feet_row == 180 &&
-              run.player.cell_y() + Player::HEIGHT == 180);
+        check("start: the player stands on the floor",
+              r.player_standing && r.player_feet_row == 180 &&
+                  run.player.cell_y() + Player::HEIGHT == 180);
         check("start: with no level file the objective goes to the default column",
               r.objective_placed && !r.objective_authored &&
                   run.objective_x() == boot::default_objective_column(400));
         check("start: ...and enemies are planted by the heuristic",
-              !r.enemies_authored && r.enemies_placed == run.enemies_alive() && r.enemies_placed > 0);
+              !r.enemies_authored && r.enemies_placed == run.enemies_alive() &&
+                  r.enemies_placed > 0);
     }
 
     level_list::LevelDef lv;
@@ -174,17 +183,16 @@ void test_start() {
               run.objective_y() == 180 - Player::HEIGHT / 2);
     check("start: authored enemies are exactly the ones listed",
           r.enemies_authored && r.enemies_placed == 2 && run.enemies_alive() == 2 && r.trolls == 1);
-    check("start: ...each standing centred on its column",
-          [&] {
-              bool troll = false, ghoul = false;
-              for (const Enemy& e : run.enemies) {
-                  if (!e.is_alive()) continue;
-                  const bool on_floor = e.cell_y() + e.species().height == 180;
-                  if (&e.species() == &species::TROLL) troll = on_floor && e.center_x() == 200;
-                  if (&e.species() == &species::GHOUL) ghoul = on_floor && e.center_x() == 120;
-              }
-              return troll && ghoul;
-          }());
+    check("start: ...each standing centred on its column", [&] {
+        bool troll = false, ghoul = false;
+        for (const Enemy& e : run.enemies) {
+            if (!e.is_alive()) continue;
+            const bool on_floor = e.cell_y() + e.species().height == 180;
+            if (&e.species() == &species::TROLL) troll = on_floor && e.center_x() == 200;
+            if (&e.species() == &species::GHOUL) ghoul = on_floor && e.center_x() == 120;
+        }
+        return troll && ghoul;
+    }());
     check("start: one that cannot stand is reported by its line",
           r.enemy_lines_unplaced.size() == 1 && r.enemy_lines_unplaced[0] == 5);
     bool warned = false;
@@ -216,8 +224,8 @@ void test_shipped_scenes() {
     check("shipped: the scene list loads", !scenes.empty(), error);
     for (const scene_list::SceneDef& def : scenes) {
         const level_files::Loaded loaded = level_files::load(def, "assets/", level::is_species);
-        check(("shipped: '" + def.name + "' loads without errors").c_str(),
-              loaded.errors.empty(), loaded.errors.empty() ? "" : loaded.errors.front());
+        check(("shipped: '" + def.name + "' loads without errors").c_str(), loaded.errors.empty(),
+              loaded.errors.empty() ? "" : loaded.errors.front());
         Run run(10, 10, 1);
         const level::Report r = level::start(run, def, loaded.scene, loaded.level, 1);
         if (def.declared_empty()) continue;

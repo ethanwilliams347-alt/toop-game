@@ -113,8 +113,7 @@ constexpr int count_where(const Art& a, bool (Art::*pred)(int, int) const) {
 // function needs its scratch arrays sized at compile time. The troll's art
 // makes this the most expensive constant expression in the build; see the
 // /constexpr:steps note in CMakeLists.txt.
-template <int N>
-constexpr bool connected(const Art& a) {
+template <int N> constexpr bool connected(const Art& a) {
     if (a.w * a.h != N) return false;
     bool seen[N] = {};
     int queue[N] = {};

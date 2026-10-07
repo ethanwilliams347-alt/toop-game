@@ -56,8 +56,10 @@ public:
         dropped_ = 0;
     }
     void push(const Event& e) {
-        if (count_ < CAPACITY) events_[static_cast<size_t>(count_++)] = e;
-        else ++dropped_;
+        if (count_ < CAPACITY)
+            events_[static_cast<size_t>(count_++)] = e;
+        else
+            ++dropped_;
     }
 
     int size() const { return count_; }

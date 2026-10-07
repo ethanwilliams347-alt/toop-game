@@ -42,24 +42,22 @@ bool is_key(uint32_t p) { return (p & 0xFFFFFFu) == 0xFF00FFu; }
 
 void test_parser() {
     std::string err;
-    const backdrop_set::Set ok = parse(
-        "# comment\n"
-        "size 100 50\n"
-        "anchor standing\n"
-        "rig 20 40 0.5   # horizon, contact, k\n"
-        "ripple 0.6\n"
-        "layer sky.bmp factor=0 opaque\n"
-        "layer plane.bmp plane ripple=25:30\n"
-        "layer glint.bmp factor=0 on_plane ripple=25:30\n"
-        "layer hill.bmp foot=30\n"
-        "layer cloud.bmp factor=0.01 drift=-0.6\n"
-        "layer reeds.bmp factor=1.3 foreground\n",
-        &err);
+    const backdrop_set::Set ok = parse("# comment\n"
+                                       "size 100 50\n"
+                                       "anchor standing\n"
+                                       "rig 20 40 0.5   # horizon, contact, k\n"
+                                       "ripple 0.6\n"
+                                       "layer sky.bmp factor=0 opaque\n"
+                                       "layer plane.bmp plane ripple=25:30\n"
+                                       "layer glint.bmp factor=0 on_plane ripple=25:30\n"
+                                       "layer hill.bmp foot=30\n"
+                                       "layer cloud.bmp factor=0.01 drift=-0.6\n"
+                                       "layer reeds.bmp factor=1.3 foreground\n",
+                                       &err);
     check("parse: a well-formed set parses", err.empty() && ok.layers.size() == 6, err);
     check("parse: ...with its size, anchor, rig and ripple",
-          ok.native_w == 100 && ok.native_h == 50 &&
-              ok.anchor == backdrop_set::Anchor::Standing && ok.has_rig &&
-              ok.rig.horizon_row == 20 && ok.rig.contact_row == 40 &&
+          ok.native_w == 100 && ok.native_h == 50 && ok.anchor == backdrop_set::Anchor::Standing &&
+              ok.has_rig && ok.rig.horizon_row == 20 && ok.rig.contact_row == 40 &&
               ok.rig.vertical_strength == 0.5f && ok.ripple_amplitude == 0.6f);
     if (ok.layers.size() == 6) {
         check("parse: a foot row derives its factor from the rig",
@@ -68,13 +66,13 @@ void test_parser() {
               backdrop_set::vertical_factor_of(ok, ok.layers[3]) == 0.75f);
         check("parse: flags and ranges land on their layer",
               ok.layers[0].opaque && ok.layers[1].plane && ok.layers[1].ripple_row0 == 25 &&
-                  ok.layers[2].on_plane && ok.layers[4].drift == -0.6f &&
-                  ok.layers[5].foreground && ok.layers[5].factor == 1.3f);
+                  ok.layers[2].on_plane && ok.layers[4].drift == -0.6f && ok.layers[5].foreground &&
+                  ok.layers[5].factor == 1.3f);
         check("parse: layers keep their line", ok.layers[0].line == 6 && ok.layers[5].line == 11);
     }
 
-    const backdrop_set::Set banded = parse(
-        "size 10 20\nanchor corner\nlayer g.bmp bands=0:8:0.3,8:12:0.7,12:20:1\n", &err);
+    const backdrop_set::Set banded =
+        parse("size 10 20\nanchor corner\nlayer g.bmp bands=0:8:0.3,8:12:0.7,12:20:1\n", &err);
     check("parse: a banded corner set with no rig parses",
           err.empty() && banded.layers.size() == 1 && banded.layers[0].bands.size() == 3 &&
               banded.anchor == backdrop_set::Anchor::Corner && !banded.has_rig,
@@ -85,7 +83,11 @@ void test_parser() {
 
     // Every malformed record rejects the whole set and names its line: a stack
     // missing the layer it could not read draws hills with no ground under them.
-    struct Bad { const char* what; const char* text; int line; };
+    struct Bad {
+        const char* what;
+        const char* text;
+        int line;
+    };
     const Bad bad[] = {
         {"a record before size", "layer a.bmp factor=1\nsize 10 10\n", 1},
         {"a second size", "size 10 10\nsize 10 10\n", 2},
@@ -100,9 +102,9 @@ void test_parser() {
         {"a foot row outside the art", "size 10 10\nrig 2 8 0\nlayer a.bmp foot=12\n", 3},
         {"bands with a gap", "size 10 10\nlayer a.bmp bands=0:4:0.3,5:10:1\n", 2},
         {"bands that stop short", "size 10 10\nlayer a.bmp bands=0:4:0.3,4:8:1\n", 2},
-        {"bands under vertical parallax",
-         "size 10 10\nrig 2 8 0.5\nlayer a.bmp bands=0:10:1\n", 3},
-        {"on_plane with no ripple rows", "size 10 10\nrig 2 8 0\nlayer a.bmp factor=0 on_plane\n", 3},
+        {"bands under vertical parallax", "size 10 10\nrig 2 8 0.5\nlayer a.bmp bands=0:10:1\n", 3},
+        {"on_plane with no ripple rows", "size 10 10\nrig 2 8 0\nlayer a.bmp factor=0 on_plane\n",
+         3},
         {"a file outside the set's directory", "size 10 10\nlayer ../a.bmp factor=1\n", 2},
         {"a file that is not a bmp", "size 10 10\nlayer a.png factor=1\n", 2},
         {"a factor with a unit on it", "size 10 10\nlayer a.bmp factor=0.3x\n", 2},
@@ -266,8 +268,8 @@ void test_every_set(const Shipped& sh) {
             bool ordered = true;
             for (size_t i = 0; i < l.bands.size(); ++i) {
                 const float f = l.bands[i].parallax_x;
-                ordered = ordered && f > 0.0f && f <= 1.0f &&
-                          (i == 0 || f > l.bands[i - 1].parallax_x);
+                ordered =
+                    ordered && f > 0.0f && f <= 1.0f && (i == 0 || f > l.bands[i - 1].parallax_x);
             }
             check((ltag + "the bands' factors increase toward the viewer and cap at 1.0").c_str(),
                   ordered);
@@ -306,7 +308,8 @@ void test_every_set(const Shipped& sh) {
             for (int x = 0; x + 1 < img.width; ++x) worst = std::max(worst, differ(x, x + 1));
             const int seam = differ(img.width - 1, 0);
             check((ltag + "the wrap seam is no harsher than any column boundary inside it").c_str(),
-                  seam <= worst, "seam " + std::to_string(seam) + " vs worst " + std::to_string(worst));
+                  seam <= worst,
+                  "seam " + std::to_string(seam) + " vs worst " + std::to_string(worst));
         }
     }
 }
@@ -374,8 +377,8 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
     for (size_t i = 0; same && i < a.layers.size(); ++i) {
         const backdrop_set::Layer& la = a.layers[i];
         const backdrop_set::Layer& lb = b.layers[i];
-        same = la.factor == lb.factor && la.opaque == lb.opaque &&
-               la.foreground == lb.foreground && la.bands.empty() == lb.bands.empty();
+        same = la.factor == lb.factor && la.opaque == lb.opaque && la.foreground == lb.foreground &&
+               la.bands.empty() == lb.bands.empty();
     }
     check("bg1_ext: every layer carries bg1's factor and bg1's flags", same);
 
@@ -393,7 +396,8 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
                       (k == 0 ? bb[k].row0 == 0 : bb[k].row0 == ba[k].row0 + shift);
     }
     check("bg1_ext: the ground bands are bg1's, at the same factors, moved down by the "
-          "frame's growth", shifted);
+          "frame's growth",
+          shifted);
 
     // Same colours, layer by layer. The generator paints only with what it found
     // in each source layer, so this holds by construction; the check is for the
@@ -411,7 +415,8 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
             continue;  // the read itself is checked per set
         const std::set<uint32_t> want = palette_of(ia), got = palette_of(ib);
         check(("bg1_ext: " + b.layers[i].file + " is painted in exactly the colours of " +
-               a.layers[i].file).c_str(),
+               a.layers[i].file)
+                  .c_str(),
               want == got,
               std::to_string(got.size()) + " colours against " + std::to_string(want.size()));
     }

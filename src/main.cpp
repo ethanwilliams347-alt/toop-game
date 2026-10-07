@@ -253,9 +253,9 @@ int main(int argc, char* argv[]) {
     // The enemies' bodies, painted every frame by present::paint_enemies into a
     // buffer this texture mirrors; present/present.h has the layout and why it is
     // built rather than loaded.
-    SDL_Texture* enemy_atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                                                 SDL_TEXTUREACCESS_STREAMING,
-                                                 present::ENEMY_ATLAS_W, present::ENEMY_ATLAS_H);
+    SDL_Texture* enemy_atlas =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                          present::ENEMY_ATLAS_W, present::ENEMY_ATLAS_H);
     if (enemy_atlas) {
         SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
     } else {
@@ -471,10 +471,10 @@ int main(int argc, char* argv[]) {
         // scene the same way.
         const level_files::Loaded loaded = level_files::load(def, "assets/", level::is_species);
         for (const std::string& e : loaded.errors) std::fprintf(stderr, "ERROR: %s\n", e.c_str());
-        for (const std::string& w : loaded.warnings) std::fprintf(stderr, "WARNING: %s\n", w.c_str());
-        const scene_activation::Resolved resolved =
-            scene_activation::resolve(def, loaded.scene.width, loaded.scene.height,
-                                      GRID_WIDTH, GRID_HEIGHT, view_scale);
+        for (const std::string& w : loaded.warnings)
+            std::fprintf(stderr, "WARNING: %s\n", w.c_str());
+        const scene_activation::Resolved resolved = scene_activation::resolve(
+            def, loaded.scene.width, loaded.scene.height, GRID_WIDTH, GRID_HEIGHT, view_scale);
         world_infinite = resolved.infinite;
         world_w = resolved.world_w;
         world_h = resolved.world_h;
@@ -513,8 +513,10 @@ int main(int argc, char* argv[]) {
         // for what it does and why it is not here.
         const level::Report built = level::start(run, def, loaded.scene, loaded.level, world_seed);
         for (const level::Line& line : level::describe(built, def)) {
-            if (line.warning) std::fprintf(stderr, "WARNING: %s\n", line.text.c_str());
-            else std::printf("%s\n", line.text.c_str());
+            if (line.warning)
+                std::fprintf(stderr, "WARNING: %s\n", line.text.c_str());
+            else
+                std::printf("%s\n", line.text.c_str());
         }
 
         // Props after the world, because they are planted on the terrain it
@@ -805,9 +807,11 @@ int main(int argc, char* argv[]) {
                 // request rather than a call on the Run: the spawn changes the world,
                 // so it has to arrive through Input and be in the recording. See the
                 // step loop below for why it is consumed by the first step only.
-                if (e.key.keysym.sym == SDLK_n && !repeat) pending_command = Command::spawn(species::GHOUL);
+                if (e.key.keysym.sym == SDLK_n && !repeat)
+                    pending_command = Command::spawn(species::GHOUL);
                 // A troll at the cursor, standing on it -- point at the ground.
-                if (e.key.keysym.sym == SDLK_t && !repeat) pending_command = Command::spawn(species::TROLL);
+                if (e.key.keysym.sym == SDLK_t && !repeat)
+                    pending_command = Command::spawn(species::TROLL);
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
@@ -1109,7 +1113,8 @@ int main(int argc, char* argv[]) {
             for (const frame::EnemySprite& es : enemy_sprites)
                 SDL_UpdateTexture(enemy_atlas, &es.src,
                                   enemy_atlas_pixels.data() +
-                                      static_cast<size_t>(es.src.y) * present::ENEMY_ATLAS_W + es.src.x,
+                                      static_cast<size_t>(es.src.y) * present::ENEMY_ATLAS_W +
+                                      es.src.x,
                                   present::ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
         }
         present::arrows(run, alpha, arrow_sprites);

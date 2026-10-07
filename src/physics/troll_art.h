@@ -149,8 +149,8 @@ inline constexpr int ARM_TOP = 24;
 inline constexpr int BOX_LEFT = 14;
 inline constexpr int BOX_RIGHT = W - BOX_LEFT;
 
-inline constexpr body_art::Art ART{ROWS, W, H, PALETTE, PALETTE_COUNT, "E", "hjk",
-                                   BOX_LEFT, ARM_TOP, FOOT_ROWS};
+inline constexpr body_art::Art ART{ROWS, W,     H,        PALETTE, PALETTE_COUNT,
+                                   "E",  "hjk", BOX_LEFT, ARM_TOP, FOOT_ROWS};
 
 static_assert(body_art::well_formed(ART),
               "troll_art::ROWS has a row of the wrong width or a character with no "
@@ -168,8 +168,7 @@ static_assert(body_art::count_where(ART, &body_art::Art::is_arm) > 0,
 static_assert(body_art::connected<W * H>(ART),
               "some troll pixel is not 8-connected to the heart; it would fall off "
               "as sand the first time the troll is hit anywhere");
-static_assert(body_art::stands_on_bottom_row(ART),
-              "the troll art floats: its bottom row is empty");
+static_assert(body_art::stands_on_bottom_row(ART), "the troll art floats: its bottom row is empty");
 
 // The gaps that let a limb come off, checked rather than trusted: a pixel in
 // either gap column below ARM_TOP joins an arm to the ribs down its length, and

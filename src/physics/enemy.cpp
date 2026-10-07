@@ -44,9 +44,8 @@ void Enemy::spawn(int x, int y, const Species& k) {
     for (int fy = 0; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
             pixels[fy * art.w + fx] =
-                art.is_body(fx, fy)
-                    ? static_cast<uint8_t>(1 + rig::part_of(art, kind->rig, fx, fy))
-                    : 0;
+                art.is_body(fx, fy) ? static_cast<uint8_t>(1 + rig::part_of(art, kind->rig, fx, fy))
+                                    : 0;
     remaining = kind->pixel_count;
     // Every animation clock is at zero, so this is the rest pose: every pixel
     // exactly where the art has it.
@@ -152,8 +151,8 @@ void Enemy::crumble(Grid& grid, int index) {
     // on every machine; through powder only, never through a wall; and as far as
     // twice the frame's height, because the column a whole body leaves is the
     // body's own height of grains with whatever it was standing in under them.
-    for (int climbed = 0; material_of(there).move == MoveKind::Powder && climbed < 2 * kind->frame_h();
-         ++climbed) {
+    for (int climbed = 0;
+         material_of(there).move == MoveKind::Powder && climbed < 2 * kind->frame_h(); ++climbed) {
         --wy;
         there = grid.get_element(wx, wy).type;
     }
@@ -286,7 +285,8 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         // is a gas and sits on the floor, so in practice the feet.
         int burned = 0;
         const int frame_w = kind->frame_w();
-        for (int i = frame_w * kind->frame_h() - 1; i >= 0 && burned < kind->burn_pixels_per_tick; --i) {
+        for (int i = frame_w * kind->frame_h() - 1; i >= 0 && burned < kind->burn_pixels_per_tick;
+             --i) {
             if (!pixels[i]) continue;
             int wx = 0, wy = 0;
             world_of(i % frame_w, i / frame_w, wx, wy);
@@ -354,8 +354,10 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         } else if (chasing) {
             // Stops once the boxes are roughly over each other, rather than
             // oscillating across the target's centre one cell at a time.
-            if (dx > kind->width / 2) want = 1;
-            else if (dx < -kind->width / 2) want = -1;
+            if (dx > kind->width / 2)
+                want = 1;
+            else if (dx < -kind->width / 2)
+                want = -1;
         } else {
             want = face_left ? -1 : 1;
         }
@@ -406,8 +408,10 @@ void Enemy::advance_gait() {
     const fx::v half = cycle / 2;
     const fx::v settle = cycle / 16;
     const fx::v target = gait < half / 2 ? 0 : gait < half + half / 2 ? half : cycle;
-    if (gait < target) gait = std::min(gait + settle, target);
-    else gait = std::max(gait - settle, target);
+    if (gait < target)
+        gait = std::min(gait + settle, target);
+    else
+        gait = std::max(gait - settle, target);
     if (gait >= cycle) gait = 0;
 }
 
@@ -432,8 +436,8 @@ void Enemy::compute_pose() {
 
     // --- the breath --- always running, so a body standing still is not a
     // picture of one.
-    const fx::v breath_sin = fx::sincos(static_cast<fx::v>(
-                                            int64_t{breath} * TURN / r.breathe_steps)).s;
+    const fx::v breath_sin =
+        fx::sincos(static_cast<fx::v>(int64_t{breath} * TURN / r.breathe_steps)).s;
     const fx::v sway = fx::mul(r.breathe, breath_sin);
     lean += sway / 2;
     front_arm += sway;
@@ -589,8 +593,10 @@ bool Enemy::target_in_reach(int target_x, int target_y) const {
     int left = body.x - reach;
     int right = body.x + kind->width + reach;  // one past
     if (kind->attack == Attack::Slam) {
-        if (face_left) right = body.x + kind->width;
-        else left = body.x;
+        if (face_left)
+            right = body.x + kind->width;
+        else
+            left = body.x;
     }
     return target_x < right && target_x + Player::WIDTH > left &&
            target_y < body.y + kind->height && target_y + Player::HEIGHT > body.y;

@@ -22,8 +22,7 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
 
     run.reset(seed, r.world_w, r.world_h);
 
-    if (!def.declared_empty() && scene.width > 0)
-        r.scene_cells = load_scene(run.grid, scene, 0, 0);
+    if (!def.declared_empty() && scene.width > 0) r.scene_cells = load_scene(run.grid, scene, 0, 0);
     r.scene_placed_nothing = !def.declared_empty() && r.scene_cells == 0;
 
     // --- the player ---
@@ -31,15 +30,12 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
     // An authored column is the body's centre, like a prop's x, so the file does
     // not have to know the box is eight cells wide.
     const int player_left =
-        level.has_player
-            ? static_cast<int>(std::lround(level.player_x)) - Player::WIDTH / 2
-            : -1;
+        level.has_player ? static_cast<int>(std::lround(level.player_x)) - Player::WIDTH / 2 : -1;
     if (def.spawn == scene_list::Spawn::Floor) {
         boot::stand_player_on_floor(run, player_left);
         r.player_on_floor = true;
     } else {
-        if (player_left >= 0)
-            run.player = Player(player_left, run.grid.get_height() / 4);
+        if (player_left >= 0) run.player = Player(player_left, run.grid.get_height() / 4);
         const boot::Standing s = boot::stand_player_on_ground(run);
         r.player_standing = s.placed;
         r.player_feet_row = s.surface;
@@ -49,8 +45,8 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
     run.clear_objective();
     r.objective_wanted = !def.declared_empty();
     r.objective_authored = level.has_objective;
-    r.objective_x = level.has_objective ? level.objective_x
-                                        : boot::default_objective_column(r.world_w);
+    r.objective_x =
+        level.has_objective ? level.objective_x : boot::default_objective_column(r.world_w);
     if (r.objective_wanted) {
         const boot::Objective obj = boot::place_objective(run, r.objective_x);
         r.objective_placed = obj.placed;
@@ -92,10 +88,9 @@ std::vector<Line> describe(const Report& r, const scene_list::SceneDef& def) {
     auto info = [&](const std::string& t) { out.push_back(Line{false, t}); };
     auto warn = [&](const std::string& t) { out.push_back(Line{true, t}); };
 
-    info("Scene: " + def.name + ", " + std::to_string(r.world_w) + "x" +
-         std::to_string(r.world_h) + ", " + std::to_string(r.scene_cells) + " cells placed");
-    if (r.scene_placed_nothing)
-        warn("the scene named no material anywhere - the world is empty.");
+    info("Scene: " + def.name + ", " + std::to_string(r.world_w) + "x" + std::to_string(r.world_h) +
+         ", " + std::to_string(r.scene_cells) + " cells placed");
+    if (r.scene_placed_nothing) warn("the scene named no material anywhere - the world is empty.");
 
     if (!r.player_on_floor) {
         if (r.player_standing)
@@ -119,9 +114,8 @@ std::vector<Line> describe(const Report& r, const scene_list::SceneDef& def) {
         }
     }
 
-    info("Enemies: " + std::to_string(r.enemies_placed) + " placed (" +
-         std::to_string(r.trolls) + " trolls)" +
-         (r.enemies_authored ? ", from the level file" : ""));
+    info("Enemies: " + std::to_string(r.enemies_placed) + " placed (" + std::to_string(r.trolls) +
+         " trolls)" + (r.enemies_authored ? ", from the level file" : ""));
     for (int line : r.enemy_lines_unplaced)
         warn("assets/" + def.level + ":" + std::to_string(line) +
              ": the enemy there has no room to stand and was not placed.");

@@ -183,7 +183,8 @@ int main() {
         for (int y = 0; y < G.frame_h(); ++y)
             for (int x = 0; x < G.frame_w(); ++x)
                 if (enemy_art::is_head(x, y)) eye_y = y;
-        e.shatter(g, world_x(e, G.frame_w() / 2, eye_y), world_y(e, G.frame_w() / 2, eye_y), Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, G.frame_w() / 2, eye_y), world_y(e, G.frame_w() / 2, eye_y),
+                  Quiver::BITE_RADIUS);
         check("a shot between the eyes kills it", !e.is_alive());
         check("and the whole body comes down as sand", count_sand(g) == enemy_art::PIXEL_COUNT,
               "sand=" + std::to_string(count_sand(g)) + " of " +
@@ -209,7 +210,8 @@ int main() {
         Enemy e = standing_enemy(g, 100);
         const int before = e.pixel_count();
         // The outer edge of the right arm, at the shoulder.
-        const int lost = e.shatter(g, world_x(e, G.frame_w() - 1, 13), world_y(e, G.frame_w() - 1, 13), 1);
+        const int lost =
+            e.shatter(g, world_x(e, G.frame_w() - 1, 13), world_y(e, G.frame_w() - 1, 13), 1);
         check("a graze takes a graze", lost > 0 && lost < 10 && e.pixel_count() == before - lost,
               "lost=" + std::to_string(lost));
     }
@@ -328,8 +330,7 @@ int main() {
         check("an enemy that has seen you walks over and hurts you",
               run.player.health() < Player::MAX_HEALTH,
               "hp=" + std::to_string(run.player.health()));
-        check("at the swipe's rate, not every step",
-              hurt_steps <= 600 / G.attack_interval + 1,
+        check("at the swipe's rate, not every step", hurt_steps <= 600 / G.attack_interval + 1,
               "hurt_steps=" + std::to_string(hurt_steps));
 
         // Disarmed, it cannot.
@@ -437,7 +438,10 @@ int main() {
                 }
             return h ^ static_cast<uint64_t>(run.kills());
         };
-        check("two runs from the same inputs end in the same world", play() == play());
+        // Both sides are the same call on purpose: the claim is that calling it twice
+        // gives the same answer.
+        check("two runs from the same inputs end in the same world",
+              play() == play());  // NOLINT(misc-redundant-expression)
 
         // The same volley, reading the events: every kill the run counts is one
         // EnemyKilled, naming the slot that died.
@@ -496,9 +500,10 @@ int main() {
         Enemy e;
         e.spawn(100, FLOOR_Y - T.height, T);
         // The middle of the belly: torso all round, nothing to sever.
-        const int lost = e.shatter(g, world_x(e, TA.w / 2, 42), world_y(e, TA.w / 2, 42), Quiver::BITE_RADIUS);
-        check("an arrow in the belly takes exactly its bite",
-              lost == 13 && e.is_alive(), "lost=" + std::to_string(lost));
+        const int lost =
+            e.shatter(g, world_x(e, TA.w / 2, 42), world_y(e, TA.w / 2, 42), Quiver::BITE_RADIUS);
+        check("an arrow in the belly takes exactly its bite", lost == 13 && e.is_alive(),
+              "lost=" + std::to_string(lost));
         check("as sand, grain for pixel", count_sand(g) == lost);
         check("and leaves a hole you can see through",
               e.pixel_at(world_x(e, TA.w / 2, 42), world_y(e, TA.w / 2, 42)) < 0 &&
@@ -513,7 +518,8 @@ int main() {
         // The left forearm, the arm's own centre column.
         const int arm_x = 8, arm_y = 38;
         check("the forearm is there to hit", e.has_pixel(arm_x, arm_y));
-        const int first = e.shatter(g, world_x(e, arm_x - 2, arm_y), world_y(e, arm_x - 2, arm_y), Quiver::BITE_RADIUS);
+        const int first = e.shatter(g, world_x(e, arm_x - 2, arm_y), world_y(e, arm_x - 2, arm_y),
+                                    Quiver::BITE_RADIUS);
         bool hand_left = false;
         for (int y = 52; y < TA.h; ++y)
             for (int x = 0; x < TA.box_left; ++x)
@@ -521,8 +527,10 @@ int main() {
         check("one arrow into an arm that thick is a bite, and the hand stays on",
               first <= 13 && hand_left, "first=" + std::to_string(first));
         // Two more across the same height, through the rest of the arm.
-        const int rest = e.shatter(g, world_x(e, arm_x + 1, arm_y), world_y(e, arm_x + 1, arm_y), Quiver::BITE_RADIUS) +
-                         e.shatter(g, world_x(e, arm_x + 3, arm_y), world_y(e, arm_x + 3, arm_y), Quiver::BITE_RADIUS);
+        const int rest = e.shatter(g, world_x(e, arm_x + 1, arm_y), world_y(e, arm_x + 1, arm_y),
+                                   Quiver::BITE_RADIUS) +
+                         e.shatter(g, world_x(e, arm_x + 3, arm_y), world_y(e, arm_x + 3, arm_y),
+                                   Quiver::BITE_RADIUS);
         hand_left = false;
         for (int y = 52; y < TA.h; ++y)
             for (int x = 0; x < TA.box_left; ++x)
@@ -579,8 +587,10 @@ int main() {
         const int between = (left_eye + right_eye) / 2;
         e.shatter(g, world_x(e, between, eye_y), world_y(e, between, eye_y), Quiver::BITE_RADIUS);
         check("a shot between the eyes does not kill a troll", e.is_alive());
-        e.shatter(g, world_x(e, left_eye + 1, eye_y), world_y(e, left_eye + 1, eye_y), Quiver::BITE_RADIUS);
-        e.shatter(g, world_x(e, right_eye - 1, eye_y), world_y(e, right_eye - 1, eye_y), Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, left_eye + 1, eye_y), world_y(e, left_eye + 1, eye_y),
+                  Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, right_eye - 1, eye_y), world_y(e, right_eye - 1, eye_y),
+                  Quiver::BITE_RADIUS);
         check("one into each eye does", !e.is_alive());
         check("and all of it comes down as sand", count_sand(g) == troll_art::PIXEL_COUNT,
               "sand=" + std::to_string(count_sand(g)));
@@ -590,8 +600,7 @@ int main() {
     auto troll_arena = [](int player_x) {
         Run run(WORLD_W, WORLD_H);
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
-            for (int x = 0; x < WORLD_W; ++x)
-                run.grid.set_element(x, y, ElementType::Wall);
+            for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.player = Player(player_x, FLOOR_Y - Player::HEIGHT);
         run.spawn_enemy(100, FLOOR_Y - species::TROLL.height, species::TROLL);
         return run;
@@ -636,13 +645,12 @@ int main() {
         check("the slam lands after the wind-up, not on contact",
               hit_at - wound_up_at == T.windup_steps,
               "wound=" + std::to_string(wound_up_at) + " hit=" + std::to_string(hit_at));
-        check("for the troll's damage",
-              run.player.health() == Player::MAX_HEALTH - T.damage,
+        check("for the troll's damage", run.player.health() == Player::MAX_HEALTH - T.damage,
               "hp=" + std::to_string(run.player.health()));
         check("events: the wind-up and the blow are each reported on their step",
               windup_event_at == wound_up_at && slam_event_at == hit_at,
-              "windup ev=" + std::to_string(windup_event_at) + " slam ev=" +
-                  std::to_string(slam_event_at));
+              "windup ev=" + std::to_string(windup_event_at) +
+                  " slam ev=" + std::to_string(slam_event_at));
         check("events: ...and the hit as one PlayerHurt naming the troll and its damage",
               hurt_events == 1 && hurt_amount == T.damage &&
                   hurt_source == species::index_of(species::TROLL));
@@ -761,8 +769,7 @@ int main() {
         // and the feet swing both ahead of and behind where they stand at rest.
         Run run(WORLD_W, WORLD_H);
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
-            for (int x = 0; x < WORLD_W; ++x)
-                run.grid.set_element(x, y, ElementType::Wall);
+            for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.player = Player(240, FLOOR_Y - Player::HEIGHT);
         run.spawn_enemy(60, FLOOR_Y - G.height);
         const int foot_x = 9, foot_y = G.frame_h() - 1;  // the front foot's toe
@@ -809,8 +816,8 @@ int main() {
             if (e.attack_recovery() == 0) {
                 const int cx = world_x(e, club_x, club_y);
                 const int front = e.facing_left() ? e.cell_x() : e.cell_x() + T.width;
-                forward_at_impact = e.facing_left() ? cx < front - T.reach / 2
-                                                    : cx > front + T.reach / 2;
+                forward_at_impact =
+                    e.facing_left() ? cx < front - T.reach / 2 : cx > front + T.reach / 2;
             }
         }
         check("the troll raises its club over its head to slam", overhead);

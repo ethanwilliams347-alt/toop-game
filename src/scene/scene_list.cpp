@@ -163,7 +163,8 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                     if (!def.backdrop.empty())
                         return fail("scene '" + def.name + "' names `backdrop=` twice");
                     if (value.empty() || !scene_name_ok(value))
-                        return fail("'" + value + "' is not a usable backdrop directory "
+                        return fail("'" + value +
+                                    "' is not a usable backdrop directory "
                                     "(a bare name under assets/)");
                     def.backdrop = value;
                 } else {

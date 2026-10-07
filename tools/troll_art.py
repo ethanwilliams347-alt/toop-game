@@ -20,25 +20,25 @@ The roles (see troll_art.h):
     'h' 'j' 'k'  chest       -- HEART: the root a limb has to stay joined to
 Arms and feet are geometry, not letters, exactly as for the ghoul.
 """
+
 import argparse
-import math
 
 W, H = 52, 70
 BOX_W = 24
-BOX_LEFT = (W - BOX_W) // 2          # 14
-BOX_RIGHT = BOX_LEFT + BOX_W         # 38, one past the last box column
+BOX_LEFT = (W - BOX_W) // 2  # 14
+BOX_RIGHT = BOX_LEFT + BOX_W  # 38, one past the last box column
 ARM_TOP = 24
 EMPTY = None
 
 # Tone ramps, darkest first. One letter per tone; the outline is 'K'.
 RAMPS = {
-    "skin":  "SPQR",   # grey-brown hide, dark to highlight
-    "hair":  "ZY",
-    "iron":  "IJ",
+    "skin": "SPQR",  # grey-brown hide, dark to highlight
+    "hair": "ZY",
+    "iron": "IJ",
     "cloth": "LN",
-    "wood":  "WX",
-    "bone":  "T",
-    "eye":   "E",
+    "wood": "WX",
+    "bone": "T",
+    "eye": "E",
 }
 # The chest's tones, spelt with their own letters so they can be the HEART.
 HEART_FOR = {"S": "k", "P": "h", "Q": "j", "R": "j"}
@@ -47,17 +47,20 @@ HEART_FOR = {"S": "k", "P": "h", "Q": "j", "R": "j"}
 def ellipse(cx, cy, rx, ry):
     def inside(x, y):
         return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0
+
     return inside, (cx - rx, cy - ry, cx + rx, cy + ry)
 
 
 def rect(x0, y0, x1, y1):
     def inside(x, y):
         return x0 <= x <= x1 and y0 <= y <= y1
+
     return inside, (x0, y0, x1, y1)
 
 
 def capsule(ax, ay, bx, by, r0, r1):
     """A limb: a segment from a to b, radius r0 at a tapering to r1 at b."""
+
     def inside(x, y):
         dx, dy = bx - ax, by - ay
         L2 = dx * dx + dy * dy
@@ -65,6 +68,7 @@ def capsule(ax, ay, bx, by, r0, r1):
         px, py = ax + t * dx, ay + t * dy
         r = r0 + (r1 - r0) * t
         return (x - px) ** 2 + (y - py) ** 2 <= r * r
+
     r = max(r0, r1)
     return inside, (min(ax, bx) - r, min(ay, by) - r, max(ax, bx) + r, max(ay, by) + r)
 
@@ -122,7 +126,7 @@ def layers():
 
     # Head: small for the body, low and pushed forward off the hunch.
     out.append(("skin", ellipse(27.5, 13, 6.5, 7.5), 0.2))
-    out.append(("skin", ellipse(27.5, 18, 6.0, 3.2), 0.1))   # the jaw
+    out.append(("skin", ellipse(27.5, 18, 6.0, 3.2), 0.1))  # the jaw
     # Iron collar.
     out.append(("iron", ellipse(27, 22, 9, 2.2), 0.0))
     # Hair: lank, off the crown and down both sides of the face to the collar.
@@ -147,26 +151,30 @@ def shade(masks, owner, k, x, y, bias):
     def inside(xx, yy):
         return 0 <= xx < W and 0 <= yy < H and m[yy][xx]
 
-    toward = sum(inside(x - i, y - i) for i in range(1, R + 1)) * 0.6 + \
-        sum(inside(x - i, y) for i in range(1, R + 1)) * 0.4
-    away = sum(inside(x + i, y + i) for i in range(1, R + 1)) * 0.6 + \
-        sum(inside(x + i, y) for i in range(1, R + 1)) * 0.4
-    l = 0.5 + 0.5 * (away - toward) / R + bias
+    toward = (
+        sum(inside(x - i, y - i) for i in range(1, R + 1)) * 0.6
+        + sum(inside(x - i, y) for i in range(1, R + 1)) * 0.4
+    )
+    away = (
+        sum(inside(x + i, y + i) for i in range(1, R + 1)) * 0.6
+        + sum(inside(x + i, y) for i in range(1, R + 1)) * 0.4
+    )
+    tone = 0.5 + 0.5 * (away - toward) / R + bias
     # Shadow cast by a shape in front onto this one: a pixel whose upper-left
     # neighbour belongs to a later layer sits in that layer's shadow.
     for dx, dy in ((-1, 0), (0, -1), (-1, -1)):
         nx, ny = x + dx, y + dy
         if 0 <= nx < W and 0 <= ny < H and owner[ny][nx] is not None and owner[ny][nx] > k:
-            l -= 0.3
+            tone -= 0.3
             break
-    return l
+    return tone
 
 
 def draw():
     shapes = layers()
     masks = []
     owner = [[None] * W for _ in range(H)]
-    for k, (material, (inside, bb), bias) in enumerate(shapes):
+    for k, (_material, (inside, _bb), _bias) in enumerate(shapes):
         m = [[inside(x, y) for x in range(W)] for y in range(H)]
         masks.append(m)
         for y in range(H):
@@ -182,14 +190,14 @@ def draw():
                 continue
             material, _, bias = shapes[k]
             ramp = RAMPS[material]
-            l = shade(masks, owner, k, x, y, bias)
+            tone = shade(masks, owner, k, x, y, bias)
             # Ordered dither on the hide only, and only near a tone boundary, so
             # a broad surface reads as skin rather than as banded plastic.
             if material == "skin":
-                f = l * len(ramp) - int(l * len(ramp))
+                f = tone * len(ramp) - int(tone * len(ramp))
                 if abs(f - 0.5) > 0.42:
-                    l += 0.07 if (x + y) % 2 == 0 else -0.07
-            i = int(l * len(ramp))
+                    tone += 0.07 if (x + y) % 2 == 0 else -0.07
+            i = int(tone * len(ramp))
             grid[y][x] = ramp[max(0, min(len(ramp) - 1, i))]
 
     # The gap columns. Whatever a shape spilled into them is cleared, from
@@ -203,7 +211,7 @@ def draw():
             grid[y][x] = EMPTY
 
     def put(points, c):
-        for (x, y) in points:
+        for x, y in points:
             grid[y][x] = c
 
     # Features painted last, onto the head. Brow, deep-set eyes, a flat nose,
@@ -211,15 +219,21 @@ def draw():
     put([(x, 11) for x in range(23, 33)], "S")
     put([(24, 12), (25, 12), (30, 12), (31, 12)], "E")
     put([(23, 12), (26, 12), (29, 12), (32, 12), (27, 12), (28, 12)], "S")
-    put([(27, 14), (28, 14)], "R"); put([(27, 15), (28, 15)], "S")
+    put([(27, 14), (28, 14)], "R")
+    put([(27, 15), (28, 15)], "S")
     put([(x, 18) for x in range(23, 33)], "Z")
     put([(24, 17), (31, 17), (24, 16), (31, 16)], "T")
     # Muscle: the line under the pecs, the navel, the knees and the knuckles.
-    put([(x, 36) for x in (18, 19, 20, 21, 22, 23)] + [(x, 36) for x in (28, 29, 30, 31, 32, 33)], "S")
+    put(
+        [(x, 36) for x in (18, 19, 20, 21, 22, 23)] + [(x, 36) for x in (28, 29, 30, 31, 32, 33)],
+        "S",
+    )
     put([(25, 34), (26, 34)], "S")
     put([(26, 42)], "S")
-    put([(17, 59), (18, 59), (19, 59)], "P"); put([(31, 59), (32, 59), (33, 59)], "P")
-    put([(6, 58), (8, 58), (10, 58)], "S"); put([(41, 58), (43, 58), (45, 58)], "S")
+    put([(17, 59), (18, 59), (19, 59)], "P")
+    put([(31, 59), (32, 59), (33, 59)], "P")
+    put([(6, 58), (8, 58), (10, 58)], "S")
+    put([(41, 58), (43, 58), (45, 58)], "S")
     # Studs on the club's head.
     put([(46, 61), (49, 63), (46, 65), (49, 67)], "J")
 
@@ -246,12 +260,21 @@ def draw():
 
 PALETTE = {
     "K": 0xFF15110F,
-    "S": 0xFF3E3430, "P": 0xFF5E5049, "Q": 0xFF7E6C5F, "R": 0xFF9C8875,
-    "k": 0xFF3E3430, "h": 0xFF5E5049, "j": 0xFF7E6C5F,
-    "Z": 0xFF1B1716, "Y": 0xFF332C28,
-    "I": 0xFF3B3E44, "J": 0xFF6E747C,
-    "L": 0xFF4A3322, "N": 0xFF6B4A2F,
-    "W": 0xFF4E3720, "X": 0xFF74552F,
+    "S": 0xFF3E3430,
+    "P": 0xFF5E5049,
+    "Q": 0xFF7E6C5F,
+    "R": 0xFF9C8875,
+    "k": 0xFF3E3430,
+    "h": 0xFF5E5049,
+    "j": 0xFF7E6C5F,
+    "Z": 0xFF1B1716,
+    "Y": 0xFF332C28,
+    "I": 0xFF3B3E44,
+    "J": 0xFF6E747C,
+    "L": 0xFF4A3322,
+    "N": 0xFF6B4A2F,
+    "W": 0xFF4E3720,
+    "X": 0xFF74552F,
     "T": 0xFFDDD2B4,
     "E": 0xFFFF7A2E,
 }
@@ -266,6 +289,7 @@ def main():
         print(f'    "{r}",')
     if args.png:
         from PIL import Image
+
         s = 8
         img = Image.new("RGB", (W * s, H * s), (40, 32, 64))
         px = img.load()

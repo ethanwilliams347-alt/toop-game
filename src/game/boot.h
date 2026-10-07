@@ -139,8 +139,8 @@ inline Standing stand_player_on_ground(Run& run) {
 //
 // `left` is the body's left column; -1 keeps the old middle-of-the-world spot.
 inline void stand_player_on_floor(Run& run, int left = -1) {
-    run.player = Player(left >= 0 ? left : run.grid.get_width() / 2,
-                        run.grid.get_height() - Player::HEIGHT);
+    run.player =
+        Player(left >= 0 ? left : run.grid.get_width() / 2, run.grid.get_height() - Player::HEIGHT);
 }
 
 // Where the objective ended up, and whether it got placed at all.
@@ -295,7 +295,8 @@ inline EnemyPlanting plant_enemies(Run& run) {
     // coming when the run begins.
     const Species& troll = species::TROLL;
     int troll_x = -1, troll_y = -1, best = -1;
-    for (int x = ENEMY_EDGE_MARGIN; x + troll.width + ENEMY_EDGE_MARGIN <= w; x += troll.width / 2) {
+    for (int x = ENEMY_EDGE_MARGIN; x + troll.width + ENEMY_EDGE_MARGIN <= w;
+         x += troll.width / 2) {
         const int dist = std::abs(x + troll.width / 2 - player_cx);
         if (dist < clearance_for(troll) || dist <= best) continue;
         const int y = standing_y(run.grid, x, troll);

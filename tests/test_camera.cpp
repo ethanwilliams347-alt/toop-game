@@ -198,7 +198,7 @@ int main() {
                 Camera c;
                 c.set_scale(SCALE);
                 c.follow(static_cast<float>(centre), 0.0f, V, V, W, W);
-                const float left  = depth_rig::origin(c.view_fx(), 0.0f, f, SCALE);
+                const float left = depth_rig::origin(c.view_fx(), 0.0f, f, SCALE);
                 const float right = left + static_cast<float>(W * SCALE);
                 if (left > 0.001f || right < static_cast<float>(V * SCALE) - 0.001f) {
                     covered = false;

@@ -68,9 +68,11 @@ void test_placement() {
         // At the anchor, every factor puts the art where the world is: the stack is
         // the painting there, whatever its depths.
         bool exact = true;
-        for (float f = 0.0f; f <= 1.3f; f += 0.05f)
+        for (int i = 0; i <= 26; ++i) {
+            const float f = 0.05f * static_cast<float>(i);
             exact = exact && near_eq(depth_rig::origin(ay, ay, f, SCALE), -ay * SCALE) &&
                     near_eq(depth_rig::origin(ax, ax, f, SCALE), -ax * SCALE);
+        }
         check((tag + "at the anchor every layer is placed where the world is").c_str(), exact);
 
         // The glue, swept over every camera position the game can reach: a layer
@@ -79,8 +81,10 @@ void test_placement() {
         // axis to keep.
         bool glued = true;
         std::string where;
-        for (float cy = 0.0f; cy <= max_y; cy += 3.7f) {
-            for (float cx = 0.0f; cx <= max_x; cx += 41.3f) {
+        for (int cy_i = 0; static_cast<float>(cy_i) * 3.7f <= max_y; ++cy_i) {
+            const float cy = static_cast<float>(cy_i) * 3.7f;
+            for (int cx_i = 0; static_cast<float>(cx_i) * 41.3f <= max_x; ++cx_i) {
+                const float cx = static_cast<float>(cx_i) * 41.3f;
                 for (int r = rig.horizon_row; r <= rig.contact_row; ++r) {
                     const float f = depth_rig::factor_at(rig, static_cast<float>(r));
                     const float obj_y = static_cast<float>(r * SCALE) +
@@ -104,19 +108,23 @@ void test_placement() {
         // below the anchor would fold the plane over its own horizon; this is the
         // check that the world's floor stops it first.
         bool forward = true;
-        for (float cy = 0.0f; cy <= max_y; cy += 1.3f)
+        for (int cy_i = 0; static_cast<float>(cy_i) * 1.3f <= max_y; ++cy_i) {
+            const float cy = static_cast<float>(cy_i) * 1.3f;
             for (int r = rig.horizon_row; r < world_h; ++r)
                 forward = forward && depth_rig::plane_edge_y(rig, r + 1, cy, ay, SCALE) >
                                          depth_rig::plane_edge_y(rig, r, cy, ay, SCALE);
+        }
         check((tag + "every plane row keeps a positive height at every camera height").c_str(),
               forward);
 
         // Coverage: a world-tall opaque layer at any factor in [0, 1] covers the
         // window at every reachable camera -- the convex-combination argument.
         bool covered = true;
-        for (float f = 0.0f; f <= 1.0f; f += 0.125f) {
+        for (int f_i = 0; static_cast<float>(f_i) * 0.125f <= 1.0f; ++f_i) {
+            const float f = static_cast<float>(f_i) * 0.125f;
             const float g = depth_rig::vertical_factor(rig, f);
-            for (float cy = 0.0f; cy <= max_y; cy += 1.0f) {
+            for (int cy_i = 0; static_cast<float>(cy_i) * 1.0f <= max_y; ++cy_i) {
+                const float cy = static_cast<float>(cy_i) * 1.0f;
                 const float top = depth_rig::origin(cy, ay, g, SCALE);
                 covered = covered && top <= 0.0f &&
                           top + static_cast<float>(world_h * SCALE) >=

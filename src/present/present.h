@@ -74,7 +74,7 @@ std::string diagnostics(const Run& run, int fps, ElementType brush, int brush_si
 // player standing on the rig's contact row, horizontally at the world's centre.
 // Per frame, because it depends on the viewport, which the display mode can
 // change under a loaded scene.
-void stand_backdrop_anchor(frame::Backdrop& backdrop, int padded_w, int padded_h,
-                           int world_w, int world_h);
+void stand_backdrop_anchor(frame::Backdrop& backdrop, int padded_w, int padded_h, int world_w,
+                           int world_h);
 
 } // namespace present

@@ -233,8 +233,7 @@ struct Affine {
 
     // The map that sends (0,0), (1,0) and (0,1) where `f` sends them. Exact for
     // an affine f, up to the last bit of each fx::mul inside it.
-    template <class F>
-    static Affine through(F f) {
+    template <class F> static Affine through(F f) {
         const Point o = f(0, 0), ex = f(1, 0), ey = f(0, 1);
         return {ex.x - o.x, ey.x - o.x, o.x, ex.y - o.y, ey.y - o.y, o.y};
     }

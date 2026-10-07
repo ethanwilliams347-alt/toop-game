@@ -168,7 +168,11 @@ int main() {
 
         bool declared = false;
         for (const std::string& line : read_lines(path)) declared |= declares(line, name);
-        check(("`" + name + "` is declared in " + path).c_str(), declared,
+        std::string what = "`";
+        what += name;
+        what += "` is declared in ";
+        what += path;
+        check(what.c_str(), declared,
               "the constant was renamed or removed, or the row links the wrong file");
 
         if (path != "src/physics/player.h") continue;
@@ -191,8 +195,8 @@ int main() {
     }
 
     for (size_t i = 0; i < doc.size(); ++i) {
-        const bool anchored = doc[i].find(".h#L") != std::string::npos ||
-                              doc[i].find(".cpp#L") != std::string::npos;
+        const bool anchored =
+            doc[i].find(".h#L") != std::string::npos || doc[i].find(".cpp#L") != std::string::npos;
         check(("TUNING.md:" + std::to_string(i + 1) + " links a file, not a line").c_str(),
               !anchored, "drop the #L anchor; rows link the declaring file only");
     }
