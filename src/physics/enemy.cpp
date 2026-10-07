@@ -1,5 +1,38 @@
 #include "enemy.h"
+#include <algorithm>
 #include <cstdlib>
+
+namespace {
+
+// a + (b - a) * k, k in fx [0, ONE].
+fx::v lerp(fx::v a, fx::v b, fx::v k) { return a + fx::mul(b - a, k); }
+
+// t of T as fx, clamped to [0, ONE].
+fx::v fraction(int t, int T) {
+    if (t <= 0 || T <= 0) return 0;
+    if (t >= T) return fx::ONE;
+    return fx::from_ratio(t, T);
+}
+
+// Smoothstep of t of T: slow out, slow in. What makes a club being raised read as
+// weight rather than as a dial turning.
+fx::v ease(int t, int T) {
+    const fx::v x = fraction(t, T);
+    return fx::mul(fx::mul(x, x), 3 * fx::ONE - 2 * x);
+}
+
+// Where the stroke ends, as an angle the stroke reaches by turning clockwise
+// from the raise -- which, facing right, is up over the top and down the front.
+// The same place as Rig::strike, a whole turn on if need be. Without it a troll
+// whose club is raised back over its shoulder (+150) and lands a little forward
+// of straight down (-14) swings the club back the way it came, down its own back.
+fx::v stroke_end(const rig::Rig& r) {
+    fx::v end = r.strike;
+    while (end < r.raise) end += 4 * fx::HALF_PI;
+    return end;
+}
+
+}  // namespace
 
 void Enemy::spawn(int x, int y, const Species& k) {
     *this = Enemy{};
@@ -10,8 +43,14 @@ void Enemy::spawn(int x, int y, const Species& k) {
     const body_art::Art& art = *kind->art;
     for (int fy = 0; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
-            pixels[fy * art.w + fx] = art.is_body(fx, fy) ? 1 : 0;
+            pixels[fy * art.w + fx] =
+                art.is_body(fx, fy)
+                    ? static_cast<uint8_t>(1 + rig::part_of(art, kind->rig, fx, fy))
+                    : 0;
     remaining = kind->pixel_count;
+    // Every animation clock is at zero, so this is the rest pose: every pixel
+    // exactly where the art has it.
+    compute_pose();
 }
 
 bool Enemy::overlaps_solid(const Grid& grid, int px, int py) const {
@@ -35,25 +74,47 @@ bool Enemy::overlaps_solid(const Grid& grid, int px, int py) const {
     return false;
 }
 
-int Enemy::world_x_of(int x) const {
+int Enemy::world_column(int frame_x) const {
     const int left = pos_x - kind->offset_x();
-    return face_left ? left + (kind->frame_w() - 1 - x) : left + x;
+    return face_left ? left + (kind->frame_w() - 1 - frame_x) : left + frame_x;
 }
 
-int Enemy::world_y_of(int y) const {
-    return pos_y - kind->offset_y() + y;
+void Enemy::world_of(int x, int y, int& wx, int& wy) const {
+    const body_art::Art& art = *kind->art;
+    const int index = y * art.w + x;
+    const rig::Part part = pixels[index] ? static_cast<rig::Part>(pixels[index] - 1)
+                                         : rig::part_of(art, kind->rig, x, y);
+    const rig::Point p = pose.forward(part, x, y);
+    wx = world_column(rig::nearest(p.x));
+    wy = pos_y - kind->offset_y() + rig::nearest(p.y);
+}
+
+int Enemy::posed_pixel(int px, int py) const {
+    if (px < bounds.x0 || px >= bounds.x1 || py < bounds.y0 || py >= bounds.y1) return -1;
+    const body_art::Art& art = *kind->art;
+    const rig::Rig& r = kind->rig;
+    // Front to back: the first part with a surviving pixel in this cell is the
+    // one in front, and the one that is hit.
+    for (int i = rig::PART_COUNT - 1; i >= 0; --i) {
+        const rig::Part part = static_cast<rig::Part>(i);
+        const rig::Box& b = part_bounds[i];
+        if (px < b.x0 || px >= b.x1 || py < b.y0 || py >= b.y1) continue;
+        const rig::Point rest = pose.backward(part, px, py);
+        const int x = rig::nearest(rest.x), y = rig::nearest(rest.y);
+        const rig::Box home = rig::rest_box(art, r, part);
+        if (x < home.x0 || x >= home.x1 || y < home.y0 || y >= home.y1) continue;
+        const int index = y * art.w + x;
+        if (pixels[index] == 1 + part) return index;
+    }
+    return -1;
 }
 
 int Enemy::pixel_at(int wx, int wy) const {
     if (!alive) return -1;
-    const int frame_w = kind->frame_w();
-    const int fy = wy - (pos_y - kind->offset_y());
-    if (fy < 0 || fy >= kind->frame_h()) return -1;
-    int fx = wx - (pos_x - kind->offset_x());
-    if (fx < 0 || fx >= frame_w) return -1;
-    if (face_left) fx = frame_w - 1 - fx;
-    const int index = fy * frame_w + fx;
-    return pixels[index] ? index : -1;
+    const int py = wy - (pos_y - kind->offset_y());
+    int px = wx - (pos_x - kind->offset_x());
+    if (face_left) px = kind->frame_w() - 1 - px;
+    return posed_pixel(px, py);
 }
 
 bool Enemy::has_arms() const {
@@ -79,8 +140,8 @@ void Enemy::crumble(Grid& grid, int index) {
 
     const int fx = index % kind->frame_w();
     const int fy = index / kind->frame_w();
-    const int wx = world_x_of(fx);
-    const int wy = world_y_of(fy);
+    int wx = 0, wy = 0;
+    world_of(fx, fy, wx, wy);
 
     // Sand, in the pixel's own colour. Not a new material: "falls and piles like
     // sand" is exactly the Sand row's behaviour, and a second powder row identical
@@ -90,7 +151,23 @@ void Enemy::crumble(Grid& grid, int index) {
     // names. The grain keeps it as it falls, because swap_elements moves whole
     // Elements.
     const uint32_t color = kind->art->color_at(fx, fy);
-    const ElementType there = grid.get_element(wx, wy).type;
+    ElementType there = grid.get_element(wx, wy).type;
+
+    // Loose powder already there -- most often a grain this same body dropped a
+    // moment ago, because a turned limb can put two pixels within a cell of the
+    // same spot (rig.h), and a whole body coming down at once is a solid block
+    // of its own grains. The grain goes on top of the powder instead, as a grain
+    // dropped onto a pile would, so a body still turns into exactly as many
+    // grains as it had pixels. Straight up the column, so the result is the same
+    // on every machine; through powder only, never through a wall; and as far as
+    // twice the frame's height, because the column a whole body leaves is the
+    // body's own height of grains with whatever it was standing in under them.
+    for (int climbed = 0; material_of(there).move == MoveKind::Powder && climbed < 2 * kind->frame_h();
+         ++climbed) {
+        --wy;
+        there = grid.get_element(wx, wy).type;
+    }
+
     if (there == ElementType::Empty) {
         grid.paint(wx, wy, ElementType::Sand, color);
     } else if (!is_solid(there)) {
@@ -168,12 +245,17 @@ int Enemy::shatter(Grid& grid, int wx, int wy, int radius) {
         for (int fx = 0; fx < frame_w; ++fx) {
             const int i = fy * frame_w + fx;
             if (!pixels[i]) continue;
-            const int dx = world_x_of(fx) - wx;
-            const int dy = world_y_of(fy) - wy;
+            int px = 0, py = 0;
+            world_of(fx, fy, px, py);
+            const int dx = px - wx;
+            const int dy = py - wy;
             if (dx * dx + dy * dy <= r2) crumble(grid, i);
         }
     }
     settle_after_loss(grid);
+    // Rocks back from the hit, from the next step: the pose is not recomputed
+    // here, so the rest of this step's arrows find the body where they aimed.
+    if (alive && remaining < before) flinch = kind->rig.flinch_steps;
     return before - remaining;
 }
 
@@ -228,6 +310,8 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     prev_y = pos_y;
     prev_rem_x = rem_x;
     prev_rem_y = rem_y;
+    if (flinch > 0) --flinch;
+    breath = (breath + 1) % kind->rig.breathe_steps;
 
     // --- heat ---
     //
@@ -248,8 +332,8 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         const int frame_w = kind->frame_w();
         for (int i = frame_w * kind->frame_h() - 1; i >= 0 && burned < kind->burn_pixels_per_tick; --i) {
             if (!pixels[i]) continue;
-            const int wx = world_x_of(i % frame_w);
-            const int wy = world_y_of(i / frame_w);
+            int wx = 0, wy = 0;
+            world_of(i % frame_w, i / frame_w, wx, wy);
             if (grid.get_element(wx, wy).temperature < BURN_TEMPERATURE) continue;
             crumble(grid, i);
             // Darkened after the fact, on the grain crumble just wrote. Only if it is
@@ -368,8 +452,168 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
 
         on_ground = overlaps_solid(grid, pos_x, pos_y + 1);
     }
+    advance_gait();
 
-    return attack(grid, target_x, target_y, target_alive);
+    const bool landed = attack(grid, target_x, target_y, target_alive);
+    compute_pose();
+    return landed;
+}
+
+void Enemy::advance_gait() {
+    // By the distance actually covered along the ground this step, so the feet
+    // keep pace with the ground under them: blocked by a wall, it stands; slowed
+    // by a climb, it steps slower. Off the ground the gait holds where it was and
+    // compute_pose gives the legs their airborne spread instead.
+    const fx::v cycle = fx::from_int(kind->rig.stride);
+    const fx::v moved = std::abs(fx::from_int(pos_x - prev_x) + rem_x - prev_rem_x);
+    if (moved > 0 && on_ground) {
+        gait = (gait + moved) % cycle;
+        return;
+    }
+    // Standing: the legs come back together by finishing the step they were in
+    // -- the gait runs on to the nearer of the two points in the cycle where the
+    // legs pass each other -- rather than snapping back to straight.
+    const fx::v half = cycle / 2;
+    const fx::v settle = cycle / 16;
+    const fx::v target = gait < half / 2 ? 0 : gait < half + half / 2 ? half : cycle;
+    if (gait < target) gait = std::min(gait + settle, target);
+    else gait = std::max(gait - settle, target);
+    if (gait >= cycle) gait = 0;
+}
+
+void Enemy::compute_pose() {
+    const rig::Rig& r = kind->rig;
+    const body_art::Art& art = *kind->art;
+    constexpr fx::v TURN = 4 * fx::HALF_PI;
+
+    // --- the walk --- one sine drives both legs, opposite ways, and the arms
+    // against their own side's leg.
+    const fx::v stride_sin =
+        fx::sincos(static_cast<fx::v>(int64_t{gait} * TURN / fx::from_int(r.stride))).s;
+    fx::v front_leg = -fx::mul(r.leg_swing, stride_sin);
+    fx::v rear_leg = fx::mul(r.leg_swing, stride_sin);
+    fx::v front_arm = fx::mul(r.arm_swing, stride_sin);
+    fx::v rear_arm = -fx::mul(r.arm_swing, stride_sin);
+    // Lowest with the legs furthest apart, as a walking body is. Whole cells,
+    // because a body half a cell down rounds half its columns one way and half
+    // the other and tears along the rounding.
+    const int sink = rig::nearest(fx::mul(fx::from_int(r.bob), fx::mul(stride_sin, stride_sin)));
+    fx::v lean = chasing ? r.chase_lean : 0;
+
+    // --- the breath --- always running, so a body standing still is not a
+    // picture of one.
+    const fx::v breath_sin = fx::sincos(static_cast<fx::v>(
+                                            int64_t{breath} * TURN / r.breathe_steps)).s;
+    const fx::v sway = fx::mul(r.breathe, breath_sin);
+    lean += sway / 2;
+    front_arm += sway;
+    rear_arm += sway;
+
+    if (chasing && r.chase_arms != 0) {
+        // Reaching: both arms out in front, the rear one a little lower so the two
+        // read as two, still pumping a little with the stride.
+        front_arm = r.chase_arms + fx::mul(r.arm_swing, stride_sin) / 3 + sway;
+        rear_arm = r.chase_arms + rig::deg(12) - fx::mul(r.arm_swing, stride_sin) / 3 + sway;
+    }
+
+    // Moving, not merely unsupported: a body just spawned in the air has not
+    // started to fall yet and is shown at rest.
+    if (!on_ground && vel_y != 0) {
+        // In the air: the legs spread, front one reaching for the landing, and
+        // the arms come up a little.
+        front_leg = -r.leg_swing;
+        rear_leg = r.leg_swing * 2 / 3;
+        front_arm -= r.leg_swing;
+        rear_arm -= r.leg_swing;
+    }
+
+    // --- the attack --- overrides the front arm and the lean; the rear arm
+    // counterbalances a slam.
+    const int interval = kind->attack_interval;
+    if (kind->attack == Attack::Slam && windup > 0) {
+        const int t = kind->windup_steps - windup;
+        const int raising = kind->windup_steps - r.strike_steps;
+        if (t < raising) {
+            const fx::v k = ease(t, raising);
+            front_arm = lerp(front_arm, r.raise, k);
+            rear_arm = lerp(rear_arm, -r.raise / 6, k);
+            lean = lerp(lean, r.windup_lean, k);
+        } else {
+            // Linear, not eased: the blow is all speed.
+            const fx::v k = fraction(t - raising + 1, r.strike_steps);
+            front_arm = lerp(r.raise, stroke_end(r), k);
+            rear_arm = -r.raise / 6;
+            lean = lerp(r.windup_lean, r.strike_lean, k);
+        }
+    } else if (attack_timer > 0) {
+        const int since = interval - attack_timer;
+        if (kind->attack == Attack::Swipe && since < r.strike_steps) {
+            const fx::v k = fraction(since + 1, r.strike_steps);
+            front_arm = lerp(r.raise, stroke_end(r), k);
+            lean = lerp(lean, r.strike_lean, k);
+        } else {
+            // Recovering. A slam's club stays down in its crater for half the
+            // recovery -- the window to punish it in, shown -- then both come
+            // back to where the walk would have them.
+            const int hold = kind->attack == Attack::Slam ? interval / 2 : r.strike_steps;
+            const fx::v k = ease(since - hold, interval - hold);
+            if (kind->attack == Attack::Slam) rear_arm = lerp(-r.raise / 6, rear_arm, k);
+            front_arm = lerp(r.strike, front_arm, k);
+            lean = lerp(r.strike_lean, lean, k);
+        }
+    }
+
+    // --- the flinch --- rocked back, arms left behind going forward.
+    if (flinch > 0) {
+        const fx::v rock = r.flinch * flinch / r.flinch_steps;
+        lean += rock;
+        front_arm += rock;
+        rear_arm += rock;
+    }
+
+    pose.part[rig::Body] = rig::turn(lean, 0, fx::from_int(sink));
+    pose.part[rig::Head] = rig::turn(sway - lean / 2);
+    pose.part[rig::RearArm] = rig::turn(rear_arm);
+    pose.part[rig::FrontArm] = rig::turn(front_arm);
+    pose.part[rig::RearLeg] = rig::turn(rear_leg);
+    pose.part[rig::FrontLeg] = rig::turn(front_leg);
+    pose.flatten(r);
+
+    // --- where each part can be --- its rest rectangle's corners put through
+    // the pose, plus a cell of slack for rounding. Turning a rectangle's corners
+    // bounds everything inside it, so this is a bound, not a guess.
+    const rig::Box limit{-r.pad, -r.pad, art.w + r.pad, art.h + r.pad};
+    bounds = {limit.x1, limit.y1, limit.x0, limit.y0};
+    for (int i = 0; i < rig::PART_COUNT; ++i) {
+        const rig::Part part = static_cast<rig::Part>(i);
+        const rig::Box home = rig::rest_box(art, r, part);
+        rig::Box b{limit.x1, limit.y1, limit.x0, limit.y0};
+        if (home.x0 < home.x1 && home.y0 < home.y1) {
+            const int xs[2] = {home.x0, home.x1 - 1};
+            const int ys[2] = {home.y0, home.y1 - 1};
+            for (int cx : xs) {
+                for (int cy : ys) {
+                    const rig::Point p = pose.forward(part, cx, cy);
+                    const int x = rig::nearest(p.x), y = rig::nearest(p.y);
+                    b.x0 = std::min(b.x0, x - 1);
+                    b.y0 = std::min(b.y0, y - 1);
+                    b.x1 = std::max(b.x1, x + 2);
+                    b.y1 = std::max(b.y1, y + 2);
+                }
+            }
+            b.x0 = std::max(b.x0, limit.x0);
+            b.y0 = std::max(b.y0, limit.y0);
+            b.x1 = std::min(b.x1, limit.x1);
+            b.y1 = std::min(b.y1, limit.y1);
+        }
+        part_bounds[i] = b;
+        if (b.x0 < b.x1 && b.y0 < b.y1) {
+            bounds.x0 = std::min(bounds.x0, b.x0);
+            bounds.y0 = std::min(bounds.y0, b.y0);
+            bounds.x1 = std::max(bounds.x1, b.x1);
+            bounds.y1 = std::max(bounds.y1, b.y1);
+        }
+    }
 }
 
 void Enemy::shove_powder(Grid& grid) {

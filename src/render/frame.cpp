@@ -529,9 +529,9 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // Drawn exactly like the player -- a frame anchored bottom-centre on the box,
 // flipped for facing -- except that the frame comes out of an atlas the caller
 // rebuilds from each body's surviving pixels rather than out of a fixed sheet.
-// The flip is the same SDL_FLIP_HORIZONTAL over the same rect that Enemy's
-// world_x_of assumes, which is what keeps a pixel drawn over a cell and the
-// pixel an arrow finds in that cell the same pixel.
+// The flip is SDL_FLIP_HORIZONTAL over the pose's rectangle, which the caller
+// anchors to match Enemy::pixel_at's flip, so a pixel drawn over a cell and the
+// pixel an arrow finds in that cell stay the same pixel.
 void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
     if (!p.enemies || p.enemies->empty() || !p.enemy_atlas) return;
     const Camera& camera = *p.camera;

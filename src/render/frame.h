@@ -26,15 +26,17 @@ struct Prop {
 };
 
 // One enemy, as the frame draws it. The body is not a sheet cell: it is whatever
-// is left of it, rebuilt into a slot of `Params::enemy_atlas` by the caller from
-// the simulation's own pixel mask, so what is drawn is exactly what an arrow can
-// still hit. `src` is that slot.
+// is left of it, in whatever pose it is in, painted into a slot of
+// `Params::enemy_atlas` by the caller from the simulation's own answer to "which
+// pixel is in this cell" (Enemy::posed_pixel), so what is drawn is exactly what
+// an arrow can still hit. `src` is the rectangle of the slot the pose covers.
 //
 // Position is the collision box's top-left, interpolated, in world cells -- the
-// same convention as the player -- and the frame anchors it bottom-centre by
-// `offset_x`/`offset_y` (the species' Species::offset_x/y), like
-// player_sprite::OFFSET_X/Y does for the owl. The frame's size is `src`'s: a
-// troll's slot holds a bigger frame than a ghoul's, so the sprite says which.
+// same convention as the player -- and `offset_x`/`offset_y` are how far up and
+// left of it `src`'s top-left corner is drawn, already allowing for the facing:
+// a pose reaches outside the art's frame (a club raised overhead), so the anchor
+// is the rectangle's, which the caller works out from the species' own offset
+// and the pose's bounds. The size is `src`'s.
 struct EnemySprite {
     SDL_Rect src;
     float x, y;

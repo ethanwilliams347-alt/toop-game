@@ -189,32 +189,54 @@ bottom of enemy.h.
 
 | Knob | Line | Now | What it does |
 |---|---|---|---|
-| patrol speed | [122](src/physics/enemy.h#L122) | 22 | Wandering walk speed, cells/s. |
-| chase speed | [123](src/physics/enemy.h#L123) | 45 | Speed once it has noticed you. Asserted below the player's `MOVE_SPEED`, so it can always be walked away from. |
-| jump speed | [126](src/physics/enemy.h#L126) | 120 | The hop it makes at a wall it cannot step over while chasing. |
-| notice x | [132](src/physics/enemy.h#L132) | 12 body widths | How close you have to be, horizontally, before it chases. |
-| ledge drop | [134](src/physics/enemy.h#L134) | 1 body height | A wandering enemy turns back at a drop deeper than this. |
-| damage | [141](src/physics/enemy.h#L141) | 8 | Damage per swipe when the boxes touch (needs an arm). |
-| attack interval | [142](src/physics/enemy.h#L142) | 40 | Steps between swipes. |
-| collapse percent | [149](src/physics/enemy.h#L149) | 40 | Below this share of its pixels it collapses into sand. |
-| burn pixels per tick | [154](src/physics/enemy.h#L154) | 2 | Pixels burned away per burn tick, lowest first. |
+| patrol speed | [128](src/physics/enemy.h#L128) | 22 | Wandering walk speed, cells/s. |
+| chase speed | [129](src/physics/enemy.h#L129) | 45 | Speed once it has noticed you. Asserted below the player's `MOVE_SPEED`, so it can always be walked away from. |
+| jump speed | [132](src/physics/enemy.h#L132) | 120 | The hop it makes at a wall it cannot step over while chasing. |
+| notice x | [138](src/physics/enemy.h#L138) | 12 body widths | How close you have to be, horizontally, before it chases. |
+| ledge drop | [140](src/physics/enemy.h#L140) | 1 body height | A wandering enemy turns back at a drop deeper than this. |
+| damage | [147](src/physics/enemy.h#L147) | 8 | Damage per swipe when the boxes touch (needs an arm). |
+| attack interval | [148](src/physics/enemy.h#L148) | 40 | Steps between swipes. |
+| collapse percent | [155](src/physics/enemy.h#L155) | 40 | Below this share of its pixels it collapses into sand. |
+| burn pixels per tick | [160](src/physics/enemy.h#L160) | 2 | Pixels burned away per burn tick, lowest first. |
 
 ### Troll (`species::TROLL`) -- a 24x66 box, 52x70 frame
 
 | Knob | Line | Now | What it does |
 |---|---|---|---|
-| box | [165](src/physics/enemy.h#L165) | 24 x 66 | Asserted over 2.5x the player's height. |
-| patrol / chase speed | [170](src/physics/enemy.h#L170) | 14 / 32 | Slower than the ghoul both ways; its reach does the work. |
-| jump speed | [175](src/physics/enemy.h#L175) | 140 | Heaves itself up a ledge of about 20 cells. |
-| max step height | [178](src/physics/enemy.h#L178) | 6 | Steps over what stops the player. |
-| notice x / y | [181](src/physics/enemy.h#L181) | 20 body widths / 90 | Sees farther, because its slam is slow. |
-| damage | [186](src/physics/enemy.h#L186) | 30 | Per slam. A third of the bar. |
-| attack interval | [189](src/physics/enemy.h#L189) | 50 | Steps it stands spent after a slam -- the window to punish it. |
-| wind-up | [193](src/physics/enemy.h#L193) | 42 | Steps from deciding to slam to the club landing. Asserted long enough to walk out from under. |
-| reach | [197](src/physics/enemy.h#L197) | 20 | How far past its front edge the slam lands. |
-| crush radius | [202](src/physics/enemy.h#L202) | 5 | Radius of ground the slam breaks and throws. Asserted to fit inside the reach with the debris clear of its feet. |
-| burn pixels per tick | [206](src/physics/enemy.h#L206) | 4 | Twice the ghoul's; it has ten times the pixels. |
-| wades | [212](src/physics/enemy.h#L212) | true | Powder never stops it; it shoves sand out of its box. |
+| box | [208](src/physics/enemy.h#L208) | 24 x 66 | Asserted over 2.5x the player's height. |
+| patrol / chase speed | [213](src/physics/enemy.h#L213) | 14 / 32 | Slower than the ghoul both ways; its reach does the work. |
+| jump speed | [218](src/physics/enemy.h#L218) | 140 | Heaves itself up a ledge of about 20 cells. |
+| max step height | [221](src/physics/enemy.h#L221) | 6 | Steps over what stops the player. |
+| notice x / y | [224](src/physics/enemy.h#L224) | 20 body widths / 90 | Sees farther, because its slam is slow. |
+| damage | [229](src/physics/enemy.h#L229) | 30 | Per slam. A third of the bar. |
+| attack interval | [232](src/physics/enemy.h#L232) | 50 | Steps it stands spent after a slam -- the window to punish it. |
+| wind-up | [236](src/physics/enemy.h#L236) | 42 | Steps from deciding to slam to the club landing. Asserted long enough to walk out from under. |
+| reach | [240](src/physics/enemy.h#L240) | 20 | How far past its front edge the slam lands. |
+| crush radius | [245](src/physics/enemy.h#L245) | 5 | Radius of ground the slam breaks and throws. Asserted to fit inside the reach with the debris clear of its feet. |
+| burn pixels per tick | [249](src/physics/enemy.h#L249) | 4 | Twice the ghoul's; it has ten times the pixels. |
+| wades | [255](src/physics/enemy.h#L255) | true | Powder never stops it; it shoves sand out of its box. |
+
+### Animation (`Species::rig`, see [src/physics/rig.h](src/physics/rig.h))
+
+Angles are degrees, clockwise on screen with the body facing right: a positive
+lean tips forward, a negative arm angle swings the hand forward. The pose moves
+where pixels are drawn and hit, never what the body is made of.
+
+| Knob | Ghoul | Troll | Now (ghoul / troll) | What it does |
+|---|---|---|---|---|
+| `stride` | [178](src/physics/enemy.h#L178) | [273](src/physics/enemy.h#L273) | 14 / 34 | Cells walked per full step cycle. The gait runs on distance covered, so the feet never skate. |
+| `leg_swing` | [179](src/physics/enemy.h#L179) | [274](src/physics/enemy.h#L274) | 28 / 20 | Each leg's angle at the far end of a stride. |
+| `arm_swing` | [180](src/physics/enemy.h#L180) | [275](src/physics/enemy.h#L275) | 24 / 8 | Arms swung against their own side's leg. |
+| `bob` | [181](src/physics/enemy.h#L181) | [276](src/physics/enemy.h#L276) | 1 / 1 | Cells the body sinks at the far end of a stride. |
+| `chase_lean` | [182](src/physics/enemy.h#L182) | [277](src/physics/enemy.h#L277) | 8 / 6 | Forward lean while chasing. |
+| `chase_arms` | [183](src/physics/enemy.h#L183) | [278](src/physics/enemy.h#L278) | -80 / 0 | Arms held out in front while chasing (0 = keep swinging). |
+| `breathe_steps` / `breathe` | [184](src/physics/enemy.h#L184) | [279](src/physics/enemy.h#L279) | 96, 3 / 150, 2 | One breath every N steps, heaving the body and swaying the arms. |
+| `raise` | [189](src/physics/enemy.h#L189) | [284](src/physics/enemy.h#L284) | -160 / 150 | Where the attacking arm starts its stroke: over the head forward (ghoul), back over the shoulder (troll). |
+| `strike` | [190](src/physics/enemy.h#L190) | [285](src/physics/enemy.h#L285) | 25 / -14 | Where the stroke ends. Always reached turning clockwise, over the top and down the front. |
+| `strike_steps` | [191](src/physics/enemy.h#L191) | [286](src/physics/enemy.h#L286) | 8 / 6 | Steps the stroke takes. For the troll, the last steps of the 42-step wind-up. |
+| `windup_lean` / `strike_lean` | [192](src/physics/enemy.h#L192) | [287](src/physics/enemy.h#L287) | 0, 10 / -8, 10 | Leaning away into the wind-up, then over the blow. |
+| `flinch_steps` / `flinch` | [194](src/physics/enemy.h#L194) | [289](src/physics/enemy.h#L289) | 12, -14 / 12, -5 | Rocking back when an arrow takes pixels. |
+| `pad` | [197](src/physics/enemy.h#L197) | [293](src/physics/enemy.h#L293) | 14 / 56 | How far a pose reaches outside the frame. `enemy_test` checks every pose stays inside it; `Enemy::MAX_POSE_PAD` ([310](src/physics/enemy.h#L310)) sizes the renderer's atlas slots. |
 
 ## Bow and arrows
 
@@ -251,3 +273,8 @@ Record adjustments to tuning parameters and their rationale here.
   that had its arm shot off stood buried in the pile of its own arm for the
   rest of the run, and then -- allowed to climb out -- perched on the cone's tip
   with its feet in the air.
+- **Enemies animated** (first-pass values). Each species got a rig: limbs that
+  turn about their joints, driven by distance walked, breathing, the chase, the
+  attack and being hit. The troll's stroke first ran from `raise` (+150) back to
+  `strike` (-14) the short way, which swung the club down the troll's own back;
+  the stroke now always turns clockwise, over the top and down the front.

@@ -156,7 +156,7 @@ described is worth reporting.
 | 9 | **Structures** | A wall or wood shape with nothing under it falls as one rigid piece and lands intact. A shape resting on solid ground never twitches or drifts. |
 | 10 | **Depth** | Walk a long way and watch the background. Sky drifts slowest, mountains faster, terrain fastest. No visible seams or repeating vertical lines anywhere in the backdrop. |
 | 11 | **The run** | Take falling damage from a real drop, take burn damage standing in fire, die and see `YOU DIED`, press `R` to restart, then fly east across the water channel to reach the objective. |
-| 12 | **Enemies** | Hold `E` and shoot a ghoul's arm below the shoulder: the forearm drops off as sand in the ghoul's colours and piles up on the ground. A shot between the eyes collapses the whole body into a heap. |
+| 12 | **Enemies** | Hold `E` and shoot a ghoul's arm below the shoulder: the forearm drops off as sand in the ghoul's colours and piles up on the ground. A shot between the eyes collapses the whole body into a heap. Watch one walk: the legs stride, and when it sees you its arms come up. |
 | 13 | **Stability** | A few minutes of doing all of the above at once — digging near falling sand near fire near water — with no crash and no obvious slowdown during ordinary play. |
 
 `ctest` proves the mechanics in isolation; it cannot prove they compose. Run
@@ -204,6 +204,14 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   if it is that arm) drops as a heap of sand. It needs one arrow in each eye,
   not one between them. With both arms gone it has nothing to slam with. It
   wades through sand, so the pile of its own arm does not trap it.
+- **They are animated, and the animation is the body.** Legs stride in step
+  with the ground they cover, arms swing, the body breathes, leans into a
+  chase and rocks back when hit. A ghoul that has seen you reaches for you and
+  slashes from over its head; a troll swings its club back over its shoulder
+  as its eyes heat, then over the top and down into the crater. The limbs
+  turn on their joints rather than swapping to a drawn frame, so an arrow hits
+  the arm where it is drawn mid-swing, and a hole shot in a shin stays in the
+  shin as the leg moves.
 - **`N`** (development tool): Spawn a ghoul at the cursor.
 - **`T`** (development tool): Spawn a troll standing on the cursor -- point at
   the ground.

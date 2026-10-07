@@ -6,6 +6,7 @@
 #include "fixed.h"
 #include "grid.h"
 #include "player.h"
+#include "rig.h"
 #include "troll_art.h"
 
 // A body that comes apart where it is hit.
@@ -95,6 +96,11 @@ struct Species {
     // a pile or waiting to be dug out of one. See Enemy::shove_powder.
     bool wades;
 
+    // The skeleton the art hangs on and how it moves -- see rig.h. Every pose is
+    // the same pixels in different places, so this changes where a body is drawn
+    // and hit, never what it is made of.
+    rig::Rig rig;
+
     constexpr int frame_w() const { return art->w; }
     constexpr int frame_h() const { return art->h; }
     constexpr int offset_x() const { return (art->w - width) / 2; }
@@ -153,6 +159,43 @@ inline constexpr Species GHOUL{
     // ground up for most of a second before the feet give way.
     2,
     false,
+    // Moss ghoul. Short legs swinging wide, so its scuttle reads at four screen
+    // pixels per cell; arms held out in front once it has seen you, which is the
+    // read that says "it is coming for you" from across the screen; and a swipe
+    // that is a slash from overhead down past its hip.
+    rig::Rig{
+        .hip_row = 21,
+        .leg_split = 7,
+        .neck_row = 10,
+        .waist = {7, 20},
+        .neck = {7, 9},
+        .rear_shoulder = {2, 11},
+        .front_shoulder = {11, 11},
+        .rear_hip = {5, 20},
+        .front_hip = {9, 20},
+        // A body length and a half per cycle: at the patrol speed a cycle and a
+        // half a second, a shuffle; at the chase, three, a scurry.
+        .stride = 14,
+        .leg_swing = rig::deg(28),
+        .arm_swing = rig::deg(24),
+        .bob = 1,
+        .chase_lean = rig::deg(8),
+        .chase_arms = rig::deg(-80),
+        .breathe_steps = 96,
+        .breathe = rig::deg(3),
+        // From up over its head and forward, down and past the hip: a big arc for
+        // a small body, because the swipe itself has no wind-up to read and the
+        // stroke is the whole of what the player sees of it.
+        .raise = rig::deg(-160),
+        .strike = rig::deg(25),
+        .strike_steps = 8,
+        .windup_lean = 0,
+        .strike_lean = rig::deg(10),
+        .flinch_steps = 12,
+        .flinch = rig::deg(-14),
+        // An arm's length (nine cells) plus the lean, rounded up.
+        .pad = 14,
+    },
 };
 
 // The troll: nearly three times the player's height, slow, and hitting hard
@@ -210,6 +253,45 @@ inline constexpr Species TROLL{
     // once it could climb out, it stood perched on the cone's tip with its legs
     // in the air. A body this heavy goes through sand, not over it.
     true,
+    // The troll. A slow, heavy stride -- the feet swing less and the cycle is
+    // long, so each step reads as weight -- and the slam as the Elden Ring
+    // troll does it: the club goes back and up over the head as it leans away,
+    // hangs, and comes over and down in the last tenth of a second, the body
+    // following it forward.
+    rig::Rig{
+        .hip_row = 57,
+        .leg_split = 26,
+        // No separate head: it is sunk into the shoulders, and a head that
+        // turned on its own would tear the hair from the hump.
+        .neck_row = 0,
+        .waist = {26, 56},
+        .neck = {26, 0},
+        .rear_shoulder = {9, 23},
+        .front_shoulder = {43, 23},
+        .rear_hip = {19, 56},
+        .front_hip = {32, 56},
+        .stride = 34,
+        .leg_swing = rig::deg(20),
+        .arm_swing = rig::deg(8),
+        .bob = 1,
+        .chase_lean = rig::deg(6),
+        .chase_arms = 0,
+        .breathe_steps = 150,
+        .breathe = rig::deg(2),
+        // Back over the shoulder until the club's head is behind the troll's
+        // own, then through to a little past straight down: the club lands
+        // forward of the hand, in the crater Enemy::slam digs.
+        .raise = rig::deg(150),
+        .strike = rig::deg(-14),
+        .strike_steps = 6,
+        .windup_lean = rig::deg(-8),
+        .strike_lean = rig::deg(10),
+        .flinch_steps = 12,
+        .flinch = rig::deg(-5),
+        // The club arm is 46 cells from shoulder to club-foot, and the lean
+        // carries the shoulder six more.
+        .pad = 56,
+    },
 };
 
 }  // namespace species
@@ -222,6 +304,10 @@ public:
     static constexpr int MAX_FRAME_W = troll_art::W;
     static constexpr int MAX_FRAME_H = troll_art::H;
     static constexpr int MAX_FRAME_PIXELS = MAX_FRAME_W * MAX_FRAME_H;
+
+    // The most any species' pose reaches outside its frame (Rig::pad). The
+    // renderer sizes an atlas slot as the largest frame plus this all round.
+    static constexpr int MAX_POSE_PAD = 56;
 
     // Shared by every species: the same gravity as the player, so bodies fall
     // alike and a shove of sand drops them all the same way; and the player's
@@ -260,6 +346,22 @@ public:
     // as it passes through each cell.
     int pixel_at(int wx, int wy) const;
 
+    // The same question in posed frame space -- the frame as the art faces, before
+    // the flip for facing left, with (0, 0) the rest frame's top-left and cells
+    // outside the rest frame allowed. pixel_at is this after the anchoring and the
+    // flip; the renderer calls it directly for every cell of pose_bounds(), so
+    // what is drawn in a cell and what an arrow finds there are one answer.
+    int posed_pixel(int px, int py) const;
+
+    // Where frame pixel (x, y) is in the world in the current pose. Forwards, so
+    // within a cell of where it is drawn rather than exactly (rig.h says why);
+    // used for where a lost pixel's grain goes and for measuring a bite.
+    void world_of(int x, int y, int& wx, int& wy) const;
+
+    // The rectangle of posed frame space the current pose can draw into,
+    // [x0, x1) x [y0, y1), already clipped to the species' Rig::pad.
+    rig::Box pose_bounds() const { return bounds; }
+
     // Takes out every surviving pixel within `radius` cells of world cell (wx, wy),
     // then everything the bite cut off from the heart, then -- if that killed it --
     // the rest. Each pixel lost goes into the grid as sand. Returns the number of
@@ -288,6 +390,12 @@ public:
     // Steps until a slam that is winding up lands, or 0 when none is. Public for
     // the renderer's telegraph -- the eyes flare as it winds up -- and for tests.
     int windup_left() const { return windup; }
+
+    // Steps since the last attack landed, or -1 while it is not recovering from
+    // one. For the renderer and tests; the pose already reads it.
+    int attack_recovery() const {
+        return attack_timer > 0 ? kind->attack_interval - attack_timer : -1;
+    }
 
     // Whether frame pixel (x, y) is still there. The renderer builds the sprite from
     // this and the art's colours, so what is drawn is exactly what an arrow can
@@ -327,18 +435,41 @@ private:
     int windup = 0;
     int burn_timer = 0;
 
-    // One byte per frame pixel: 1 while it exists, indexed y * frame_w + x for
+    // One byte per frame pixel: 0 once it is gone, and while it exists, one
+    // more than the rig::Part it belongs to -- looked up once at spawn, because
+    // every pixel's part is asked for every step (where is it, is it burning)
+    // and the answer never changes. Indexed y * frame_w + x for
     // the species' own frame. A fixed array on the body rather than a vector, so
     // a pool of enemies is one allocation-free block and the step never touches
     // the heap.
     std::array<uint8_t, MAX_FRAME_PIXELS> pixels{};
     int remaining = 0;
 
-    // Where frame pixel (x, y) is in the world, given the facing. The renderer
-    // flips the sprite with SDL_FLIP_HORIZONTAL over the same frame rect, so the two
-    // agree: frame column x lands on world column (left + W-1-x) when facing left.
-    int world_x_of(int x) const;
-    int world_y_of(int y) const;
+    // --- the pose ------------------------------------------------------------
+    //
+    // Recomputed once at the end of every step and at spawn, and nowhere else, so
+    // that within a step every arrow sees the body in one place. A hit therefore
+    // never moves the body under the next arrow of the same volley; the flinch it
+    // starts shows from the next step.
+    rig::Pose pose{};
+    // Each part's posed rectangle, for skipping the parts a cell cannot be in,
+    // and their union clipped to the pad.
+    std::array<rig::Box, rig::PART_COUNT> part_bounds{};
+    rig::Box bounds{};
+    // Distance along the stride cycle, in fx cells, [0, stride).
+    fx::v gait = 0;
+    // Steps into the current breath, [0, breathe_steps).
+    int breath = 0;
+    // Steps of flinch left.
+    int flinch = 0;
+
+    void compute_pose();
+    void advance_gait();
+
+    // Frame column x lands on world column (left + W-1-x) when facing left. The
+    // renderer flips the sprite with SDL_FLIP_HORIZONTAL over its slot rect and
+    // anchors it so the two agree; see main.cpp.
+    int world_column(int frame_x) const;
 
     // Removes one pixel and writes its grain. A pixel whose cell is already solid --
     // a foot buried in the step it is climbing -- just goes: there is nowhere for the
@@ -369,14 +500,24 @@ constexpr bool species_is_sound(const Species& s) {
     return s.chase_speed < Player::MOVE_SPEED && s.patrol_speed < s.chase_speed &&
            s.offset_x() >= 0 && s.offset_y() >= 0 && s.offset_x() == s.art->box_left &&
            s.art->w <= Enemy::MAX_FRAME_W && s.art->h <= Enemy::MAX_FRAME_H &&
-           s.footing_rows() <= s.height;
+           s.footing_rows() <= s.height && s.rig.pad <= Enemy::MAX_POSE_PAD &&
+           s.rig.hip_row > s.art->arm_top && s.rig.hip_row < s.art->h &&
+           s.rig.leg_split > s.art->box_left && s.rig.leg_split < s.art->box_right() &&
+           s.rig.neck_row <= s.art->arm_top && s.rig.stride > 0 && s.rig.breathe_steps > 1 &&
+           s.rig.strike_steps > 0 && s.rig.flinch_steps > 0 &&
+           (s.attack != Attack::Slam || s.rig.strike_steps < s.windup_steps) &&
+           s.rig.strike_steps < s.attack_interval;
 }
 static_assert(species_is_sound(species::GHOUL) && species_is_sound(species::TROLL),
               "a species breaks one of: chasing slower than the player walks (the "
               "escape is the whole counterplay to being noticed), wandering slower "
               "than it chases, a frame at least as big as its box, the art's "
               "box_left matching the box it is anchored to (or has_arms counts the "
-              "wrong columns), or a frame that fits Enemy::MAX_FRAME_*");
+              "wrong columns), a frame that fits Enemy::MAX_FRAME_*, or a rig whose "
+              "parts are where the art's are (hips below the shoulders, the leg "
+              "split inside the box, the head above the arms), whose pad fits "
+              "Enemy::MAX_POSE_PAD, and whose strike fits inside its wind-up and "
+              "its recovery");
 
 // The troll is meant to be imposing, and "imposing" is a ratio: well over twice
 // the player's height, or it is a big ghoul.

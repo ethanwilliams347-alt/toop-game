@@ -19,10 +19,12 @@
 // same reason: this is a single pose, and a single pose reviewed as text is a
 // one-pixel change reviewed as a one-character change.
 //
-// One pose, deliberately. The damage mask lives in frame space, so a walk cycle
-// whose legs move between frames would let a hit leg grow back on the next frame
-// -- the mask would be marking pixels the new frame draws somewhere else. A
-// second frame is fine the day it only differs in pixels that cannot be hit.
+// One drawn pose, deliberately, and the body still moves. The damage mask lives
+// in this frame's coordinates, so a drawn walk cycle whose legs move between
+// frames would let a hit leg grow back on the next frame -- the mask would be
+// marking pixels the new frame draws somewhere else. Instead the rig (rig.h)
+// turns these same pixels about the shoulders, hips, neck and waist: one body,
+// one mask, posed. The rows below are the rest pose.
 namespace enemy_art {
 
 // Frame size, matching the player's sheet: the enemy is the same kind of thing

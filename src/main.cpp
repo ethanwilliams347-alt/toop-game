@@ -495,22 +495,32 @@ int main(int argc, char* argv[]) {
     }
     player_anim::State anim_state;
 
-    // The enemies' bodies, one frame-sized slot per Run::enemies slot, rebuilt from
-    // each body's surviving pixels every frame they are on screen. A slot is the
-    // largest species' frame (Enemy::MAX_FRAME_*), so any slot can hold a troll;
-    // a ghoul uses the top-left corner of its slot.
+    // The enemies' bodies, one slot per Run::enemies slot, redrawn every frame
+    // from each body's surviving pixels in its current pose. A slot is the largest
+    // species' frame plus the most any pose reaches outside it (Enemy::MAX_POSE_PAD)
+    // on every side -- a troll's club raised over its head is well above its
+    // frame -- so any slot can hold any species in any pose. The slots sit in a
+    // grid rather than one row, which at that size would be wider than the
+    // smallest texture limit SDL promises.
     //
     // Built rather than loaded, because there is no fixed picture to load: an enemy
-    // looks like whatever is left of it, and the pixel mask is simulation state
-    // (see physics/enemy_art.h for why the art lives there and not in assets/).
-    // Every frame rather than on change, because the whole atlas is a few
-    // thousand pixels -- smaller than one row of the cell texture -- and a cache
-    // keyed on which body is in which slot is a correctness problem in exchange
-    // for nothing measurable.
+    // looks like whatever is left of it, posed however it is standing, and both
+    // are simulation state (see physics/enemy_art.h and physics/rig.h). Every
+    // frame rather than on change, and only the rectangle each pose covers is
+    // written and uploaded: a few thousand pixels a body, against a cache keyed
+    // on which body is in which slot in which pose, which is a correctness
+    // problem in exchange for nothing measurable.
+    constexpr int ENEMY_SLOT_W = Enemy::MAX_FRAME_W + 2 * Enemy::MAX_POSE_PAD;
+    constexpr int ENEMY_SLOT_H = Enemy::MAX_FRAME_H + 2 * Enemy::MAX_POSE_PAD;
+    constexpr int ENEMY_SLOT_COLS = 6;
+    constexpr int ENEMY_SLOT_ROWS = (Run::MAX_ENEMIES + ENEMY_SLOT_COLS - 1) / ENEMY_SLOT_COLS;
+    constexpr int ENEMY_ATLAS_W = ENEMY_SLOT_W * ENEMY_SLOT_COLS;
+    constexpr int ENEMY_ATLAS_H = ENEMY_SLOT_H * ENEMY_SLOT_ROWS;
+    static_assert(ENEMY_ATLAS_W <= 2048 && ENEMY_ATLAS_H <= 2048,
+                  "the enemy atlas outgrew the texture size every SDL renderer supports");
     SDL_Texture* enemy_atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                                  SDL_TEXTUREACCESS_STREAMING,
-                                                 Enemy::MAX_FRAME_W * Run::MAX_ENEMIES,
-                                                 Enemy::MAX_FRAME_H);
+                                                 ENEMY_ATLAS_W, ENEMY_ATLAS_H);
     if (enemy_atlas) {
         SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
     } else {
@@ -521,7 +531,7 @@ int main(int argc, char* argv[]) {
                              "enemies will not be drawn.\n", SDL_GetError());
     }
     std::vector<uint32_t> enemy_atlas_pixels(
-        static_cast<size_t>(Enemy::MAX_FRAME_W) * Run::MAX_ENEMIES * Enemy::MAX_FRAME_H, 0u);
+        static_cast<size_t>(ENEMY_ATLAS_W) * ENEMY_ATLAS_H, 0u);
     std::vector<frame::EnemySprite> enemy_sprites;
     std::vector<frame::ArrowSprite> arrow_sprites;
     enemy_sprites.reserve(Run::MAX_ENEMIES);
@@ -1658,11 +1668,9 @@ int main(int argc, char* argv[]) {
         // cells every step by design, and the clamp would make every arrow in
         // flight strobe.
         enemy_sprites.clear();
-        bool any_enemy = false;
         for (int slot = 0; slot < Run::MAX_ENEMIES; ++slot) {
             const Enemy& en = run.enemies[static_cast<size_t>(slot)];
             if (!en.is_alive()) continue;
-            any_enemy = true;
             const Species& kind = en.species();
             const body_art::Art& art = *kind.art;
 
@@ -1676,32 +1684,56 @@ int main(int argc, char* argv[]) {
                 eye_heat = static_cast<uint32_t>(
                     255 * (kind.windup_steps - en.windup_left()) / kind.windup_steps);
             }
-            for (int y = 0; y < art.h; ++y) {
-                for (int x = 0; x < art.w; ++x) {
-                    const size_t at = static_cast<size_t>(y) * Enemy::MAX_FRAME_W * Run::MAX_ENEMIES +
-                                      static_cast<size_t>(slot) * Enemy::MAX_FRAME_W + x;
-                    uint32_t c = en.has_pixel(x, y) ? art.color_at(x, y) : 0u;
-                    if (c != 0u && eye_heat > 0 && art.is_head(x, y)) {
-                        const uint32_t g = (c >> 8) & 0xFFu, b = c & 0xFFu;
-                        c = 0xFFFF0000u |
-                            ((g + (255u - g) * eye_heat / 255u) << 8) |
-                            (b + (255u - b) * eye_heat / 255u);
+            // The pose's rectangle, painted cell by cell from the same question an
+            // arrow asks (Enemy::posed_pixel), so what is drawn in a cell is what
+            // is hit there. Whatever the pose cannot reach is left as it was:
+            // nothing samples outside the rectangle.
+            const rig::Box b = en.pose_bounds();
+            const int bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+            if (bw <= 0 || bh <= 0) continue;
+            const int slot_x = (slot % ENEMY_SLOT_COLS) * ENEMY_SLOT_W;
+            const int slot_y = (slot / ENEMY_SLOT_COLS) * ENEMY_SLOT_H;
+            for (int y = 0; y < bh; ++y) {
+                uint32_t* row = enemy_atlas_pixels.data() +
+                                static_cast<size_t>(slot_y + y) * ENEMY_ATLAS_W + slot_x;
+                for (int x = 0; x < bw; ++x) {
+                    const int index = en.posed_pixel(b.x0 + x, b.y0 + y);
+                    uint32_t c = 0u;
+                    if (index >= 0) {
+                        const int ax = index % art.w, ay = index / art.w;
+                        c = art.color_at(ax, ay);
+                        if (eye_heat > 0 && art.is_head(ax, ay)) {
+                            const uint32_t g = (c >> 8) & 0xFFu, bl = c & 0xFFu;
+                            c = 0xFFFF0000u |
+                                ((g + (255u - g) * eye_heat / 255u) << 8) |
+                                (bl + (255u - bl) * eye_heat / 255u);
+                        }
                     }
-                    enemy_atlas_pixels[at] = c;
+                    row[x] = c;
                 }
+            }
+            const SDL_Rect src{slot_x, slot_y, bw, bh};
+            if (enemy_atlas) {
+                SDL_UpdateTexture(enemy_atlas, &src,
+                                  enemy_atlas_pixels.data() +
+                                      static_cast<size_t>(slot_y) * ENEMY_ATLAS_W + slot_x,
+                                  ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
             }
             const pacer::Interpolated at = pacer::interpolate(
                 static_cast<float>(en.prev_cell_x()) + fx::to_float(en.prev_remainder_x()),
                 static_cast<float>(en.prev_cell_y()) + fx::to_float(en.prev_remainder_y()),
                 static_cast<float>(en.cell_x()) + fx::to_float(en.remainder_x()),
                 static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha);
+            // The rectangle's own anchor. Posed column x lands on frame column x
+            // facing right and on (w-1-x) facing left, and SDL's flip mirrors the
+            // rectangle about its own middle -- so facing left, the rectangle's
+            // left edge in the frame is w - x1, not x0. This is Enemy::pixel_at's
+            // flip written for a rectangle; the two must agree or what is drawn is
+            // a cell off what is hit.
+            const int left_in_frame = en.facing_left() ? art.w - b.x1 : b.x0;
             enemy_sprites.push_back(frame::EnemySprite{
-                SDL_Rect{slot * Enemy::MAX_FRAME_W, 0, art.w, art.h},
-                at.x, at.y, kind.offset_x(), kind.offset_y(), en.facing_left()});
-        }
-        if (any_enemy && enemy_atlas) {
-            SDL_UpdateTexture(enemy_atlas, nullptr, enemy_atlas_pixels.data(),
-                              Enemy::MAX_FRAME_W * Run::MAX_ENEMIES * static_cast<int>(sizeof(uint32_t)));
+                src, at.x, at.y, kind.offset_x() - left_in_frame, kind.offset_y() - b.y0,
+                en.facing_left()});
         }
 
         arrow_sprites.clear();
