@@ -63,6 +63,10 @@ ctest --test-dir build -C Release -R grid_test --output-on-failure
 .\build\Release\grid_bench.exe                        # timings, not a test
 .\build\Release\preview_light.exe                     # headless frame dump
 python tools/rawpng.py out.raw out.png 804 604
+
+just code_cleanup                                     # pre-PR pass, see below
+just code_check                                       # same, changes nothing
+just asan                                             # ASan build in build-asan\, all suites
 ```
 
 `*_probe.exe` targets report numbers for judging feel and assert nothing; don't
@@ -70,6 +74,15 @@ turn them into `add_test()`.
 
 ## Verifying changes
 
+- **Before opening or updating any PR:** `just code_cleanup` (needs `just`, LLVM's
+  clang-format/clang-tidy, and `ruff`). It runs `tools/code_cleanup.py`:
+  clang-format on the changed lines, clang-tidy on the changed C++ files, ruff on
+  the changed Python files, then the Release build and ctest. Formatting is
+  limited to changed lines because the tree predates `.clang-format`, and a
+  whole-file reformat in a feature branch buries the real change and conflicts
+  with every other open branch — don't run `clang-format -i` over whole files. Fix
+  a tidy finding, or silence it at that line with `// NOLINT(check-name)` and a
+  comment saying why; never edit `.clang-tidy` to make one change pass.
 - **`src/physics/`:** run the full ctest suite. `golden_frame_test` must pass
   unchanged — it checksums a composited frame, so a new checksum means visible
   output changed; confirm that was intended before re-baselining. Run `grid_bench`
