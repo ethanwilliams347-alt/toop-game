@@ -3,6 +3,7 @@
 #include <vector>
 #include "game/camera.h"
 #include "render/backdrop_wrap.h"
+#include "render/depth_rig.h"
 #include "render/light.h"
 
 // The world layers of one frame, in the order they are drawn.
@@ -106,6 +107,19 @@ struct ParallaxLayer {
     // Empty for every layer that is an object. Non-empty only for a surface -- see
     // Band. When set, parallax_x above is unused and each band carries its own.
     std::vector<Band> bands;
+
+    // --- read only when Backdrop::rig_on (render/depth_rig.h) ---
+    //
+    // The ground plane: drawn one texture row at a time, each at the rig's factor
+    // for that row on both axes. parallax_x/y are unused when this is set.
+    bool line_scroll = false;
+    // Placed vertically by the plane's rows but scrolled at parallax_x: paint lying
+    // on the plane, like the sun's reflection. Drawn per row over the ripple range.
+    bool on_plane = false;
+    // Rows [ripple_row0, ripple_row1) of the texture shimmer sideways with time.
+    int ripple_row0 = 0, ripple_row1 = 0;
+    // Cells per second of sideways motion independent of the camera (clouds).
+    float drift = 0.0f;
 };
 
 // The generated parallax layers.
@@ -148,6 +162,20 @@ struct Backdrop {
     // furthest back. is_foreground is the one exception and it is not a reordering --
     // it moves a layer past the player into the second of the two passes.
     std::vector<ParallaxLayer> layers;
+
+    // The perspective rig, for a set from render/rig_backdrop.h. When on, `layers`
+    // is drawn by the rig's path rather than the bg1 one: every layer wraps
+    // horizontally, is placed about the anchor rather than about the world's
+    // corner, and moves vertically at its own factor. Off for every bg1 set, which
+    // therefore draws exactly as before.
+    //
+    // The anchor is the camera view position, in cells, at which the stack is the
+    // painting -- the caller sets it per frame, since it depends on the viewport.
+    bool rig_on = false;
+    depth_rig::Rig rig{};
+    float rig_anchor_x = 0.0f;
+    float rig_anchor_y = 0.0f;
+    float ripple_amplitude = 0.0f;  // cells
 };
 
 
@@ -223,6 +251,12 @@ struct Params {
     // Nothing sets this yet. It is a knob with no caller -- see the note at the
     // layer table for why it ships anyway and what would make it a defect.
     Grade world_grade;
+
+    // Seconds of wall clock, for the backdrop's own motion -- drifting clouds and
+    // rippling water. Render-only by construction: it is read nowhere but the rig's
+    // draw path, and a frame composed at 0 (the default, and what golden_frame_test
+    // composes) is the still painting.
+    float time_s = 0.0f;
 };
 
 
