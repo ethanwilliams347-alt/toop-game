@@ -144,6 +144,25 @@ Grading multipliers shape the relative brightness of background, terrain, and li
 
 ---
 
+## Perspective rig (bg_tarn)
+
+[src/render/rig_backdrop.h](src/render/rig_backdrop.h), [src/render/depth_rig.h](src/render/depth_rig.h)
+
+Layer parallax factors in a rig set are **not** knobs: each is derived from the
+row the layer stands on (`foot_row`). Move the horizon or contact row and every
+factor moves together. The knobs are the camera and the motion.
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `Rig::horizon_row` | [rig_backdrop.h:119](src/render/rig_backdrop.h#L119) | 200 | Art row where the ground plane vanishes (factor 0). Must match `HORIZON` in `tools/generate_bg_tarn.py`. |
+| `Rig::contact_row` | [rig_backdrop.h:119](src/render/rig_backdrop.h#L119) | 264 | Art row where the plane meets the world (factor 1); the terrain surface. |
+| `Rig::vertical_strength` | [rig_backdrop.h:119](src/render/rig_backdrop.h#L119) | 0.75 | Share of honest vertical parallax. 1.0 = true camera (plane magnifies 3.6x at the ceiling, 1080p); 0 = bg1's locked vertical. |
+| `ripple_amplitude` | [rig_backdrop.h:119](src/render/rig_backdrop.h#L119) | 0.6 cells | Sideways shimmer of lake rows and the sun glint. Keep under 1 cell or rows visibly tear. |
+| clouds `drift` | [rig_backdrop.h:106](src/render/rig_backdrop.h#L106) | -0.6 cells/s | Cloud drift with no camera motion. |
+| reeds `factor` | [rig_backdrop.h:115](src/render/rig_backdrop.h#L115) | 1.30 | Foreground speed. Above 1.00 is legal only because rig layers wrap. |
+
+---
+
 ## Camera framing
 
 [src/game/camera.h](src/game/camera.h)
@@ -168,3 +187,8 @@ Grading multipliers shape the relative brightness of background, terrain, and li
 ## History
 
 Record adjustments to tuning parameters and their rationale here.
+
+- **2026-10-07, perspective rig (`bg_tarn`).** Added `vertical_strength` 0.75,
+  `ripple_amplitude` 0.6, cloud `drift` -0.6, reeds 1.30. 0.75 because at 0.5 the
+  valley drops out of a ceiling-height window and at 1.0 the plane smears at 3.6x;
+  see the comment above `TARN_LAYERS`. Existing bg1-family sets are unchanged.

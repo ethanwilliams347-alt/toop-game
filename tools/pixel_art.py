@@ -243,6 +243,67 @@ PALETTE = {
     # silhouette
     'water_fill':   (0x1A, 0x29, 0x32),
     'water_rim':    (0x2E, 0x49, 0x55),
+
+    # bg_tarn - a mountain lake at golden hour (tools/generate_bg_tarn.py).
+    #
+    # Its own group rather than a reuse of the backdrop group above, because that
+    # group is a night palette with "zero warm colour in it" as a rule, and this
+    # scene is lit by a low sun. The hues are taken from Ethan's
+    # art_src/Background_1, measured rather than copied: the teal mountain
+    # (#0B4D5C there), the sage and pale-cyan sky bands, the taupe/sand/brown hill
+    # ladder with a gold rim line, the red banded rock, the deep-teal lake and the
+    # olive/bottle-green meadow. What is new is the light: a warm horizon and a
+    # sun, which push every lit edge toward gold and every far value toward the
+    # sky (aerial perspective), so depth reads from value as well as from motion.
+    #
+    # Far to near the body values fall and the rims brighten, the same ladder
+    # bg_forest's README states: far is close to the sky, near is darker and more
+    # contrasty.
+    'tarn_sky_top':     (0x0B, 0x4D, 0x5C),  # bg1's mountain teal, at the zenith
+    'tarn_sky_high':    (0x2F, 0x6F, 0x7A),
+    'tarn_sky_mid':     (0x7D, 0xA1, 0x95),  # bg1's sage sky band
+    'tarn_sky_low':     (0xC9, 0xB9, 0x8A),
+    'tarn_sky_horizon': (0xE8, 0xA8, 0x62),  # the one warm band: under the sun
+    'tarn_sun_halo':    (0xF6, 0xD0, 0x80),
+    'tarn_sun':         (0xFF, 0xF3, 0xC8),
+    'tarn_cloud_lit':   (0xE0, 0x9E, 0x78),  # underside, lit from below by the sun
+    'tarn_cloud':       (0x8F, 0x9E, 0x8E),
+    'tarn_cloud_shade': (0x5E, 0x7A, 0x78),
+    'tarn_peak':        (0x3E, 0x6E, 0x78),  # far range: hazed toward the sky
+    'tarn_peak_shade':  (0x2E, 0x5A, 0x67),
+    'tarn_snow':        (0xD8, 0xE2, 0xD6),
+    'tarn_snow_shade':  (0x9C, 0xB8, 0xB6),
+    'tarn_peak_rim':    (0xF4, 0xC8, 0x82),
+    'tarn_ridge':       (0x58, 0x74, 0x6E),  # bg1's grey-green hill, hazed
+    'tarn_ridge_shade': (0x45, 0x60, 0x5E),
+    'tarn_ridge_rim':   (0x63, 0xA0, 0x84),  # bg1's green rim, lifted
+    'tarn_mesa':        (0x8A, 0x5A, 0x46),  # bg1's red rock
+    'tarn_mesa_band':   (0x6E, 0x3E, 0x30),
+    'tarn_mesa_shade':  (0x5A, 0x38, 0x2E),
+    'tarn_mesa_lit':    (0xC0, 0x7E, 0x52),
+    'tarn_dune':        (0xA4, 0x98, 0x80),  # bg1's sand hill
+    'tarn_dune_shade':  (0x80, 0x6C, 0x47),
+    'tarn_dune_rim':    (0xD6, 0xAE, 0x5E),  # bg1's gold rim, in sunlight
+    'tarn_shore_far':   (0x2C, 0x3E, 0x2E),
+    'tarn_lake_deep':   (0x13, 0x34, 0x31),  # bg1's lake
+    'tarn_lake':        (0x1E, 0x4A, 0x46),
+    'tarn_lake_sky':    (0x6F, 0x9A, 0x92),  # the sky, reflected
+    'tarn_lake_warm':   (0xB0, 0x8A, 0x5E),  # the horizon, reflected
+    'tarn_glint':       (0xFF, 0xE6, 0xA6),
+    'tarn_glint_dim':   (0xE2, 0xA6, 0x62),
+    'tarn_meadow_far':  (0x2C, 0x3A, 0x12),
+    'tarn_meadow':      (0x1F, 0x2A, 0x0C),  # bg1's olive meadow
+    'tarn_meadow_near': (0x0C, 0x27, 0x14),  # bg1's bottle green
+    'tarn_meadow_lit':  (0x5A, 0x62, 0x22),
+    'tarn_flower':      (0xC8, 0x9A, 0x48),
+    'tarn_pine_far':    (0x1E, 0x3C, 0x36),
+    'tarn_pine_far_rim': (0x8E, 0x8A, 0x52),
+    'tarn_pine':        (0x10, 0x2A, 0x1E),
+    'tarn_pine_shade':  (0x0A, 0x1E, 0x16),
+    'tarn_pine_rim':    (0xC4, 0x96, 0x4E),
+    'tarn_trunk':       (0x2A, 0x1D, 0x14),
+    'tarn_fg':          (0x08, 0x16, 0x0E),  # nearest of all: almost a silhouette
+    'tarn_fg_rim':      (0x6A, 0x5C, 0x2A),
 }
 
 # char_accent is the brightest value in this entire palette, above what is
