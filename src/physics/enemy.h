@@ -180,8 +180,8 @@ inline constexpr Species GHOUL{
             .front_shoulder = {11, 11},
             .rear_hip = {5, 20},
             .front_hip = {9, 20},
-        // A body length and a half per cycle: at the patrol speed a cycle and a
-        // half a second, a shuffle; at the chase, three, a scurry.
+            // A body length and a half per cycle: at the patrol speed a cycle and a
+            // half a second, a shuffle; at the chase, three, a scurry.
             .stride = 14,
             .leg_swing = rig::deg(28),
             .arm_swing = rig::deg(24),
@@ -190,9 +190,9 @@ inline constexpr Species GHOUL{
             .chase_arms = rig::deg(-80),
             .breathe_steps = 96,
             .breathe = rig::deg(3),
-        // From up over its head and forward, down and past the hip: a big arc for
-        // a small body, because the swipe itself has no wind-up to read and the
-        // stroke is the whole of what the player sees of it.
+            // From up over its head and forward, down and past the hip: a big arc for
+            // a small body, because the swipe itself has no wind-up to read and the
+            // stroke is the whole of what the player sees of it.
             .raise = rig::deg(-160),
             .strike = rig::deg(25),
             .strike_steps = 8,
@@ -200,7 +200,7 @@ inline constexpr Species GHOUL{
             .strike_lean = rig::deg(10),
             .flinch_steps = 12,
             .flinch = rig::deg(-14),
-        // An arm's length (nine cells) plus the lean, rounded up.
+            // An arm's length (nine cells) plus the lean, rounded up.
             .pad = 14,
         },
 };
@@ -270,8 +270,8 @@ inline constexpr Species TROLL{
         rig::Rig{
             .hip_row = 57,
             .leg_split = 26,
-        // No separate head: it is sunk into the shoulders, and a head that
-        // turned on its own would tear the hair from the hump.
+            // No separate head: it is sunk into the shoulders, and a head that
+            // turned on its own would tear the hair from the hump.
             .neck_row = 0,
             .waist = {26, 56},
             .neck = {26, 0},
@@ -287,9 +287,9 @@ inline constexpr Species TROLL{
             .chase_arms = 0,
             .breathe_steps = 150,
             .breathe = rig::deg(2),
-        // Back over the shoulder until the club's head is behind the troll's
-        // own, then through to a little past straight down: the club lands
-        // forward of the hand, in the crater Enemy::slam digs.
+            // Back over the shoulder until the club's head is behind the troll's
+            // own, then through to a little past straight down: the club lands
+            // forward of the hand, in the crater Enemy::slam digs.
             .raise = rig::deg(150),
             .strike = rig::deg(-14),
             .strike_steps = 6,
@@ -297,8 +297,8 @@ inline constexpr Species TROLL{
             .strike_lean = rig::deg(10),
             .flinch_steps = 12,
             .flinch = rig::deg(-5),
-        // The club arm is 46 cells from shoulder to club-foot, and the lean
-        // carries the shoulder six more.
+            // The club arm is 46 cells from shoulder to club-foot, and the lean
+            // carries the shoulder six more.
             .pad = 56,
         },
 };
