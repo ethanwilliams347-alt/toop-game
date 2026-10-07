@@ -1,15 +1,16 @@
-// Headless frames of a perspective-rig backdrop, for looking at.
+// Headless frames of a scene's backdrop, for looking at.
 //
 //     build/Release/preview_backdrop bg_tarn out            four stills
 //     build/Release/preview_backdrop bg_tarn out 120        a 120-frame flight
 //     python tools/rawpng.py out/still_0.raw still_0.png 1920 1080
 //
 // Not an add_test(), for preview_light's reason: it asserts nothing, and what it
-// produces is for a person to judge. The depth rig is a feel -- whether the lake
+// produces is for a person to judge. Parallax is a feel -- whether the lake
 // reads as wide, whether climbing reads as climbing -- and no checksum says that.
 //
-// It composes with the real frame::compose, the real layer table and the real
-// draw_rig_layer, into a software renderer over a surface, the way
+// The scene is looked up in assets/scenes.txt and its backdrop read from its
+// backdrop.txt, the way the game reads them. It composes with the real
+// frame::compose, the real layer table and the real draw_layer, into a software renderer over a surface, the way
 // golden_frame_test does; only the world is stood in for. The cells are the
 // scene's own albedo where its material map is solid, and there is no player and
 // no light. Run from the repo root, so assets/ resolves.
@@ -29,8 +30,9 @@
 
 #include "game/camera.h"
 #include "render/frame.h"
-#include "render/rig_backdrop.h"
+#include "render/backdrop_set.h"
 #include "scene/bmp.h"
+#include "scene/scene_list.h"
 
 namespace {
 
@@ -80,9 +82,21 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: preview_backdrop <scene> <out_dir> [flight_frames]\n");
         return 2;
     }
-    const rig_backdrop::Set* set = rig_backdrop::find(argv[1]);
-    if (!set) {
-        std::fprintf(stderr, "no rig set named '%s'\n", argv[1]);
+    std::string err;
+    const std::vector<scene_list::SceneDef> scenes =
+        scene_list::load_scene_list("assets/scenes.txt", &err);
+    const scene_list::SceneDef* def = nullptr;
+    for (const scene_list::SceneDef& d : scenes)
+        if (d.name == argv[1]) def = &d;
+    if (!def || def->backdrop.empty() || def->material.empty()) {
+        std::fprintf(stderr, "no scene '%s' with a backdrop and a material map%s%s\n", argv[1],
+                     err.empty() ? "" : ": ", err.c_str());
+        return 2;
+    }
+    const std::string dir = "assets/" + def->backdrop + "/";
+    const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &err);
+    if (set.layers.empty()) {
+        std::fprintf(stderr, "%s\n", err.c_str());
         return 2;
     }
     const std::string out = argv[2];
@@ -97,34 +111,31 @@ int main(int argc, char** argv) {
     }
 
     frame::Backdrop backdrop;
-    for (int i = 0; i < set->layer_count; ++i) {
-        const rig_backdrop::Layer& sp = set->layers[i];
+    for (const backdrop_set::Layer& sp : set.layers) {
         frame::ParallaxLayer l;
-        l.texture = load(renderer, std::string(set->dir) + sp.file, !sp.opaque);
+        l.texture = load(renderer, set.dir + sp.file, !sp.opaque);
         if (!l.texture) return 1;
-        l.w = set->native_w * SCALE;
-        l.h = set->native_h * SCALE;
-        l.tex_h = set->native_h;
-        l.parallax_x = rig_backdrop::factor_of(*set, sp);
-        l.parallax_y = depth_rig::vertical_factor(set->rig, l.parallax_x);
-        l.line_scroll = sp.line_scroll;
+        l.w = set.native_w * SCALE;
+        l.h = set.native_h * SCALE;
+        l.tex_h = set.native_h;
+        l.parallax_x = backdrop_set::factor_of(set, sp);
+        l.parallax_y = backdrop_set::vertical_factor_of(set, sp);
+        l.bands = sp.bands;
+        l.line_scroll = sp.plane;
         l.on_plane = sp.on_plane;
         l.ripple_row0 = sp.ripple_row0;
         l.ripple_row1 = sp.ripple_row1;
         l.drift = sp.drift;
-        l.is_foreground = sp.is_foreground;
+        l.is_foreground = sp.foreground;
         backdrop.layers.push_back(l);
     }
-    backdrop.rig_on = true;
-    backdrop.rig = set->rig;
-    backdrop.ripple_amplitude = set->ripple_amplitude;
+    backdrop.rig = set.rig;
+    backdrop.ripple_amplitude = set.ripple_amplitude;
 
     // The world: the scene's albedo wherever its material map is not air.
-    const std::string scene = std::string("assets/") + set->scene;
     bmp::Image mat, alb;
-    std::string err;
-    if (!bmp::read((scene + "_material.bmp").c_str(), mat, &err) ||
-        !bmp::read((scene + "_albedo.bmp").c_str(), alb, &err)) {
+    if (!bmp::read(("assets/" + def->material).c_str(), mat, &err) ||
+        !bmp::read(("assets/" + def->albedo).c_str(), alb, &err)) {
         std::fprintf(stderr, "scene maps: %s\n", err.c_str());
         return 1;
     }
@@ -136,11 +147,17 @@ int main(int argc, char** argv) {
                                            SDL_TEXTUREACCESS_STREAMING, PADDED_W, PADDED_H);
     SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
 
+    // Where the shots stand: the rig's standing camera, or for a set with no rig
+    // the floor of the world, which is where a standing player's camera is.
     const float anchor_x = 0.5f * static_cast<float>(world_w - PADDED_W);
-    const float anchor_y = depth_rig::standing_anchor_y(set->rig, BODY_H, PADDED_H,
-                                                        Camera::VERTICAL_ANCHOR, world_h);
-    backdrop.rig_anchor_x = anchor_x;
-    backdrop.rig_anchor_y = anchor_y;
+    const float anchor_y =
+        set.has_rig ? depth_rig::standing_anchor_y(set.rig, BODY_H, PADDED_H,
+                                                   Camera::VERTICAL_ANCHOR, world_h)
+                    : static_cast<float>(world_h - PADDED_H);
+    if (set.anchor == backdrop_set::Anchor::Standing) {
+        backdrop.anchor_x = anchor_x;
+        backdrop.anchor_y = anchor_y;
+    }
 
     const auto shoot = [&](float view_x, float view_y, float t, const std::string& name) {
         Camera camera;

@@ -1,0 +1,52 @@
+# bg1: the art_src/Background_1 set, nine layers at 344x144.
+#
+# Format and model: src/render/backdrop_set.h. backdrop_set_test checks every
+# number here against the BMPs.
+#
+# Anchored at the world's corner with no rig, so every layer is placed at
+# -(cam * f) and is locked vertically. The nine images share ONE painted land
+# plane: bg1_08_ground is opaque from row 63 to 143, every hill's silhouette
+# bottoms out on it (rows 67..89), the rocks are painted into it, and
+# bg1_albedo.bmp -- the terrain the player stands on -- is a flattened copy of
+# its bottom band. Different vertical factors would shear the pieces of that one
+# surface apart, so there are none. What that costs is the vertical depth cue;
+# getting it back needs art whose layers do not share a plane (bg_tarn).
+#
+# Every factor is <= 1: a world-sized layer at the corner anchor covers the
+# window at every camera position exactly when f <= 1, and this art does not
+# tile, so it must never need a second copy.
+#
+# The factors are the art's own (art_src/Background_1/README.md); hills_midfar
+# (0.30) stands at row 73 and hills_near (0.70) at row 89, which is a pinhole
+# camera with horizon 61 and contact 101 (depth_rig.h).
+#
+# The ground is banded because one factor on a receding surface slides the
+# hills' feet against it. It is uniform across all 344 columns on 61 of its 81
+# opaque rows; the only horizontal detail is three shore contours:
+#
+#     rows  70..77   shore 1   hills_midfar's foot lands at row 73 (0.30)
+#     rows  87..97   shore 2   hills_near's   foot lands at row 89 (0.70)
+#     rows 102..106  shore 3   nothing stands on it
+#
+# so each band carries one contour at the factor of what stands on it, and
+# every cut sits inside a run of flat colour (78..86 and 98..101), where a step
+# in scroll offset is invisible. Not a smooth ramp: the contacts want about
+# 0.025 of factor per row, so a ten-row contour would tear sideways. The near
+# band is 1.00 because the rocks and the diggable terrain live there.
+#
+# No grades: the reference composites to an exact match with none, so the art
+# already carries its own aerial perspective.
+
+size    344 144
+anchor  corner
+
+# file                       how it moves                            flags
+layer   bg1_09_sky.bmp           factor=0.04                             opaque
+layer   bg1_08_ground.bmp        bands=0:82:0.30,82:100:0.70,100:144:1.00
+layer   bg1_07_mountains.bmp     factor=0.12
+layer   bg1_06_hills_far.bmp     factor=0.20
+layer   bg1_05_hills_midfar.bmp  factor=0.30
+layer   bg1_04_hills_mid.bmp     factor=0.42
+layer   bg1_03_hills_midnear.bmp factor=0.55
+layer   bg1_02_hills_near.bmp    factor=0.70
+layer   bg1_01_fg_rocks.bmp      factor=1.00                             foreground

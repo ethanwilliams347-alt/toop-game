@@ -8,7 +8,7 @@
 // It drives frame::compose, not a copy of it. A parallel software compositor
 // that reimplements the layer order passes happily while the shipped renderer is
 // broken, because the two are different programs. So the only thing this file
-// builds is the inputs: a grid, a camera, four textures. The ordering under test
+// builds is the inputs: a grid, a camera, a handful of textures. The ordering under test
 // is read out of src/render/frame.cpp.
 //
 // SDL_CreateSoftwareRenderer, because a GPU frame is not reproducible. Drivers
@@ -32,9 +32,11 @@
 #include <SDL.h>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 #include "game/camera.h"
 #include "physics/grid.h"
+#include "render/depth_rig.h"
 #include "render/frame.h"
 #include "game/display.h"
 #include "render/light.h"
@@ -48,10 +50,6 @@ namespace {
 // modest surface. padded_h is deliberately not a multiple of LightField::BLOCK,
 // so the light texture's block extent genuinely overhangs the viewport, which is
 // the alignment case the light pass's destination rect exists for.
-//
-// The bottom band the fill check reads: the shortened plane in that check cannot
-// reach it at any camera position, so anything drawn below came from the fill.
-constexpr int BAND_TOP = 200;
 constexpr int PADDED_W = 120;
 constexpr int PADDED_H = 68;
 
@@ -89,20 +87,6 @@ uint64_t hash_surface(SDL_Surface* surf) {
 // ratio between two frames, and the surface is BGRA in memory.
 double luminance_at(const uint8_t* px) {
     return 0.2126 * px[2] + 0.7152 * px[1] + 0.0722 * px[0];
-}
-
-// Rows [y0, y1) of the surface, hashed the way hash_surface does the whole of
-// it. The fill check needs to ask about one band rather than the frame.
-uint64_t hash_band(SDL_Surface* surf, int y0, int y1) {
-    uint64_t h = 1469598103934665603ull;
-    for (int y = y0; y < y1; ++y) {
-        const uint8_t* row = static_cast<const uint8_t*>(surf->pixels) + y * surf->pitch;
-        for (int x = 0; x < surf->w * 4; ++x) {
-            h ^= row[x];
-            h *= 1099511628211ull;
-        }
-    }
-    return h;
 }
 
 double mean_luminance(SDL_Surface* surf) {
@@ -151,21 +135,41 @@ uint32_t sky_pattern(int x, int y) {
 // parallaxed mountain layer actually has, so a wrong y offset shows up in the
 // hash rather than being hidden by a full-rect fill.
 uint32_t mountain_pattern(int x, int y) {
-    const int ridge = 30 + ((x * 7) % 23);
+    const int ridge = 60 + ((x * 7) % 23);
     return y < ridge ? 0x00000000u : 0xFF2B2438u;
 }
 
-// The ground plane tile. Arted rather than left null: a null texture draws
-// nothing, so a checksum over a configuration with one covers that layer's
-// absence and says nothing about its position, its order or its strip
-// arithmetic. The pattern is a vertical ramp with sparse horizontal dashes --
-// the same two things the real tile carries, because both are what the strip
-// loop transforms. A flat fill would hash identically with every strip's source
-// rect wrong.
-uint32_t ground_pattern(int x, int y) {
-    const uint32_t ramp = static_cast<uint32_t>(0x18 + y / 12);
+// The backdrop's art rows. The fixture's backdrop is world-sized, 400x200, the
+// way a shipped set is, and its rig puts the horizon and the contact row where
+// the fixture's terrain is.
+constexpr int HORIZON = 110;
+constexpr int CONTACT = 150;
+
+// The ground plane: transparent above the horizon and solid from it down, as
+// backdrop_set_test requires of a shipped plane. A vertical ramp with sparse
+// marks, because both are what the per-row loop transforms -- a flat fill would
+// hash identically with every row's source wrong.
+uint32_t plane_pattern(int x, int y) {
+    if (y < HORIZON) return 0x00000000u;
+    const uint32_t ramp = static_cast<uint32_t>(0x18 + (y - HORIZON) / 3);
     if ((x * 5 + y * 13) % 97 < 6) return 0xFF3C3452u;  // a mark
     return 0xFF000000u | (ramp << 16) | ((ramp - 4) << 8) | (ramp + 26);
+}
+
+// Sparse reeds, for the foreground pass. Painted higher than reeds would stand
+// because the fixture's camera is well above the standing anchor, and at 1.3 the
+// foreground rises out of the window fastest of all.
+uint32_t reeds_pattern(int x, int y) {
+    return (x * 7) % 31 < 3 && y > 70 + (x % 11) && y < 110 ? 0xFF1E2A18u : 0x00000000u;
+}
+
+// A painted surface for the banded fixture: transparent sky, then three runs
+// of rows with marks, so a band at the wrong factor or the wrong rows moves the
+// hash.
+uint32_t banded_pattern(int x, int y) {
+    if (y < 90) return 0x00000000u;
+    if ((x * 3 + y * 7) % 41 < 4) return 0xFF52443Cu;
+    return 0xFF000000u | (static_cast<uint32_t>(0x30 + y / 4) << 8) | 0x2Au;
 }
 
 uint32_t prop_pattern(int x, int y) {
@@ -249,19 +253,42 @@ int main() {
     p.camera = &camera;
     p.padded_w = PADDED_W;
     p.padded_h = PADDED_H;
-    p.backdrop.sky = pattern_texture(renderer, 700, 400, sky_pattern);
-    p.backdrop.sky_w = 700;
-    p.backdrop.sky_h = 400;
-    p.backdrop.mountains = pattern_texture(renderer, 700, 300, mountain_pattern);
-    p.backdrop.mountain_w = 700;
-    p.backdrop.mountain_h = 300;
-    // The plane's tile, at the size the generator actually writes. Not scaled down
-    // to match the small fixture window, because the tile size is what decides how
-    // many wrapping copies a window needs, and a tile shrunk to fit would exercise a
-    // copy count the game never issues.
-    p.backdrop.ground = pattern_texture(renderer, 256, 256, ground_pattern);
-    p.backdrop.ground_w = 256;
-    p.backdrop.ground_h = 256;
+    // The backdrop: one of each kind of layer the frame draws, as a rig set
+    // anchored at the standing camera -- an opaque sky at a typed factor, a
+    // silhouette standing on the plane, the line-scrolled plane with rippled rows,
+    // and a foreground above 1.0. time_s is 0, so the ripple is the still frame's.
+    // The banded, corner-anchored model gets its own checksum further down.
+    const depth_rig::Rig rig{HORIZON, CONTACT, 0.75f};
+    const int bd_w = WORLD_W * camera.scale(), bd_h = WORLD_H * camera.scale();
+    auto layer = [&](uint32_t (*f)(int, int), float fx) {
+        frame::ParallaxLayer l;
+        l.texture = pattern_texture(renderer, WORLD_W, WORLD_H, f);
+        l.w = bd_w;
+        l.h = bd_h;
+        l.tex_h = WORLD_H;
+        l.parallax_x = fx;
+        l.parallax_y = depth_rig::vertical_factor(rig, fx);
+        return l;
+    };
+    p.backdrop.rig = rig;
+    p.backdrop.ripple_amplitude = 0.6f;
+    p.backdrop.anchor_x = 0.5f * static_cast<float>(WORLD_W - PADDED_W);
+    p.backdrop.anchor_y = depth_rig::standing_anchor_y(rig, 20, PADDED_H,
+                                                       Camera::VERTICAL_ANCHOR, WORLD_H);
+    p.backdrop.layers.push_back(layer(sky_pattern, 0.04f));
+    p.backdrop.layers.push_back(layer(mountain_pattern, depth_rig::factor_at(rig, 116.0f)));
+    {
+        frame::ParallaxLayer plane = layer(plane_pattern, 0.0f);
+        plane.line_scroll = true;
+        plane.ripple_row0 = HORIZON + 4;
+        plane.ripple_row1 = HORIZON + 20;
+        p.backdrop.layers.push_back(plane);
+    }
+    {
+        frame::ParallaxLayer reeds = layer(reeds_pattern, 1.3f);
+        reeds.is_foreground = true;
+        p.backdrop.layers.push_back(reeds);
+    }
     p.cells = cells;
 
     SDL_Texture* prop_tex = pattern_texture(renderer, 24, 40, prop_pattern);
@@ -291,7 +318,9 @@ int main() {
     p.light_texture = light_tex;
 
     check("every fixture texture created",
-          p.backdrop.sky && p.backdrop.mountains && p.backdrop.ground && prop_tex && p.player_tex && light_tex,
+          p.backdrop.layers[0].texture && p.backdrop.layers[1].texture &&
+              p.backdrop.layers[2].texture && p.backdrop.layers[3].texture && prop_tex &&
+              p.player_tex && light_tex,
           SDL_GetError());
 
     // The layer table's shape, asserted here rather than only in the compiler.
@@ -349,78 +378,73 @@ int main() {
     // covers the layer's absence rather than its position. Where the separation is
     // not available, say so and let the headless suites -- backdrop_test's rounding
     // properties, camera_test's framing in screen terms -- carry it instead.
-    constexpr uint64_t GOLDEN = 0x26881784d76b594full;
+    constexpr uint64_t GOLDEN = 0xf23f87b761b69d53ull;
     char detail[128];
     std::snprintf(detail, sizeof(detail), "got 0x%016llx, expected 0x%016llx",
                   static_cast<unsigned long long>(first),
                   static_cast<unsigned long long>(GOLDEN));
     check("the composed frame matches the golden checksum", first == GOLDEN, detail);
 
-    // The ground plane has to be in the frame for the number above to say anything
-    // about it. A checksum over a layer with a null texture covers the layer's
-    // absence, and the same hazard is reachable by geometry: a horizon derived from
-    // an absolute row of the shipped mountains BMP puts the entire plane below this
-    // fixture's shorter synthetic one, and the frame composes cleanly with every
-    // check passing.
+    // Every backdrop layer has to be in the frame for the number above to say
+    // anything about it. A checksum over a layer with a null texture covers the
+    // layer's absence, and the same hazard is reachable by geometry: a plane whose
+    // rows land below the window, or a foreground drawn off-screen, composes
+    // cleanly with every check passing.
     //
-    // So the layer's presence is asserted rather than assumed, by the only
+    // So each layer's presence is asserted rather than assumed, by the only
     // instrument that can: compose again without it and require a different frame.
     {
-        SDL_Texture* real_ground = p.backdrop.ground;
-        p.backdrop.ground = nullptr;
+        const char* names[] = {"the sky", "the standing silhouette", "the plane",
+                               "the foreground"};
+        for (size_t i = 0; i < p.backdrop.layers.size(); ++i) {
+            SDL_Texture* real = p.backdrop.layers[i].texture;
+            p.backdrop.layers[i].texture = nullptr;
+            frame::compose(renderer, p);
+            const uint64_t without = hash_surface(surface);
+            p.backdrop.layers[i].texture = real;
+            check((std::string(names[i]) + " actually reaches the fixture's window").c_str(),
+                  without != first,
+                  "removing the layer's texture changed no pixel, so the golden "
+                  "checksum is not covering it");
+        }
         frame::compose(renderer, p);
-        const uint64_t without = hash_surface(surface);
-        p.backdrop.ground = real_ground;
-        frame::compose(renderer, p);
-        check("the ground plane actually reaches the fixture's window",
-              without != first,
-              "removing the plane's texture changed no pixel, so the golden "
-              "checksum is not covering the layer at all");
+        check("restoring the backdrop restores the golden frame", hash_surface(surface) == first);
     }
 
-    // The fill below the plane's near edge, which the golden checksum cannot reach.
-    // Whether that region is drawn is a fact about draw_ground rather than about the
-    // arithmetic backdrop_test covers.
-    //
-    // It does not trigger in this fixture and does trigger on a large display: the
-    // plane's depth is the tile's height times PLANE_TEXEL_SCALE, so against this
-    // fixture's short window the near edge is always far below the bottom, while at
-    // a tall window the horizon derives from the mountains' art and does not grow
-    // with the window, leaving rows below the plane's near edge.
-    //
-    // Forced by shortening the declared tile height for one composition, which is
-    // the only input the near edge depends on. The texture is untouched, so the rows
-    // this exercises are real rows of real art.
-    //
-    // The comparison is over the bottom band only. Comparing the whole frame against
-    // one composed with no ground texture at all differs whether or not the fill is
-    // drawn, because the plane's own strips are in it -- that passes for the wrong
-    // reason and would go on passing with the fill deleted. Restricted to rows below
-    // where the plane can possibly reach, the two frames are identical unless
-    // something fills them.
+    // The other model: a corner-anchored, vertically locked set with a banded
+    // surface -- the bg1 family. Its own checksum, so a change to one model's
+    // placement cannot hide inside the other's number.
     {
-        const int real_h = p.backdrop.ground_h;
-        p.backdrop.ground_h = 32;  // a short plane in a taller window
+        frame::Backdrop rig_backdrop = p.backdrop;
+        frame::Backdrop corner;
+        corner.layers.push_back(rig_backdrop.layers[0]);  // the sky, at 0.04
+        corner.layers[0].parallax_y = 1.0f;
+        frame::ParallaxLayer ground = layer(banded_pattern, 0.0f);
+        ground.parallax_y = 1.0f;
+        ground.bands = {{0, 130, 0.30f}, {130, 160, 0.70f}, {160, WORLD_H, 1.00f}};
+        corner.layers.push_back(ground);
+        p.backdrop = corner;
         frame::compose(renderer, p);
-        const uint64_t with_fill = hash_band(surface, BAND_TOP, surface->h);
+        const uint64_t banded = hash_surface(surface);
 
-        SDL_Texture* real_ground = p.backdrop.ground;
-        p.backdrop.ground = nullptr;
+        constexpr uint64_t CORNER_GOLDEN = 0x4de151aa6a5cb6c8ull;
+        char cd[128];
+        std::snprintf(cd, sizeof(cd), "got 0x%016llx, expected 0x%016llx",
+                      static_cast<unsigned long long>(banded),
+                      static_cast<unsigned long long>(CORNER_GOLDEN));
+        check("the corner-anchored banded frame matches its golden checksum",
+              banded == CORNER_GOLDEN, cd);
+
+        SDL_Texture* real = p.backdrop.layers[1].texture;
+        p.backdrop.layers[1].texture = nullptr;
         frame::compose(renderer, p);
-        const uint64_t bare = hash_band(surface, BAND_TOP, surface->h);
-
-        p.backdrop.ground = real_ground;
-        p.backdrop.ground_h = real_h;
+        check("the banded surface actually reaches the fixture's window",
+              hash_surface(surface) != banded);
+        SDL_DestroyTexture(real);
+        p.backdrop = rig_backdrop;
         frame::compose(renderer, p);
-
-        check("the region below the plane's near edge is filled",
-              with_fill != bare,
-              "the rows below a short plane's near edge are identical with and "
-              "without the ground texture, so nothing is drawn there");
-        check("restoring the fixture's plane restores the golden frame",
-              hash_surface(surface) == first,
-              "the fill check left the fixture changed, so every number after "
-              "it is measuring a different frame");
+        check("restoring the rig backdrop restores the golden frame",
+              hash_surface(surface) == first);
     }
 
     // Composing the same inputs twice must give the same frame. Not redundant with
@@ -583,7 +607,7 @@ int main() {
     // not a defect, but it is why the two numbers must always be reasoned about in
     // order: a moved OVERLAY_GOLDEN beside an unmoved GOLDEN is the only combination
     // that says the UI changed.
-    constexpr uint64_t OVERLAY_GOLDEN = 0xd23935ff7e756900ull;
+    constexpr uint64_t OVERLAY_GOLDEN = 0xd465cdf478e9cbd4ull;
     char odetail[128];
     std::snprintf(odetail, sizeof(odetail), "got 0x%016llx, expected 0x%016llx",
                   static_cast<unsigned long long>(with_overlay),
@@ -599,7 +623,7 @@ int main() {
     // Each block, switched off on its own. The single checksum above says the four
     // blocks together produce a frame; it does not say all four are in it. A hotbar
     // drawn off-screen, a wash of zero alpha or a settings loop that never enters
-    // its body would all pass it. Same instrument as the ground plane's presence
+    // its body would all pass it. Same instrument as the backdrop layers' presence
     // check, applied four times.
     auto without = [&](const char* name, auto&& mutate) {
         overlay::Params q = op;
@@ -641,9 +665,7 @@ int main() {
 
     SDL_DestroyTexture(p.player_tex);
     SDL_DestroyTexture(prop_tex);
-    SDL_DestroyTexture(p.backdrop.ground);
-    SDL_DestroyTexture(p.backdrop.mountains);
-    SDL_DestroyTexture(p.backdrop.sky);
+    for (frame::ParallaxLayer& l : p.backdrop.layers) SDL_DestroyTexture(l.texture);
     SDL_DestroyTexture(light_tex);
     SDL_DestroyTexture(cells);
     SDL_DestroyRenderer(renderer);

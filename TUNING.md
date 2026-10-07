@@ -138,28 +138,9 @@ cooldown, governed by three constants:
 
 ---
 
-## Depth grading
-
-[src/render/frame.cpp](src/render/frame.cpp), [src/render/surface_plane.h](src/render/surface_plane.h)
-
-Grading multipliers shape the relative brightness of background, terrain, and light.
-
-| Knob | File | Now | What it does |
-|---|---|---|---|
-| `mountains` grade | [frame.cpp](src/render/frame.cpp) | 0.60 (153) | Darkness of distant mountain silhouette against the sky. |
-| `sky` grade | [frame.cpp](src/render/frame.cpp) | 1.00 | Identity. Serves as base reference for other layers. |
-| `cells` grade | [frame.cpp](src/render/frame.cpp) | 1.00 | Identity. Simulated matter renders with authored palette colors. |
-| `ground` grade | [frame.cpp](src/render/frame.cpp) | 0.53 (135) | Grade multiplier for receding ground plane. |
-| `PLANE_TEXEL_SCALE` | [backdrop_wrap.h](src/render/backdrop_wrap.h) | 2.5 | Screen pixels per row of ground tile, controlling apparent depth. |
-| `SKIN_CELLS` / `FULL_END` / `DEPTH_END` | [surface_plane.h](src/render/surface_plane.h) | 4 / 256 / 320 cells | Depth range for blending terrain surface into receding plane values. |
-| `PLANE_FADE_END_T` | [surface_plane.h](src/render/surface_plane.h) | 125 (= 1.25) | Normalized ground plane position where near-ground blend terminates. |
-| `GROUND_STRIPS` | [frame.cpp](src/render/frame.cpp) | 24 | Number of horizontal strips used to render receding plane parallax. |
-
----
-
 ## Perspective rig (bg_tarn)
 
-[src/render/rig_backdrop.h](src/render/rig_backdrop.h), [src/render/depth_rig.h](src/render/depth_rig.h)
+[assets/bg_tarn/backdrop.txt](assets/bg_tarn/backdrop.txt), [src/render/depth_rig.h](src/render/depth_rig.h)
 
 Layer parallax factors in a rig set are **not** knobs: each is derived from the
 row the layer stands on (`foot_row`). Move the horizon or contact row and every
@@ -167,12 +148,12 @@ factor moves together. The knobs are the camera and the motion.
 
 | Knob | File | Now | What it does |
 |---|---|---|---|
-| `Rig::horizon_row` | [rig_backdrop.h](src/render/rig_backdrop.h) | 200 | Art row where the ground plane vanishes (factor 0). Must match `HORIZON` in `tools/generate_bg_tarn.py`. |
-| `Rig::contact_row` | [rig_backdrop.h](src/render/rig_backdrop.h) | 264 | Art row where the plane meets the world (factor 1); the terrain surface. |
-| `Rig::vertical_strength` | [rig_backdrop.h](src/render/rig_backdrop.h) | 0.75 | Share of honest vertical parallax. 1.0 = true camera (plane magnifies 3.6x at the ceiling, 1080p); 0 = bg1's locked vertical. |
-| `ripple_amplitude` | [rig_backdrop.h](src/render/rig_backdrop.h) | 0.6 cells | Sideways shimmer of lake rows and the sun glint. Keep under 1 cell or rows visibly tear. |
-| clouds `drift` | [rig_backdrop.h](src/render/rig_backdrop.h) | -0.6 cells/s | Cloud drift with no camera motion. |
-| reeds `factor` | [rig_backdrop.h](src/render/rig_backdrop.h) | 1.30 | Foreground speed. Above 1.00 is legal only because rig layers wrap. |
+| `rig` horizon | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 200 | Art row where the ground plane vanishes (factor 0). Must match `HORIZON` in `tools/generate_bg_tarn.py`. |
+| `rig` contact | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 264 | Art row where the plane meets the world (factor 1); the terrain surface. |
+| `rig` vertical strength | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 0.75 | Share of honest vertical parallax. 1.0 = true camera (plane magnifies 3.6x at the ceiling, 1080p); 0 = bg1's locked vertical. |
+| `ripple` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 0.6 cells | Sideways shimmer of lake rows and the sun glint. Keep under 1 cell or rows visibly tear. |
+| clouds `drift` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | -0.6 cells/s | Cloud drift with no camera motion. |
+| reeds `factor` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 1.30 | Foreground speed. Above 1.00 is legal only because rig layers wrap. |
 
 ---
 
@@ -298,7 +279,7 @@ Record adjustments to tuning parameters and their rationale here.
 - **2026-10-07, perspective rig (`bg_tarn`).** Added `vertical_strength` 0.75,
   `ripple_amplitude` 0.6, cloud `drift` -0.6, reeds 1.30. 0.75 because at 0.5 the
   valley drops out of a ceiling-height window and at 1.0 the plane smears at 3.6x;
-  see the comment above `TARN_LAYERS`. Existing bg1-family sets are unchanged.
+  see the header of `assets/bg_tarn/backdrop.txt`. Existing bg1-family sets are unchanged.
 - **Troll added** (first-pass values). The slam's reach went 16 -> 20 and its
   crush radius 4 -> 5 after the preview showed a 4-radius crater sitting under
   the club's own head where nobody could see it. Wading was added after a troll
@@ -314,3 +295,12 @@ Record adjustments to tuning parameters and their rationale here.
   feature branch was re-pointing line numbers it had not meant to touch, and the
   three open at once conflicted on them. The `File` column now names the file,
   and `tuning_test` checks that the file still declares the constant.
+- **2026-10-07 -- one backdrop system; depth-grading rows removed.** Backdrops
+  are now `assets/<dir>/backdrop.txt` files drawn by one rig-based path
+  (`src/render/backdrop_set.h`). The generated sky/mountains/ground backdrop went
+  with it, and so did its knobs: the `mountains` (0.60) and `ground` (0.53)
+  grades, `PLANE_TEXEL_SCALE`, `GROUND_STRIPS` and the surface-plane pass's
+  `SKIN_CELLS` / `FULL_END` / `DEPTH_END` / `PLANE_FADE_END_T`. Its only user was
+  the `empty` debug scene, which now draws the clear colour. The `bg_tarn` rows
+  moved to its backdrop.txt with the same values; bg1-family factors and bands
+  are unchanged.

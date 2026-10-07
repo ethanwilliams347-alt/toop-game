@@ -56,9 +56,8 @@ def asset_path(*parts):
 
 
 def src_path(*parts):
-    """Path under the repo's src/. Used by the two generators that write a
-    header (`player_sheet.py`, `generate_backdrop.py`); those headers are
-    overwritten wholesale, so writing one to the wrong tree is real damage."""
+    """Path under the repo's src/. Used by the generator that writes a
+    header (`player_sheet.py`); that header is overwritten wholesale, so writing one to the wrong tree is real damage."""
     return os.path.join(ROOT, 'src', *parts)
 
 

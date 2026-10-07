@@ -1,6 +1,6 @@
 """Wraps an authored BMP into a PNG for preview.
 
-    python tools/bmp_to_png.py assets/backdrop_mountains.bmp out.png
+    python tools/bmp_to_png.py assets/bg1/bg1_07_mountains.bmp out.png
 """
 import sys
 

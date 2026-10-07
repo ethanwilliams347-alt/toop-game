@@ -59,6 +59,15 @@ time**, so editing a file by hand shows nothing until you rebuild (or run
 The location BMPs and the prop list are not sprites and are named in
 `assets/scenes.txt` rather than bound through the sprite manifest.
 
+A backdrop is a folder: its layer BMPs plus a `backdrop.txt` that lists them
+back to front and says how each one moves with the camera (a factor, the row it
+stands on, or bands of a painted surface). A scene picks one with
+`backdrop=<folder>` in `assets/scenes.txt`. The format is documented at the top
+of `src/render/backdrop_set.h`, and `backdrop_set_test` checks every shipped
+set against its art, so a new backdrop is an asset drop rather than a code
+change. What a scene puts in its world (player column, objective, enemies) is
+the same idea: a level file named with `level=<file>`.
+
 For the player character specifically, `tools/player_sheet.py` holds the frame
 grid and the `ANIMATIONS` table that says which slot means what, and emits both
 into `src/render/player_sprite.h`.
@@ -66,7 +75,7 @@ into `src/render/player_sprite.h`.
 ## Running the Tests
 
 The simulation has no SDL dependency, so it is tested headlessly. There are
-eighteen suites, one per concern — `grid_test` for the cellular automata,
+twenty-two suites, one per concern — `grid_test` for the cellular automata,
 `player_test` for the character physics, `tool_test` for digging,
 `collapse_test` for structural support, `run_test` for the three of them driven
 together through one `Run::step()`, `scene_test` for the level loader,
@@ -76,8 +85,10 @@ for the sprite manifest that decides which BMP each key loads, and `debug_test`
 for the debug tooling — the pause, the free camera's clamp and the cell
 inspector's text, none of which would be reachable by any test had they been
 written where the keys are bound. Three more cover the renderer's arithmetic:
-`backdrop_test` for the wrapping-layer maths, `camera_test` for the view's
-framing and its world-edge clamps, and `golden_frame_test`,
+`backdrop_test` for the wrapping-layer maths, `rig_test` for the perspective
+rig's arithmetic, `backdrop_set_test` for the backdrop file format and every
+shipped set held to its BMPs, `camera_test` for the view's framing and its
+world-edge clamps, and `golden_frame_test`,
 which composes a fixed scene through the real renderer and checksums it — **the
 one suite that links SDL**, though it still needs no display. It carries two
 checksums: one for the world the composition draws, and a
@@ -88,7 +99,10 @@ confused for each other. `boot_test` covers
 what the game decides before its first frame — where the objective and each prop
 are planted on the terrain actually under them, and which display mode to open
 at — and it runs the *shipped* scene, so the two lines a launch used to be
-checked by are assertions instead. `shell_test` covers the decisions the shell
+checked by are assertions instead. `level_test` covers the level file and
+`level::start`, the one function the game, the replay bench and the tests all
+build a world with, and starts every shipped scene the way the game does.
+`shell_test` covers the decisions the shell
 takes every frame and every keypress — how much simulated time a frame buys,
 what freezing the world means, where between two steps the picture falls, and
 the settings menu's navigation and selection. CTest runs all of them.

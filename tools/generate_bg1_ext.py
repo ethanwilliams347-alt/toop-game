@@ -64,7 +64,7 @@ drawing idiom -- a 1px rim on every mass's top edge, a 1px line along its foot,
 interior contour lines tracing the ridges behind it -- is reproduced without
 being described. And because a segment keeps its own rows, every hill's foot
 lands where the source put it plus the vertical shift. That matters beyond
-looks: bg1_backdrop.h bands the ground plane at the factors of whatever stands
+looks: assets/bg1/backdrop.txt bands the ground plane at the factors of whatever stands
 on each band, and nothing in this file is free to move those contacts.
 
 --- the mountains, which are the one layer not re-laid-out at all -------------
@@ -97,7 +97,7 @@ treatment: each boundary between two strata is re-generated as a random walk
 whose step distribution is the empirical one from the source's own boundary,
 clamped to the rows that boundary actually occupied.
 
-The clamp is not cosmetic. bg1_backdrop.h's band boundaries are placed inside
+The clamp is not cosmetic. The backdrop.txt band boundaries are placed inside
 runs of rows that are uniform in colour, because a band boundary is a
 discontinuity in scroll offset and is invisible only on flat paint. Clamping each
 generated contour to the range its source occupied keeps those runs flat at the
@@ -176,7 +176,7 @@ LAYERS = [
 ]
 
 # Back to front -- the numeric-descending filename order, the same order
-# convert_background_layers.DRAW_ORDER and bg1::EXT_LAYERS state.
+# convert_background_layers.DRAW_ORDER and assets/bg1_ext/backdrop.txt state.
 DRAW_ORDER = [name for name, _, _ in reversed(LAYERS)]
 
 MATERIAL_PATH = os.path.join("assets", "bg1_ext_material.bmp")
@@ -641,7 +641,7 @@ def flatten(grid, keyed):
 
 
 def check_flat_cuts(grid, cuts):
-    """The property `bg1_backdrop.h` places its band boundaries for, checked on
+    """The property the `bands=` in backdrop.txt places its band boundaries for, checked on
     the pixels this run just produced.
 
     A band boundary is a step in scroll offset, so it can only be invisible

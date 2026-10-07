@@ -1,0 +1,24 @@
+# bg1_ext: bg1's location at 688x288, generated from bg1's own pixels by
+# tools/generate_bg1_ext.py. The art argument is in that script's header.
+#
+# The factors are bg1's, unchanged, and that is the point: a factor is one over
+# a depth, and this is the same nine depths of the same place. backdrop_set_test
+# checks the two files against each other.
+#
+# The bands are bg1's moved down by 144 (the frame's growth): the generator
+# anchors bottom-anchored art to the bottom, so the contacts are at rows 217 and
+# 233, and the cuts at 226 and 244 fall on flat paint (222..230, 242..245).
+
+size    688 288
+anchor  corner
+
+# file                           how it moves                              flags
+layer   bg1_ext_09_sky.bmp           factor=0.04                               opaque
+layer   bg1_ext_08_ground.bmp        bands=0:226:0.30,226:244:0.70,244:288:1.00
+layer   bg1_ext_07_mountains.bmp     factor=0.12
+layer   bg1_ext_06_hills_far.bmp     factor=0.20
+layer   bg1_ext_05_hills_midfar.bmp  factor=0.30
+layer   bg1_ext_04_hills_mid.bmp     factor=0.42
+layer   bg1_ext_03_hills_midnear.bmp factor=0.55
+layer   bg1_ext_02_hills_near.bmp    factor=0.70
+layer   bg1_ext_01_fg_rocks.bmp      factor=1.00                               foreground

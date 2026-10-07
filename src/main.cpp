@@ -15,15 +15,11 @@
 #include "game/run.h"
 #include "game/scene_activation.h"
 #include "game/settings_menu.h"
-#include "render/backdrop_layers.h"
-#include "render/bg1_backdrop.h"
-#include "render/rig_backdrop.h"
-#include "render/backdrop_wrap.h"
+#include "render/backdrop_set.h"
 #include "render/frame.h"
 #include "render/light.h"
 #include "render/overlay.h"
 #include "render/player_anim.h"
-#include "render/surface_plane.h"
 #include "scene/bmp.h"
 #include "scene/level_files.h"
 #include "scene/props.h"
@@ -285,11 +281,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // The backdrop: two static parallax layers plus the ground plane, generated
-    // by tools/generate_backdrop.py, which sizes each layer to cover the
-    // camera's full pan range at its own factor.
-    //
-    // Which BMP each key resolves to is data -- see src/scene/sprites.h. The
+    // Which BMP each sprite key resolves to is data -- see src/scene/sprites.h. The
     // literals below are the fallback, so this file still says what ships; the
     // manifest is how a drawing dropped into assets/ gets in front of them
     // without a code change. A malformed manifest is reported and then ignored
@@ -302,115 +294,16 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "         every sprite falls back to its shipped file.\n");
     }
 
-    // The parallax factors are in the generated render/backdrop_layers.h, written
-    // by `python tools/generate_backdrop.py --header` from the same table that
-    // sizes these images. What is left here is the loading.
+    // The loaded scene's backdrop (render/backdrop_set.h). Filled by
+    // load_backdrop when a scene is activated; empty until then, and for a scene
+    // that names none.
     frame::Backdrop backdrop;
-    backdrop.sky = load_art_texture(
-        renderer, sprites.path_for("backdrop_sky", "backdrop_sky.bmp").c_str(), false);
-    backdrop.mountains = load_art_texture(
-        renderer, sprites.path_for("backdrop_mountains", "backdrop_mountains.bmp").c_str(), true);
-    // The ground plane loads with no colour key: it is an opaque surface rather
-    // than a silhouette, so there is nothing in it to key out and a key would
-    // punch holes in the plane wherever the ramp landed on the key colour.
-    backdrop.ground = load_art_texture(
-        renderer, sprites.path_for("backdrop_ground", "backdrop_ground.bmp").c_str(), false);
+    backdrop_set::Anchor backdrop_anchor = backdrop_set::Anchor::Corner;
 
-    if (backdrop.sky)
-        SDL_QueryTexture(backdrop.sky, nullptr, nullptr, &backdrop.sky_w, &backdrop.sky_h);
-    if (backdrop.mountains)
-        SDL_QueryTexture(backdrop.mountains, nullptr, nullptr,
-                         &backdrop.mountain_w, &backdrop.mountain_h);
-    if (backdrop.ground)
-        SDL_QueryTexture(backdrop.ground, nullptr, nullptr,
-                         &backdrop.ground_w, &backdrop.ground_h);
-
-    // The seam at the pan limit, turned into a printed line. A backdrop layer has
-    // to be large enough to cover the window plus the camera's whole pan range at
-    // that layer's factor; if it is not, the layer runs out of image before the
-    // world runs out of ground and an edge of raw clear colour appears -- at the
-    // far edge of the map, which is the last place anybody looks.
-    //
-    // The generated header carries the size the generator would produce, so the
-    // disagreement is checkable, and this says so at startup rather than at the
-    // map's edge.
-    //
-    // A warning and not a failure: an undersized backdrop is a cosmetic defect at
-    // one extreme of the world, and refusing to launch over it would be worse
-    // than the seam. A line here means the art and the header disagree, which is
-    // either a stale BMP (rerun the generator) or a hand-edited header.
-    auto check_layer_size = [](const char* name, SDL_Texture* tex, int w, int h,
-                               const backdrop_layers::Layer& expected) {
-        if (!tex) return;
-        if (w < expected.width || h < expected.height) {
-            std::fprintf(stderr,
-                         "WARNING: backdrop %s is %dx%d but parallax %.2f/%.2f needs at "
-                         "least %dx%d - expect a seam at the pan limit.\n"
-                         "         rerun: python tools/generate_backdrop.py\n",
-                         name, w, h, expected.parallax_x, expected.parallax_y,
-                         expected.width, expected.height);
-        }
-    };
-    check_layer_size("sky", backdrop.sky, backdrop.sky_w, backdrop.sky_h,
-                     backdrop_layers::SKY);
-    check_layer_size("mountains", backdrop.mountains, backdrop.mountain_w,
-                     backdrop.mountain_h, backdrop_layers::MOUNTAINS);
-    // The ground plane is checked by the same lambda and the number means
-    // something different for it: a wrapping layer cannot have a seam at the pan
-    // limit. For a tile, undersized means the texture repeats sooner than the art
-    // was drawn for, and the vertical half is sharper still -- the tile's rows are
-    // the plane's depth, so a short tile is a plane missing part of its recession.
-    check_layer_size("ground", backdrop.ground, backdrop.ground_w,
-                     backdrop.ground_h, backdrop_layers::GROUND);
-
-    // The same tile again, on the CPU, reduced to one colour per row.
-    // render/surface_plane.cpp blends the near terrain toward the plane's own
-    // value at its own depth, and it cannot read an SDL_Texture, so the BMP is
-    // read a second time through bmp::read.
-    //
-    // Read again rather than kept from the texture load, which is a deliberate
-    // small waste: load_art_texture returns a texture and throws the pixels away,
-    // and threading a copy out of it would put a second output parameter on a
-    // function four other layers call and do not want.
-    //
-    // A failure here is not fatal: ground_rows stays empty, TileRows::count is 0,
-    // and the pass copies the window through unchanged. The warning is printed
-    // because a silently-disabled depth pass is the kind of thing that gets
-    // noticed six sessions later.
-    std::vector<uint8_t> ground_rows;
-    {
-        bmp::Image ground_img;
-        std::string err;
-        const std::string path = sprites.path_for("backdrop_ground", "backdrop_ground.bmp");
-        if (bmp::read(path.c_str(), ground_img, &err)) {
-            surface_plane::average_rows(ground_img.pixels.data(), ground_img.width,
-                                        ground_img.height, ground_rows);
-        } else {
-            std::printf("WARNING: ground plane rows unavailable (%s) - "
-                        "the near terrain will not take the plane's value\n", err.c_str());
-        }
-    }
-
-    // The `ground` row's grade, read out of frame.cpp's table rather than written
-    // here a second time. The blend has to match the plane as composited, so it
-    // needs this number; the table stays the one place it is decided.
-    frame::Grade ground_grade{};
-    for (int i = 0; i < frame::LAYER_COUNT; ++i) {
-        if (std::string(frame::LAYERS[i].name) == "ground") {
-            ground_grade = frame::LAYERS[i].grade;
-            break;
-        }
-    }
-
-    // Scratch for the surface-plane pass. Resized at the upload site rather than
-    // sized here, because `mode` is not fixed for the run -- the settings menu
-    // switches resolutions and apply_mode rebuilds every target when it does. A
-    // buffer sized once at boot survives every test and fails on the one machine
-    // whose owner opens the menu.
+    // Scratch for the cell upload when the window reaches past the grid. Resized
+    // at the upload site rather than here, because the display mode can change
+    // under a running scene.
     std::vector<uint32_t> cell_window;
-    std::vector<int> plane_src_row_for;
-    std::vector<int> plane_row_scale;
-    std::vector<int> cell_depth;
 
     // Props: sprites from tools/generate_props.py, positioned by a prop list
     // rather than by a list in this file, so a second scene can have props at
@@ -702,112 +595,54 @@ int main(int argc, char* argv[]) {
     // Declared above the scene lambdas rather than below them, and that is a
     // requirement rather than a tidy-up: they capture by reference, so
     // activate_scene can only tell the camera a scene's scale, and
-    // load_bg1_layers can only read it back, if the camera is already in scope
+    // load_backdrop can only read it back, if the camera is already in scope
     // where those lambdas are written.
 
-    // --- the authored backdrop stack --------------------------
+    // --- the backdrop ------------------------------------------------------
     //
     // frame::Backdrop::layers is owned here and by nothing else, so every path that
     // changes scene goes through these two. The clear destroys before it empties,
     // which is the whole reason it is a function: cycling scenes with a
-    // layers.clear() that only dropped the pointers would leak nine textures a
+    // layers.clear() that only dropped the pointers would leak a set's textures a
     // cycle with nothing on screen ever saying so.
-    auto clear_custom_layers = [&]() {
+    auto clear_backdrop = [&]() {
         for (frame::ParallaxLayer& l : backdrop.layers)
             if (l.texture) SDL_DestroyTexture(l.texture);
-        backdrop.layers.clear();
-        backdrop.rig_on = false;
+        backdrop = frame::Backdrop{};
+        backdrop_anchor = backdrop_set::Anchor::Corner;
     };
 
-    // An authored backdrop set: nine images at the set's own native size, listed
-    // back to front. bg1::SETS is where a scene name picks one.
+    // The scene's backdrop set, read from assets/<dir>/backdrop.txt -- the one
+    // loader for every set. Everything a layer is, and the argument for each
+    // number, is in that file and in render/backdrop_set.h; what is left here is
+    // turning records into textures.
     //
-    // The factors are the art's own, from art_src/Background_1/README.md, and they
-    // are carried in bg1_backdrop.h rather than in backdrop_layers.h because that
-    // header is generated from the tool that derives factors and sizes together.
-    // This art arrived with its factors already chosen by whoever painted it;
-    // there is nothing to derive, so there is nothing to generate. An extended set
-    // keeps those same factors -- it is the same nine depths of the same place, so
-    // a different ladder would make it a different landscape in the same palette.
-    //
-    // Everything else about this table is argued at the table itself.
-    auto load_bg1_layers = [&](const bg1::Set& set) {
-        // The stack, its nine parallax factors and the argument for every one of
-        // them are the set's rows in render/bg1_backdrop.h. Nothing about them is
-        // restated here; what is left below is the loading.
-        //
-        // Which stack is a parameter rather than a name compared in here: two
-        // authored sets read by one loader cannot drift apart, and a chain of
-        // `if (def.name == ...)` is how one world's images end up over another
-        // world's terrain while compiling perfectly. bg1::find is the only place
-        // a scene name is matched to a stack.
-        const int NATIVE_W = set.native_w, NATIVE_H = set.native_h;
-
-        // One art pixel is one world cell, so the on-screen size of a layer is
-        // the world's size in screen pixels and nothing else -- no fitting, no
-        // deriving from the window. Computing a scale here from the window height
-        // is sizing art to a window rather than to a world; the window's job is
-        // to be a view into this, which is what the scene's `scale` column buys.
-        //
-        // Read off the camera rather than off def.scale so that a scene whose
-        // requested scale could not be applied draws its backdrop at the scale
-        // actually in use, instead of at the one it asked for and did not get.
-        const int scale = camera.scale();
-        const int layer_w = NATIVE_W * scale;
-        const int layer_h = NATIVE_H * scale;
-
-        clear_custom_layers();
-        backdrop.layers.reserve(static_cast<size_t>(set.layer_count));
-        int missing = 0;
-        for (int i = 0; i < set.layer_count; ++i) {
-            const bg1::Layer& sp = set.layers[i];
-            const std::string path = std::string(set.dir) + sp.file;
-            SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
-            if (!tex) { ++missing; continue; }
-            frame::ParallaxLayer l;
-            l.texture = tex;
-            l.w = layer_w;
-            l.h = layer_h;
-            l.parallax_x = sp.parallax_x;
-            // One shared plane, and there is no per-layer vertical factor to read --
-            // the argument is at bg1::Layer::parallax_x.
-            l.parallax_y = 1.0f;
-            l.tex_h = NATIVE_H;
-            if (sp.banded)
-                l.bands.assign(set.bands, set.bands + set.band_count);
-            l.grade = frame::Grade{};  // identity; the art carries its own depth
-            l.is_foreground = sp.is_foreground;
-            backdrop.layers.push_back(l);
+    // One art pixel is one world cell, so a layer's on-screen size is the art's
+    // native size times the scale and nothing else -- no fitting to the window.
+    // Read off the camera rather than off def.scale so that a scene whose requested
+    // scale could not be applied draws its backdrop at the scale actually in use.
+    auto load_backdrop = [&](const scene_list::SceneDef& def) {
+        clear_backdrop();
+        if (def.backdrop.empty()) {
+            std::printf("Backdrop: none\n");
+            return;
         }
-        // Printed for the same reason Scene: and Props: are -- a backdrop that
-        // half-loaded is otherwise a frame you have to recognise by eye, and
-        // layers.empty() is the switch that silently restores the generated
-        // three, so a total failure looks like the old backdrop working rather
-        // than like the new one missing.
-        std::printf("Backdrop: %d of %d %s layers at %dx (%dx%d px over a %dx%d world)\n",
-                    static_cast<int>(backdrop.layers.size()), set.layer_count,
-                    set.scene, scale, layer_w, layer_h, world_w, world_h);
-        if (missing)
-            std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun that "
-                                 "set's generator (tools/convert_background_layers.py "
-                                 "for bg1, tools/generate_bg1_ext.py for bg1_ext) and "
-                                 "rebuild.\n",
-                         missing, set.scene);
-    };
+        const std::string dir = "assets/" + def.backdrop + "/";
+        std::string error;
+        const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &error);
+        if (!error.empty()) {
+            // Reported and drawn without, the way every parser here degrades: the
+            // whole set is refused rather than drawn with the layer it could not read.
+            std::fprintf(stderr, "ERROR: %s\n         scene '%s' draws no backdrop.\n",
+                         error.c_str(), def.name.c_str());
+            return;
+        }
 
-    // A perspective-rig set (render/rig_backdrop.h). The loading is load_bg1_layers'
-    // -- native-size textures stretched by the scale, colour-keyed unless opaque --
-    // and what differs is only what is read off each row: the factor is derived
-    // from the layer's feet by the rig, the vertical factor from that, and the
-    // plane, ripple and drift flags are carried through for draw_rig_layer.
-    auto load_rig_layers = [&](const rig_backdrop::Set& set) {
         const int scale = camera.scale();
-        clear_custom_layers();
-        backdrop.layers.reserve(static_cast<size_t>(set.layer_count));
+        backdrop.layers.reserve(set.layers.size());
         int missing = 0;
-        for (int i = 0; i < set.layer_count; ++i) {
-            const rig_backdrop::Layer& sp = set.layers[i];
-            const std::string path = std::string(set.dir) + sp.file;
+        for (const backdrop_set::Layer& sp : set.layers) {
+            const std::string path = set.dir + sp.file;
             SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
             if (!tex) { ++missing; continue; }
             frame::ParallaxLayer l;
@@ -815,28 +650,35 @@ int main(int argc, char* argv[]) {
             l.w = set.native_w * scale;
             l.h = set.native_h * scale;
             l.tex_h = set.native_h;
-            l.parallax_x = rig_backdrop::factor_of(set, sp);
-            l.parallax_y = depth_rig::vertical_factor(set.rig, l.parallax_x);
-            l.line_scroll = sp.line_scroll;
+            l.parallax_x = backdrop_set::factor_of(set, sp);
+            l.parallax_y = backdrop_set::vertical_factor_of(set, sp);
+            l.bands = sp.bands;
+            l.line_scroll = sp.plane;
             l.on_plane = sp.on_plane;
             l.ripple_row0 = sp.ripple_row0;
             l.ripple_row1 = sp.ripple_row1;
             l.drift = sp.drift;
-            l.grade = frame::Grade{};
-            l.is_foreground = sp.is_foreground;
+            l.grade = frame::Grade{};  // identity; the art carries its own depth
+            l.is_foreground = sp.foreground;
             backdrop.layers.push_back(l);
         }
-        backdrop.rig_on = true;
         backdrop.rig = set.rig;
         backdrop.ripple_amplitude = set.ripple_amplitude;
-        std::printf("Backdrop: %d of %d %s layers at %dx, perspective rig "
-                    "(horizon row %d, contact row %d)\n",
-                    static_cast<int>(backdrop.layers.size()), set.layer_count, set.scene,
-                    scale, set.rig.horizon_row, set.rig.contact_row);
+        backdrop_anchor = set.anchor;
+
+        // Printed for the same reason Scene: and Props: are -- a backdrop that
+        // half-loaded is otherwise a frame you have to recognise by eye.
+        std::printf("Backdrop: %d of %d %s layers at %dx, anchored at the %s",
+                    static_cast<int>(backdrop.layers.size()),
+                    static_cast<int>(set.layers.size()), def.backdrop.c_str(), scale,
+                    set.anchor == backdrop_set::Anchor::Corner ? "corner" : "standing camera");
+        if (set.has_rig)
+            std::printf(", rig horizon %d contact %d", set.rig.horizon_row, set.rig.contact_row);
+        std::printf("\n");
         if (missing)
-            std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun "
-                                 "python tools/generate_bg_tarn.py and rebuild.\n",
-                         missing, set.scene);
+            std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun that "
+                                 "set's generator and rebuild.\n",
+                         missing, def.backdrop.c_str());
     };
 
     // Everything building a world is, in the order it has to happen, and the only
@@ -895,10 +737,7 @@ int main(int argc, char* argv[]) {
         // After the size and the scale, and before anything is stamped: the stack
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
-        if (const bg1::Set* set = bg1::find(def.name.c_str())) load_bg1_layers(*set);
-        else if (const rig_backdrop::Set* rs = rig_backdrop::find(def.name.c_str()))
-            load_rig_layers(*rs);
-        else clear_custom_layers();
+        load_backdrop(def);
 
         // The world itself: one call, shared with the replay bench and the tests,
         // so there is no second path that puts a world together. See game/level.h
@@ -1480,108 +1319,43 @@ int main(int argc, char* argv[]) {
         // the case this exists for is the opposite one, where the clamp is a no-op
         // and the rect is the full viewport every frame.
         //
-        // There is a viewport-sized copy between the grid and the texture, and it is
-        // not free. A zero-copy upload works by handing SDL the grid's own buffer
-        // with the grid's pitch, so SDL reads the right columns out of each row and
-        // skips the rest -- but surface_plane::apply has to change some of those
-        // pixels, because the near terrain has to get brighter than it is and a
-        // colour multiply can only darken. The zero-copy path is still reachable and
-        // still used: a window row that is not on the plane is a straight copy, and
-        // when the tile failed to load the whole pass is one.
+        // Straight from the grid's own buffer at the grid's pitch, so SDL reads the
+        // right columns out of each row and skips the rest -- no copy. Only when the
+        // window lies wholly inside the grid, though: a scene with the horizontal
+        // clamp dropped can put the window past its edge, and those cells have to
+        // be cleared rather than read from outside the buffer. That case copies.
+        //
+        // (A near-terrain tint pass used to sit here, compiled in and switched off,
+        // blending terrain toward the generated ground plane. It went with that
+        // backdrop; render/backdrop_set.h has the account.)
         const std::vector<uint32_t>& pixels = run.grid.get_pixels();
         const int visible_w = std::min(mode.padded_w(view_scale), run.grid.get_width());
         const int visible_h = std::min(mode.padded_h(view_scale), run.grid.get_height());
         const SDL_Rect visible_rect{0, 0, visible_w, visible_h};
-
-        // Which tile row each window row of cells is looking at, or -1 for the rows
-        // that are not on the plane at all.
-        //
-        // The near edge clamps to the tile's last row rather than falling off to -1,
-        // which is the same choice frame.cpp makes in its fill below the plane's near
-        // edge: what is past the near end of a receding plane is ground nearer still.
-        // Dropping to -1 here would put a horizontal line across the terrain at
-        // whatever row the plane's near edge happened to reach.
-        const backdrop_wrap::Plane plane = backdrop_wrap::plane_geometry(
-            frame::ground_horizon_y(camera, backdrop.mountain_h),
-            backdrop.ground_h,
-            backdrop_layers::GROUND.parallax_x,
-            backdrop_layers::GROUND_NEAR_X);
-        const float band = plane.bottom_y - plane.horizon_y;
-        plane_src_row_for.assign(static_cast<size_t>(visible_h), -1);
-        plane_row_scale.assign(static_cast<size_t>(visible_h), 0);
-
-        // The near-ground pass, currently off. Leaving every row at -1 is the pass's
-        // own "no tile" path, so apply degrades to a straight copy -- no second code
-        // path, and turning it back on is this one constant.
-        //
-        // Why it is off: at full strength the pass does not tint a cell, it replaces
-        // it. weight_at_depth returns 255 for every cell a few rows below the air in
-        // its own column, and blend(from, to, 255) is `to` exactly -- so on any row
-        // below the horizon, all matter under a thin top crust is painted the ground
-        // tile's row colour, which is the same colour for every column in that row.
-        // Material placed or fallen below the horizon is then invisible, because it is
-        // being drawn in the backdrop's own colour. On a scene whose subject is
-        // scenery that reads as recession; on one whose subject is the material the
-        // player puts down, it erases the subject.
-        //
-        // The finding that has to survive into whatever replaces it: the ramp needs a
-        // floor that keeps material identity, or a bound that separates world terrain
-        // from placed material, before full strength can mean 255 again.
-        constexpr bool PLANE_ON_NEAR_TERRAIN = false;
-
-        for (int wy = 0; PLANE_ON_NEAR_TERRAIN && wy < visible_h; ++wy) {
-            // The centre of the cell row, in screen pixels, including the camera's
-            // sub-cell remainder -- the same shift draw_cells applies to the texture
-            // this feeds. Sampling the top edge instead would bias every row half a
-            // cell toward the horizon.
-            const float screen_y =
-                (static_cast<float>(wy) + 0.5f - camera.frac_y()) * static_cast<float>(view_scale);
-            if (band <= 0.0f || screen_y < plane.horizon_y) continue;
-            const float t = (screen_y - plane.horizon_y) / band;
-            const int scale = surface_plane::row_scale_at(t);
-            if (scale <= 0) continue;
-            int row = backdrop.ground_h - 1;
-            if (t < 1.0f) {
-                row = static_cast<int>(backdrop_wrap::plane_src_at(plane, t) + 0.5f);
-                if (row < 0) row = 0;
-                if (row > backdrop.ground_h - 1) row = backdrop.ground_h - 1;
-            }
-            plane_src_row_for[static_cast<size_t>(wy)] = row;
-            plane_row_scale[static_cast<size_t>(wy)] = scale;
-        }
-
-        // With the pass off, every row is a straight copy, and a straight copy is what
-        // SDL_UpdateTexture already does given the grid's own pitch. So the upload
-        // reads the grid directly and skips both apply's copy and its depth_map, which
-        // runs over the whole window unconditionally and whose output only the
-        // (unreachable) blend path reads. Only when the window lies wholly inside the
-        // grid, though: apply is what clears rows past the grid's edge, and a scene
-        // with the horizontal clamp dropped can put the window there. Turning the pass
-        // back on is still the one constant above.
         const int grid_w = run.grid.get_width();
+        const int grid_h = run.grid.get_height();
         const int view_x = camera.view_x(), view_y = camera.view_y();
         const bool window_inside_grid = view_x >= 0 && view_y >= 0 &&
                                         view_x + visible_w <= grid_w &&
-                                        view_y + visible_h <= run.grid.get_height();
-        if (!PLANE_ON_NEAR_TERRAIN && window_inside_grid) {
+                                        view_y + visible_h <= grid_h;
+        if (window_inside_grid) {
             SDL_UpdateTexture(targets.cells, &visible_rect,
                               pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
                               grid_w * static_cast<int>(sizeof(uint32_t)));
         } else {
             const size_t window_cells =
                 static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
-            if (cell_window.size() != window_cells) cell_window.assign(window_cells, 0u);
-            if (cell_depth.size() != window_cells) cell_depth.assign(window_cells, -1);
-
-            const surface_plane::View view{view_x, view_y, visible_w, visible_h};
-            const surface_plane::TileRows tile_rows{
-                ground_rows.empty() ? nullptr : ground_rows.data(),
-                static_cast<int>(ground_rows.size() / 3)
-            };
-            surface_plane::apply(pixels.data(), grid_w, run.grid.get_height(), view,
-                                 tile_rows, plane_src_row_for.data(), plane_row_scale.data(),
-                                 ground_grade.r, ground_grade.g, ground_grade.b,
-                                 cell_depth.data(), cell_window.data());
+            cell_window.assign(window_cells, 0u);
+            for (int wy = 0; wy < visible_h; ++wy) {
+                const int gy = view_y + wy;
+                if (gy < 0 || gy >= grid_h) continue;
+                for (int wx = 0; wx < visible_w; ++wx) {
+                    const int gx = view_x + wx;
+                    if (gx < 0 || gx >= grid_w) continue;
+                    cell_window[static_cast<size_t>(wy) * visible_w + wx] =
+                        pixels[static_cast<size_t>(gy) * grid_w + gx];
+                }
+            }
             SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
                               visible_w * static_cast<int>(sizeof(uint32_t)));
         }
@@ -1731,10 +1505,13 @@ int main(int argc, char* argv[]) {
         // at load, because it depends on the viewport, which the display mode can
         // change under a loaded scene. Horizontally the world's centre -- every rig
         // layer wraps, so this only chooses which columns line up where.
-        if (fp.backdrop.rig_on) {
-            fp.backdrop.rig_anchor_x =
+        //
+        // A corner-anchored set (the bg1 family) is the painting at the world's
+        // top-left instead, which is an anchor of (0, 0).
+        if (backdrop_anchor == backdrop_set::Anchor::Standing) {
+            fp.backdrop.anchor_x =
                 0.5f * static_cast<float>(std::max(0, world_w - fp.padded_w));
-            fp.backdrop.rig_anchor_y = depth_rig::standing_anchor_y(
+            fp.backdrop.anchor_y = depth_rig::standing_anchor_y(
                 fp.backdrop.rig, Player::HEIGHT, fp.padded_h, Camera::VERTICAL_ANCHOR, world_h);
         }
         // Wall clock, for drifting clouds and rippling water. Render-only; see
@@ -1889,10 +1666,7 @@ int main(int argc, char* argv[]) {
     // `props` holding several borrowed copies of each is not a double free.
     for (auto& entry : prop_textures)
         if (entry.second) SDL_DestroyTexture(entry.second);
-    clear_custom_layers();
-    if (backdrop.ground) SDL_DestroyTexture(backdrop.ground);
-    if (backdrop.mountains) SDL_DestroyTexture(backdrop.mountains);
-    if (backdrop.sky) SDL_DestroyTexture(backdrop.sky);
+    clear_backdrop();
     SDL_DestroyTexture(targets.light_texture);
     SDL_DestroyTexture(targets.cells);
     SDL_DestroyRenderer(renderer);

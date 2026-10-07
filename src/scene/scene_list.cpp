@@ -156,8 +156,18 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                         return fail("scene '" + def.name + "' names `level=` twice");
                     if (!file_field(value, def.level) || def.level.empty())
                         return fail("'" + value + "' is not a usable level file name");
+                } else if (key == "backdrop") {
+                    // A directory under assets/ holding backdrop.txt and its
+                    // layers (render/backdrop_set.h). A bare name, so a scene
+                    // cannot point outside assets/.
+                    if (!def.backdrop.empty())
+                        return fail("scene '" + def.name + "' names `backdrop=` twice");
+                    if (value.empty() || !scene_name_ok(value))
+                        return fail("'" + value + "' is not a usable backdrop directory "
+                                    "(a bare name under assets/)");
+                    def.backdrop = value;
                 } else {
-                    return fail("'" + key + "=' is not a scene field (level)");
+                    return fail("'" + key + "=' is not a scene field (level, backdrop)");
                 }
             }
             for (const std::string& p : positional) rest += p + " ";

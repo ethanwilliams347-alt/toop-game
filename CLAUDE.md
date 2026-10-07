@@ -15,14 +15,15 @@ task seems to require breaking one, stop and say so rather than working around i
 - **`src/physics/` has no float.** Replay determinism needs every simulation number
   to be reproducible across compilers and `/fp` modes. Use `fx` (signed 16.16,
   `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
-- **Rendering never feeds simulation.** `light.cpp`, `player_anim.cpp`, and
-  `surface_plane.cpp` read the grid `const` and write only their own buffers.
+- **Rendering never feeds simulation.** `light.cpp` and `player_anim.cpp`
+  read the grid `const` and write only their own buffers.
   Includes run render → physics, never the reverse.
 - **The step loop allocates nothing.** `Run::step()` / `Grid::update()` reuse
   persistent scratch vectors cleared with `.clear()`. No local `std::vector`,
   `std::string`, or `std::function` in anything reachable from `Grid::update()`.
-- **Parsers reject the whole file, never a single line.** `load_prop_list`, `load_level`,
-  `load_scene_list`, and `load_sprite_manifest` return empty and set `*error` on
+- **Parsers reject the whole file, never a single line.** `load_prop_list`,
+  `load_level`, `backdrop_set::load`, `load_scene_list`, and
+  `load_sprite_manifest` return empty and set `*error` on
   the first malformed record; callers log to `stderr` and continue degraded. Don't
   add per-line skip-and-continue — a scene that renders wrong silently is the
   failure this design prevents (`src/scene/props.h` has the full argument).

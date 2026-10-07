@@ -20,6 +20,6 @@ Native resolution: 344 x 144 px (Exact 1:1 match to Cast n Chill native scale)
 
 To convert any layer into a 24-bit engine BMP with magenta transparency:
 powershell
-python tools/png_to_bmp.py art_src/Background_1/09_sky.png assets/backdrop_sky.bmp
-python tools/png_to_bmp.py art_src/Background_1/07_distant_mountains.png assets/backdrop_mountains.bmp
+python tools/png_to_bmp.py art_src/Background_1/09_sky.png assets/bg1/bg1_09_sky.bmp
+python tools/png_to_bmp.py art_src/Background_1/07_distant_mountains.png assets/bg1/bg1_07_mountains.bmp
 

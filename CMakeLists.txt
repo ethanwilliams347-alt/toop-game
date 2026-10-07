@@ -67,7 +67,7 @@ set(ENGINE_SOURCES
 set(RENDER_SOURCES
     src/render/light.cpp
     src/render/player_anim.cpp
-    src/render/surface_plane.cpp
+    src/render/backdrop_set.cpp
 )
 
 # Authored files turned into records: the prop list, the sprite manifest, the
@@ -230,25 +230,20 @@ if(BUILD_TESTING)
     target_include_directories(backdrop_test PRIVATE src tests)
     add_test(NAME backdrop_test COMMAND backdrop_test)
 
-    # The near-ground pass. Links one source file rather than RENDER_SOURCES,
-    # because the pass shares nothing with the light field or the sprite sheet.
-    #
-    # It exists because golden_frame_test structurally cannot see what it tests:
-    # the pass runs between the grid's pixel buffer and SDL_UpdateTexture, and
-    # the golden frame is composed from a texture that is already uploaded.
-    add_executable(surface_plane_test tests/test_surface_plane.cpp
-                   src/render/surface_plane.cpp)
-    target_include_directories(surface_plane_test PRIVATE src tests)
-    add_test(NAME surface_plane_test COMMAND surface_plane_test)
-
-    # The perspective rig: the pinhole arithmetic in render/depth_rig.h, and every
-    # rig set in render/rig_backdrop.h checked against its BMPs -- feet, plane,
-    # ripple ranges, seamless wrap. Header-only and SDL-free like backdrop_test;
-    # SCENE_PROP_SOURCES only for scene/bmp.cpp, and WORKING_DIRECTORY so the
-    # assets resolve.
-    add_executable(rig_test tests/test_depth_rig.cpp ${SCENE_PROP_SOURCES})
+    # The perspective rig: the pinhole arithmetic in render/depth_rig.h.
+    # Header-only and SDL-free like backdrop_test, so it links nothing.
+    add_executable(rig_test tests/test_depth_rig.cpp)
     target_include_directories(rig_test PRIVATE src tests)
-    add_test(NAME rig_test COMMAND rig_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME rig_test COMMAND rig_test)
+
+    # Backdrop sets: the backdrop.txt parser, and every set a shipped scene names
+    # checked against its BMPs -- sizes, order, feet, the plane, bands cut on flat
+    # paint, the wrap seam. The parser and the BMP reader only, no SDL; from the
+    # source tree so assets/ resolves.
+    add_executable(backdrop_set_test tests/test_backdrop_set.cpp src/render/backdrop_set.cpp
+                   ${SCENE_PROP_SOURCES})
+    target_include_directories(backdrop_set_test PRIVATE src tests)
+    add_test(NAME backdrop_set_test COMMAND backdrop_set_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The camera's view arithmetic: the framing, the world-edge clamps, and the
     # anchor the clamps have to survive. Links no sources -- camera.h is an
@@ -282,11 +277,6 @@ if(BUILD_TESTING)
     # SCENE_PROP_SOURCES is here, and WORKING_DIRECTORY with it, because half
     # the suite runs the shipped fixture: the scene BMPs, the prop list and the
     # prop sprites.
-    #
-    # It also carries the authored backdrop's band table check, which is neither
-    # a boot decision nor the fixture: it needs SCENE_PROP_SOURCES to read a BMP
-    # and WORKING_DIRECTORY to find it, and this is the only suite that already
-    # has both.
     add_executable(boot_test tests/test_boot.cpp ${ENGINE_SOURCES} ${SCENE_PROP_SOURCES})
     target_include_directories(boot_test PRIVATE src tests)
     add_test(NAME boot_test COMMAND boot_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -326,8 +316,8 @@ if(BUILD_TESTING)
     add_executable(preview_light tests/preview_light.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES})
     target_include_directories(preview_light PRIVATE src tests)
 
-    # The same idea for a perspective-rig backdrop (render/rig_backdrop.h): stills
-    # and a flight through the scene, composed by the real frame::compose. Links
+    # The same idea for a backdrop set (assets/<dir>/backdrop.txt): stills and a
+    # flight through the scene, composed by the real frame::compose. Links
     # SDL for the software renderer, as golden_frame_test does; asserts nothing.
     add_executable(preview_backdrop tests/preview_backdrop.cpp
                    ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES} ${FRAME_SOURCES})
@@ -359,21 +349,4 @@ if(BUILD_TESTING)
     # test over it would pin a prototype rather than check the product.
     add_executable(velocity_probe tests/velocity_probe.cpp ${ENGINE_SOURCES})
     target_include_directories(velocity_probe PRIVATE src tests)
-
-    # Where the receding ground plane's band lands on screen, and how much of it
-    # the fixture's own terrain covers up. Not an add_test() for the same reason
-    # the four above are not: it reports an input to a composition decision.
-    #
-    # The one probe that reaches into src/render/, and it does so only through
-    # the two headers that are arithmetic -- backdrop_layers.h and
-    # backdrop_wrap.h, both header-only and SDL-free by design. RENDER_SOURCES
-    # is deliberately not linked: the moment this needs a .cpp from the renderer
-    # it has stopped being a headless instrument, and that should be a link
-    # error rather than a habit. surface_plane.cpp is the exception, because the
-    # probe reports the band ladder before and after the near-ground pass and
-    # reimplementing the blend here would be a second copy of the thing being
-    # measured.
-    add_executable(plane_probe tests/plane_probe.cpp ${ENGINE_SOURCES}
-                   src/render/surface_plane.cpp)
-    target_include_directories(plane_probe PRIVATE src tests)
 endif()

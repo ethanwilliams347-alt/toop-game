@@ -11,14 +11,13 @@
 //
 // --- what the bg1 family could not do, and why ------------------------------
 //
-// render/bg1_backdrop.h is careful and correct about the problem it had: nine
-// painted layers that all draw pieces of ONE ground plane. Give them different
-// vertical factors and the plane shears apart under the objects standing on it,
-// so the vertical factor is locked at 1.00 and the vertical depth cue is given
-// up ("If the cue is wanted later it cannot come from this column; it needs art
-// whose layers do not share a plane"). The same shared plane forces the ground
-// into three bands, cut on flat paint, because one factor per row would shear
-// the painted shorelines.
+// The bg1 family (assets/bg1/backdrop.txt) is careful and correct about the
+// problem it had: nine painted layers that all draw pieces of ONE ground plane.
+// Give them different vertical factors and the plane shears apart under the
+// objects standing on it, so the vertical factor is locked at 1.00 and the
+// vertical depth cue is given up -- it needs art whose layers do not share a
+// plane. The same shared plane forces the ground into three bands, cut on flat
+// paint, because one factor per row would shear the painted shorelines.
 //
 // The rig gets both back by asking what camera the painting implies, and then
 // being that camera.
@@ -39,9 +38,9 @@
 //
 //   1. A thing standing on the plane at row r must scroll at factor(r), or its
 //      feet slide on the ground under it. So a layer's factor is not a taste, it
-//      is a fact about where the layer stands: rig_backdrop.h states a foot row
-//      per layer and the factor is computed. rig_test reads each BMP and checks
-//      the lowest painted row is that foot. Retune the camera (h, c) and every
+//      is a fact about where the layer stands: backdrop.txt states a foot row
+//      per layer and the factor is computed. backdrop_set_test reads each BMP
+//      and checks the lowest painted row is that foot. Retune the camera (h, c) and every
 //      factor in the stack moves together, consistently.
 //
 //      bg1 already obeys this, which is how the relation was checked: its
@@ -87,10 +86,11 @@
 // should be the composition.
 //
 // Coverage needs nothing from the anchor horizontally (every rig layer wraps)
-// and vertically is the same convex-combination argument draw_backdrop_layer
-// makes: for f in [0, 1] and both cam and anchor in [0, world - view], the art row
-// at the window's top edge is anchor + f * (cam - anchor), which is in that same
-// range, so a world-tall opaque layer always covers the window. rig_test pins it.
+// and vertically is a convex-combination argument: for f in [0, 1] and both
+// cam and anchor in [0, world - view], the art row at the window's top edge is
+// anchor + f * (cam - anchor), which is in that same range, so a world-tall
+// opaque layer always covers the window. rig_test pins it. (The corner anchor
+// is anchor = 0, and camera_test pins that case horizontally.)
 namespace depth_rig {
 
 struct Rig {

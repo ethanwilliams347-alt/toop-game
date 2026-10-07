@@ -16,8 +16,6 @@
 // SDL_QueryTexture gives the game.
 #include <cstdint>
 #include <cstdlib>
-#include <iterator>
-#include <set>
 #include <string>
 #include <vector>
 #include "game/boot.h"
@@ -25,7 +23,6 @@
 #include "game/run.h"
 #include "game/scene_activation.h"
 #include "physics/grid.h"
-#include "render/bg1_backdrop.h"
 #include "scene/bmp.h"
 #include "scene/props.h"
 #include "scene/scene.h"
@@ -312,309 +309,6 @@ void test_shipped_fixture() {
 }
 
 
-// --- the authored layer stacks, against the art -----------------------
-//
-// The launch line reports how many of a stack's layers loaded, and
-// layers.empty() silently restores the generated three-layer backdrop -- so a
-// total load failure looks like the old backdrop working rather than the new one
-// missing. That is a number a person has to notice is wrong.
-//
-// This demotes that check rather than replacing it, and the gap is worth
-// stating: this suite reads the BMPs through bmp::read, where the game loads
-// them through SDL_LoadBMP with a colour key. What is proved here is that every
-// file exists, is the size the stack is stated in, and is described consistently
-// by the table -- every failure mode that comes from a missing converter run, a
-// renamed asset or an edited table. What is not proved is that SDL will accept
-// them.
-//
-// The order properties are the other half, and reordering is the cheapest thing
-// to get wrong here because nothing about a wrong order fails to compile.
-//
-// Every check below runs on every authored set, which is the point of bg1::SETS
-// existing at all: the failure a second set invites is not a new kind, it is
-// these same properties silently true of the table that was tested and false of
-// the one that was copied.
-void test_bg1_layer_stack() {
-    check("bg1: there is at least one authored backdrop set", bg1::SET_COUNT > 0);
-
-    for (int s = 0; s < bg1::SET_COUNT; ++s) {
-        const bg1::Set& set = bg1::SETS[s];
-        const std::string tag = std::string(set.scene) + ": ";
-        const int n = set.layer_count;
-        check((tag + "the layer stack is not empty").c_str(), n > 0);
-        if (n <= 0) continue;
-
-        // Every file present, and every one the size the factors are stated in. One
-        // art pixel is one world cell, so a layer of a different size is not a
-        // scaling question -- it is a layer that no longer lines up with the plane
-        // the other eight are painting pieces of.
-        for (int i = 0; i < n; ++i) {
-            const bg1::Layer& l = set.layers[i];
-            const std::string path = std::string(set.dir) + l.file;
-            bmp::Image img;
-            std::string err;
-            const bool read_ok = bmp::read(path.c_str(), img, &err);
-            check((tag + "layer " + l.file + " reads").c_str(), read_ok, err);
-            if (!read_ok) continue;
-            check((tag + "layer " + l.file + " is the size the stack is stated in").c_str(),
-                  img.width == set.native_w && img.height == set.native_h,
-                  std::to_string(img.width) + "x" + std::to_string(img.height));
-        }
-
-        // Back to front, in strict numeric-descending filename order -- the claim
-        // the table's own header makes, and the one a reorder breaks silently.
-        //
-        // The index is read after the set's own name, which is the second check
-        // hiding in this one: a set's files are named for the set, so a row copied
-        // between two tables and left pointing at the other set's image fails here
-        // rather than at a launch nobody is watching.
-        const std::string prefix = std::string(set.scene) + "_";
-        bool descending = true;
-        int previous = 1 << 30;
-        for (int i = 0; i < n; ++i) {
-            const std::string f = set.layers[i].file;
-            if (f.compare(0, prefix.size(), prefix) != 0 || f.size() < prefix.size() + 2) {
-                descending = false;
-                break;
-            }
-            const int index = std::atoi(f.substr(prefix.size(), 2).c_str());
-            descending = descending && index > 0 && index < previous;
-            previous = index;
-        }
-        check((tag + "the layers are named for the set and listed back to front, "
-                     "in descending filename order").c_str(), descending);
-
-        // Exactly one banded layer, and it is the ground plane.
-        // test_bg1_ground_bands checks the band numbers against that BMP; if the
-        // flag were on a different row, it would be checking one image and banding
-        // another.
-        int banded = 0;
-        std::string banded_file;
-        for (int i = 0; i < n; ++i)
-            if (set.layers[i].banded) { ++banded; banded_file = set.layers[i].file; }
-        check((tag + "exactly one layer is banded, and it is the ground plane").c_str(),
-              banded == 1 && banded_file == prefix + "08_ground.bmp",
-              std::to_string(banded) + " banded, on '" + banded_file + "'");
-
-        // The sky is the only layer painted edge to edge, and it is the backmost.
-        // Anything opaque in front of it hides everything behind it.
-        int opaque = 0;
-        for (int i = 0; i < n; ++i) if (set.layers[i].opaque) ++opaque;
-        check((tag + "exactly one layer is opaque, and it is the backmost").c_str(),
-              opaque == 1 && set.layers[0].opaque, std::to_string(opaque) + " opaque");
-
-        // One foreground layer, and it is the frontmost row. A foreground layer
-        // with anything listed after it would be drawn over by a layer that is
-        // meant to be behind the player.
-        int foreground = 0;
-        for (int i = 0; i < n; ++i) if (set.layers[i].is_foreground) ++foreground;
-        check((tag + "exactly one layer is foreground, and it is the frontmost").c_str(),
-              foreground == 1 && set.layers[n - 1].is_foreground,
-              std::to_string(foreground) + " foreground");
-
-        // Nearer is faster, nothing exceeds 1.0, and the banded row carries the 0.0
-        // sentinel rather than a fourth copy of a number the band table already
-        // states three times. The cap is draw_backdrop_layer's coverage
-        // inequality, which camera_test pins from both sides: above 1.0 a
-        // world-sized layer leaves the clear colour showing at the world's edge.
-        bool ladder = true;
-        float last = 0.0f;
-        for (int i = 0; i < n; ++i) {
-            const bg1::Layer& l = set.layers[i];
-            if (l.banded) {
-                ladder = ladder && l.parallax_x == 0.0f;
-                continue;
-            }
-            ladder = ladder && l.parallax_x > 0.0f && l.parallax_x <= 1.0f &&
-                     l.parallax_x > last;
-            last = l.parallax_x;
-        }
-        check((tag + "the unbanded factors increase toward the viewer and cap at "
-                     "1.0, and the banded row carries the sentinel").c_str(), ladder);
-
-        // Every scene name is a set name at most once. bg1::find walks this array
-        // and returns the first hit, so a duplicate is a stack that can never be
-        // reached and a table that reads as if it can.
-        int named = 0;
-        for (int j = 0; j < bg1::SET_COUNT; ++j)
-            if (std::string(bg1::SETS[j].scene) == set.scene) ++named;
-        check((tag + "the scene name appears once in the set table").c_str(), named == 1,
-              std::to_string(named) + " rows");
-        check((tag + "the set is what bg1::find returns for its own name").c_str(),
-              bg1::find(set.scene) == &set);
-    }
-
-    check("bg1: a scene with no authored stack finds no set, rather than bg1's",
-          bg1::find("empty") == nullptr && bg1::find(nullptr) == nullptr &&
-              bg1::find("bg1_") == nullptr);
-
-    // An extended set is the same nine depths of the same place, which is the one
-    // claim its header makes that is not about its own art. A factor that drifts
-    // makes it a different landscape in the same palette, and the drift would be
-    // invisible: nothing about a wrong ladder fails to load.
-    check("bg1_ext: the parallax ladder is bg1's, unchanged",
-          bg1::EXT_LAYER_COUNT == bg1::LAYER_COUNT);
-    if (bg1::EXT_LAYER_COUNT == bg1::LAYER_COUNT) {
-        bool same = true;
-        for (int i = 0; i < bg1::LAYER_COUNT; ++i)
-            same = same && bg1::EXT_LAYERS[i].parallax_x == bg1::LAYERS[i].parallax_x &&
-                   bg1::EXT_LAYERS[i].opaque == bg1::LAYERS[i].opaque &&
-                   bg1::EXT_LAYERS[i].banded == bg1::LAYERS[i].banded &&
-                   bg1::EXT_LAYERS[i].is_foreground == bg1::LAYERS[i].is_foreground;
-        check("bg1_ext: every row carries bg1's factor and bg1's three flags", same);
-    }
-
-    // Same colours, layer by layer. The generator names no colour -- it counts each
-    // source layer's pixels and paints only with what it found there -- so this
-    // holds by construction today and the check is for the day somebody edits the
-    // generator. Layer by layer rather than set-wide, because a generator that
-    // painted the near hills in the far hills' brown would pass a set-wide
-    // comparison while inverting the aerial perspective the art carries instead of a
-    // grade.
-    //
-    // The colour key is excluded on both sides: it is "no pixel here", not paint.
-    {
-        auto palette_of = [](const bmp::Image& img) {
-            std::set<uint32_t> out;
-            for (uint32_t p : img.pixels)
-                if ((p & 0xFFFFFFu) != 0xFF00FFu) out.insert(p & 0xFFFFFFu);
-            return out;
-        };
-        for (int i = 0; i < bg1::LAYER_COUNT && i < bg1::EXT_LAYER_COUNT; ++i) {
-            bmp::Image a, b;
-            const std::string pa = std::string(bg1::LAYER_DIR) + bg1::LAYERS[i].file;
-            const std::string pb = std::string(bg1::EXT_LAYER_DIR) + bg1::EXT_LAYERS[i].file;
-            if (!bmp::read(pa.c_str(), a, nullptr) || !bmp::read(pb.c_str(), b, nullptr))
-                continue;  // the read itself is already checked above
-            const std::set<uint32_t> want = palette_of(a), got = palette_of(b);
-            check((std::string("bg1_ext: ") + bg1::EXT_LAYERS[i].file +
-                   " is painted in exactly the colours of " + bg1::LAYERS[i].file).c_str(),
-                  want == got,
-                  std::to_string(got.size()) + " colours against " +
-                      std::to_string(want.size()));
-        }
-    }
-
-    // The extension is twice the base on both axes -- the fact the whole art
-    // pipeline is stated against, and the one a re-generated set at a third size
-    // would break here rather than at the seam between the band table and the BMP.
-    check("bg1_ext: the world is exactly twice bg1's on both axes",
-          bg1::EXT_NATIVE_W == bg1::NATIVE_W * 2 && bg1::EXT_NATIVE_H == bg1::NATIVE_H * 2,
-          std::to_string(bg1::EXT_NATIVE_W) + "x" + std::to_string(bg1::EXT_NATIVE_H));
-
-    // The bands moved down by the frame's growth and did not change shape. That is
-    // the vertical rule the art was generated under -- bottom-anchored art keeps its
-    // distance from the bottom -- and it is what makes the extension's standing view
-    // the same rows as the base set's. A band retuned on one set and not the other
-    // is two ground planes receding at two rates.
-    const int shift = bg1::EXT_NATIVE_H - bg1::NATIVE_H;
-    const int bands = static_cast<int>(std::size(bg1::GROUND_BANDS));
-    bool shifted = static_cast<int>(std::size(bg1::EXT_GROUND_BANDS)) == bands;
-    for (int i = 0; shifted && i < bands; ++i)
-        shifted = bg1::EXT_GROUND_BANDS[i].parallax_x == bg1::GROUND_BANDS[i].parallax_x &&
-                  bg1::EXT_GROUND_BANDS[i].row1 == bg1::GROUND_BANDS[i].row1 + shift &&
-                  (i == 0 ? bg1::EXT_GROUND_BANDS[i].row0 == 0
-                          : bg1::EXT_GROUND_BANDS[i].row0 ==
-                                bg1::GROUND_BANDS[i].row0 + shift);
-    check("bg1_ext: the ground bands are bg1's, at the same factors, moved down "
-          "by the frame's growth",
-          shifted);
-}
-
-// --- the ground plane's band table, against the art --------------
-//
-// The only enforcement the banding has, and it is worth having because the
-// numbers it guards look arbitrary and are not. The ground layer scrolls as
-// three bands at three different rates, and a boundary between two bands is a
-// horizontal discontinuity in scroll offset -- so it is invisible only where the
-// art either side of it is flat: the rows meeting at the cut must be uniform
-// across every column and the same colour as each other, or a step appears in
-// the shoreline and slides as the camera moves.
-//
-// No headless suite composes an authored frame, so nothing can check what the
-// band table looks like. What can be checked is the property the boundaries were
-// chosen for -- the one a later edit would break without noticing, because
-// moving a boundary two rows costs nothing and shows nothing until somebody
-// walks.
-void test_bg1_ground_bands() {
-    for (int s = 0; s < bg1::SET_COUNT; ++s) {
-        const bg1::Set& set = bg1::SETS[s];
-        const std::string tag = std::string(set.scene) + ": ";
-
-        // The banded row, found through the flag rather than by filename -- the
-        // same reason Layer::banded is a field. test_bg1_layer_stack has already
-        // required exactly one.
-        const bg1::Layer* ground = nullptr;
-        for (int i = 0; i < set.layer_count; ++i)
-            if (set.layers[i].banded) ground = &set.layers[i];
-        check((tag + "the set has a banded layer to check the bands against").c_str(),
-              ground != nullptr);
-        if (!ground) continue;
-
-        bmp::Image img;
-        std::string err;
-        const std::string path = std::string(set.dir) + ground->file;
-        const bool read_ok = bmp::read(path.c_str(), img, &err);
-        check((tag + "the ground layer's BMP reads").c_str(), read_ok, err);
-        if (!read_ok) continue;
-
-        check((tag + "the ground layer is the size the band table is stated in").c_str(),
-              img.width == set.native_w && img.height == set.native_h,
-              std::to_string(img.width) + "x" + std::to_string(img.height));
-        if (img.width != set.native_w || img.height != set.native_h) continue;
-
-        const int n = set.band_count;
-
-        // Contiguous, in order, covering every row exactly once. A gap would leave
-        // a strip of the sky showing through the plane; an overlap would draw one
-        // range twice at two offsets.
-        bool contiguous = set.bands[0].row0 == 0 && set.bands[n - 1].row1 == img.height;
-        for (int i = 1; i < n; ++i)
-            contiguous = contiguous && set.bands[i].row0 == set.bands[i - 1].row1;
-        check((tag + "the ground bands tile the layer with no gap and no overlap").c_str(),
-              contiguous);
-
-        // Nearer is faster, and nothing exceeds 1.0 -- draw_backdrop_layer's
-        // coverage inequality, which a factor above 1.0 breaks by leaving the clear
-        // colour at the world's edge.
-        bool ordered = true;
-        for (int i = 0; i < n; ++i) {
-            const float f = set.bands[i].parallax_x;
-            ordered = ordered && f > 0.0f && f <= 1.0f;
-            if (i > 0) ordered = ordered && f > set.bands[i - 1].parallax_x;
-        }
-        check((tag + "the ground bands' factors increase toward the viewer and "
-                     "cap at 1.0").c_str(), ordered);
-
-        // The one that names the defect. For every interior boundary, the last row
-        // of the band above and the first row of the band below must each be one
-        // colour across every column, and the same colour.
-        auto uniform_colour = [&](int row, uint32_t& out) {
-            out = img.pixels[static_cast<size_t>(row) * static_cast<size_t>(img.width)];
-            for (int x = 1; x < img.width; ++x)
-                if (img.pixels[static_cast<size_t>(row) * static_cast<size_t>(img.width) + static_cast<size_t>(x)] != out)
-                    return false;
-            return true;
-        };
-
-        for (int i = 1; i < n; ++i) {
-            const int cut = set.bands[i].row0;
-            uint32_t above = 0, below = 0;
-            const bool a = uniform_colour(cut - 1, above);
-            const bool b = uniform_colour(cut, below);
-            const bool flat = a && b && above == below;
-            check((tag + "every ground band boundary falls on flat paint, so its "
-                         "scroll step cannot be seen").c_str(),
-                  flat,
-                  flat ? std::string()
-                       : "art row " + std::to_string(cut) + ": " +
-                             (!a ? "the row above the cut is not uniform"
-                                 : (!b ? "the row below the cut is not uniform"
-                                       : "the two rows differ in colour")));
-        }
-    }
-}
-
 // The resolve half of scene activation.
 //
 // These are the two rules that were prose at the call site: the size precedence
@@ -724,11 +418,11 @@ void test_scene_resolve_shipped_rows() {
                       r.scale == 4);
         } else if (def.name == "bg1") {
             // One art pixel to one world cell, at the scale that makes the widest
-            // window show exactly the reference frame. bg1_backdrop.h asserts the art
-            // is that size; this asserts the world is.
+            // window show exactly the reference frame. backdrop_set_test asserts the
+            // art is that size; this asserts the world is.
             check("resolve: 'bg1' is a 344x144 fixed world at 10x, one art "
                   "pixel to one world cell",
-                  r.world_w == bg1::NATIVE_W && r.world_h == bg1::NATIVE_H &&
+                  r.world_w == 344 && r.world_h == 144 &&
                       !r.infinite && r.scale == 10);
         } else if (def.name == "bg1_ext") {
             // The same mapping and the same scale, over twice the world. The scale is
@@ -738,11 +432,11 @@ void test_scene_resolve_shipped_rows() {
             // extension.
             check("resolve: 'bg1_ext' is a 688x288 fixed world at bg1's 10x, "
                   "still one art pixel to one world cell",
-                  r.world_w == bg1::EXT_NATIVE_W && r.world_h == bg1::EXT_NATIVE_H &&
+                  r.world_w == 688 && r.world_h == 288 &&
                       !r.infinite && r.scale == 10);
         } else if (def.name == "bg_gemini") {
             check("resolve: 'bg_gemini' is a 688x288 fixed world at 10x",
-                  r.world_w == bg1::EXT_NATIVE_W && r.world_h == bg1::EXT_NATIVE_H &&
+                  r.world_w == 688 && r.world_h == 288 &&
                       !r.infinite && r.scale == 10);
         }
     }
@@ -759,8 +453,6 @@ int main() {
     test_stand_player_on_floor();
     test_choose_display_mode();
     test_shipped_fixture();
-    test_bg1_layer_stack();
-    test_bg1_ground_bands();
     test_scene_resolve();
     test_scene_resolve_shipped_rows();
     return report();

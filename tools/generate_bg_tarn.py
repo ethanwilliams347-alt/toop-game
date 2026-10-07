@@ -19,7 +19,7 @@ binds this file is:
      `r` scrolls at (r - HORIZON) / (CONTACT - HORIZON), and anything standing on
      row r has to scroll at the same rate or its feet slide. So nothing here
      chooses a factor. It chooses where a thing stands, and the factor falls out.
-     render/rig_backdrop.h carries the foot rows; rig_test reads each BMP and
+     assets/bg_tarn/backdrop.txt carries the foot rows; backdrop_set_test reads each BMP and
      checks that its lowest painted row is exactly that number.
 
   2. The ground plane is not banded. It is drawn one row at a time, each row at
@@ -60,8 +60,8 @@ KEY = COLOR_KEY
 
 # --- the rig ---------------------------------------------------------------
 #
-# These two rows are the camera. render/rig_backdrop.h states the same two
-# numbers; rig_test checks the plane BMP is transparent above HORIZON and opaque
+# These two rows are the camera. assets/bg_tarn/backdrop.txt states the same two
+# numbers; backdrop_set_test checks the plane BMP is transparent above HORIZON and opaque
 # from it down, which is the half of that agreement the art can be held to.
 #
 # HORIZON is where the plane vanishes (factor 0). CONTACT is where it meets the

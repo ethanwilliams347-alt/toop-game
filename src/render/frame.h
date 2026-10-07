@@ -76,47 +76,32 @@ struct Grade {
     constexpr bool identity() const { return r == 255 && g == 255 && b == 255; }
 };
 
-// One layer of an authored multi-layer backdrop. The difference from the
-// generated Backdrop below is where the numbers come from: that one's factors
-// and sizes are derived together by tools/generate_backdrop.py, which writes
-// backdrop_layers.h, so they can be constants in a header. A hand-painted set
-// has no such generator, so its factors arrive with the art and have to be
-// carried per-layer at runtime.
+// One layer of a backdrop, as the frame draws it: a texture plus how it moves.
+// Built by the caller from a backdrop_set::Layer (render/backdrop_set.h), which
+// is where every field below is argued; this is that record with the texture
+// attached and the factors resolved.
 //
 // w/h are the layer's size on screen, not its texture's size, and the two differ
-// on purpose. draw_backdrop_layer puts the texture into a dst rect of exactly
-// w x h, so authored art at its native pixel size is stretched by an integer
-// factor at draw time and the texture stays small in VRAM. Sized as textures
-// instead, a stack of layers with enough vertical headroom to pan costs two
-// orders of magnitude more memory; the scaling is nearest-neighbour, so an
-// integer factor is exact.
-//
-// One horizontal slice of an authored layer, scrolling at its own rate. The type
-// and the argument for it live in render/backdrop_wrap.h, which knows no SDL, so
-// a band table can be checked against the BMP it describes by a headless suite.
+// on purpose. The texture is the art at its native size and is stretched by the
+// scene's integer scale at draw time, so it stays small in VRAM; the scaling is
+// nearest-neighbour, so an integer factor is exact. tex_h is the texture's own
+// height, which is what turns an art row into screen rows.
 using Band = backdrop_wrap::Band;
 
 struct ParallaxLayer {
     SDL_Texture* texture = nullptr;
     int w = 0, h = 0;
+    int tex_h = 0;
     float parallax_x = 1.0f;
     float parallax_y = 1.0f;
     Grade grade{};
     bool is_foreground = false;  // drawn in front of the player and the cells
 
-    // The texture's own height in pixels, which w/h above deliberately are not.
-    // Needed only by `bands`: a band names texture rows, and turning those into
-    // destination rows is exactly h / tex_h.
-    int tex_h = 0;
-
-    // Empty for every layer that is an object. Non-empty only for a surface -- see
-    // Band. When set, parallax_x above is unused and each band carries its own.
+    // A painted surface scrolled as horizontal bands, each at its own factor;
+    // parallax_x is unused when set.
     std::vector<Band> bands;
-
-    // --- read only when Backdrop::rig_on (render/depth_rig.h) ---
-    //
-    // The ground plane: drawn one texture row at a time, each at the rig's factor
-    // for that row on both axes. parallax_x/y are unused when this is set.
+    // The ground plane: one texture row at a time, each at the rig's factor for
+    // that row on both axes. parallax_x/y are unused when set.
     bool line_scroll = false;
     // Placed vertically by the plane's rows but scrolled at parallax_x: paint lying
     // on the plane, like the sun's reflection. Drawn per row over the ripple range.
@@ -127,59 +112,22 @@ struct ParallaxLayer {
     float drift = 0.0f;
 };
 
-// The generated parallax layers.
+// The backdrop of the loaded scene. Empty `layers` draws nothing, and the clear
+// colour shows behind the cells -- the `empty` scene.
 //
-// The factors live in the generated render/backdrop_layers.h, written by
-// `python tools/generate_backdrop.py --header` from the same table that sizes
-// the images. Keeping them in both C++ and Python with nothing enforcing
-// agreement produces a seam at the pan limit; there is now one copy.
+// Drawn in vector order, so the vector is the depth ordering: index 0 is
+// furthest back. is_foreground is the one exception and it is not a reordering --
+// it moves a layer past the player into the second of the two passes.
 //
-// The factors themselves are eyeballed and unmeasured. The one reference that
-// could have measured them cannot, because its frames are separately generated
-// scenes rather than one camera pan.
-//
-// `ground` is a tile rather than an image. The other two are as wide as the
-// window plus the whole pan range at their own factor, which is why the nearer
-// one is the larger file; the plane sits nearer than either and would be tens of
-// megabytes priced that way. It wraps instead -- ground_w/ground_h are a tile
-// size, and how many copies the window needs is asked of
-// backdrop_wrap::wrap_axis every frame.
-//
-// Its height is not a height. The tile's rows are the plane's depth, sampled top
-// to bottom exactly once across the band, which is what lets one texture carry
-// both the value ramp and the mark gradient.
+// Every layer is placed about the anchor, -(anchor + f * (cam - anchor)), on
+// both axes (render/depth_rig.h). The caller sets the anchor per frame, since it
+// depends on the viewport: (0, 0) for a set anchored at the world's corner, the
+// standing camera for one anchored there.
 struct Backdrop {
-    SDL_Texture* sky = nullptr;
-    SDL_Texture* mountains = nullptr;
-    SDL_Texture* ground = nullptr;
-    int sky_w = 0, sky_h = 0;
-    int mountain_w = 0, mountain_h = 0;
-    int ground_w = 0, ground_h = 0;
-
-    // The authored stack. Empty means this scene uses the three generated layers
-    // above, and that is the whole switch -- the two mechanisms are never both live
-    // in one frame, because draw_sky and draw_mountains return early when this is
-    // non-empty. A scene gets one backdrop system or the other and never a
-    // half-composed blend, which is what a per-layer flag would have made
-    // representable.
-    //
-    // Drawn in vector order, so the vector is the depth ordering: index 0 is
-    // furthest back. is_foreground is the one exception and it is not a reordering --
-    // it moves a layer past the player into the second of the two passes.
     std::vector<ParallaxLayer> layers;
-
-    // The perspective rig, for a set from render/rig_backdrop.h. When on, `layers`
-    // is drawn by the rig's path rather than the bg1 one: every layer wraps
-    // horizontally, is placed about the anchor rather than about the world's
-    // corner, and moves vertically at its own factor. Off for every bg1 set, which
-    // therefore draws exactly as before.
-    //
-    // The anchor is the camera view position, in cells, at which the stack is the
-    // painting -- the caller sets it per frame, since it depends on the viewport.
-    bool rig_on = false;
-    depth_rig::Rig rig{};
-    float rig_anchor_x = 0.0f;
-    float rig_anchor_y = 0.0f;
+    depth_rig::Rig rig{0, 1, 0.0f};
+    float anchor_x = 0.0f;
+    float anchor_y = 0.0f;
     float ripple_amplitude = 0.0f;  // cells
 };
 
@@ -323,14 +271,5 @@ void compose(SDL_Renderer* renderer, const Params& p);
 // composition without drawing it. LAYER_COUNT is its length.
 extern const Layer* const LAYERS;
 extern const int LAYER_COUNT;
-
-// Screen y of the ground plane's far edge, given the loaded mountains' height.
-//
-// Exposed because render/surface_plane.cpp needs to know which rows of the
-// window are on the plane, which is this number plus PLANE_TEXEL_SCALE. The
-// derivation -- why the horizon is a row of the mountains BMP and why it moves
-// at the mountains' vertical factor rather than the plane's -- is in frame.cpp
-// and stays there.
-float ground_horizon_y(const Camera& camera, int mountain_h);
 
 } // namespace frame
