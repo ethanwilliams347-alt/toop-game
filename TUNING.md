@@ -113,6 +113,17 @@ cooldown, governed by five constants:
 
 ---
 
+## Toppling
+
+[src/physics/grid.h](src/physics/grid.h)
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `TIP_GRAVITY` | [776](src/physics/grid.h#L776) | 1/4 cell/step² | How hard a piece leaning over its edge is pulled round. Tied to `TICKS_PER_SPEEDUP` so tipping and falling share one gravity. Higher topples faster. |
+| `TIP_MAX_STEPS` | [783](src/physics/grid.h#L783) | 600 | Safety cap: a piece still tipping after this many steps is frozen where it is. A real topple ends long before. |
+
+---
+
 ## Light
 
 [src/render/light.h](src/render/light.h), [src/render/light.cpp](src/render/light.cpp)
@@ -168,3 +179,8 @@ Grading multipliers shape the relative brightness of background, terrain, and li
 ## History
 
 Record adjustments to tuning parameters and their rationale here.
+
+- **2026-10-07** — Added `TIP_GRAVITY` (1/4 cell/step²) and `TIP_MAX_STEPS` (600)
+  with toppling. Gravity matches the falling-piece acceleration
+  (`TICKS_PER_SPEEDUP` = 4) so a post going over and one dropping read as the
+  same world; the step cap is a backstop, not a feel knob.
