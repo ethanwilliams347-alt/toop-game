@@ -39,6 +39,7 @@ endif()
 # and tested headlessly. Only the shell (window, input, blitting) touches SDL.
 set(ENGINE_SOURCES
     src/physics/grid.cpp
+    src/physics/topple.cpp
     src/physics/player.cpp
     src/physics/tool.cpp
     src/physics/enemy.cpp
