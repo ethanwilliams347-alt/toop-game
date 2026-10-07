@@ -273,6 +273,14 @@ int main() {
             dig.cursor_y = 20;
             sequence.push_back(dig);
         }
+        {
+            // A command, so the log's command slot is in the round trip below.
+            Input spawn;
+            spawn.command = Command::spawn(species::GHOUL);
+            spawn.cursor_x = 20;
+            spawn.cursor_y = 45;
+            sequence.push_back(spawn);
+        }
 
         Run a(90, 50, 4040);
         build_floor(a, 45);
@@ -344,7 +352,9 @@ int main() {
                 inputs_identical = x.left == y.left && x.right == y.right && x.jump == y.jump &&
                                    x.dig == y.dig && x.cursor_x == y.cursor_x &&
                                    x.cursor_y == y.cursor_y && x.brush_active == y.brush_active &&
-                                   x.brush_type == y.brush_type && x.brush_size == y.brush_size;
+                                   x.brush_type == y.brush_type && x.brush_size == y.brush_size &&
+                                   x.shoot == y.shoot && x.command.kind == y.command.kind &&
+                                   x.command.arg == y.command.arg;
             }
             check("...and every field of every Input", inputs_identical);
 

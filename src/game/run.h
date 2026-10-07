@@ -18,6 +18,38 @@
 // A plain struct of button and cursor state rather than SDL types, for the same
 // reason PlayerInput is: it keeps everything under src/game/ and src/physics/
 // testable without a window.
+// A one-shot action, as against the held buttons above it in Input.
+//
+// Each held verb is a bit in the log's button byte, and the dev keys used to be
+// bits too: N for a ghoul, T for a troll, the last free bit spent on the troll.
+// Every new one-shot cost a bit and a log format bump. A command is one slot per
+// step instead -- a kind and an argument -- so a new one is a new enum value and
+// nothing else, and the log carries two bytes for it whatever the count.
+//
+// One per step is enough: commands come from key presses, and main.cpp queues at
+// most one per rendered frame and clears it after the first step that takes it,
+// so a frame that buys three steps does not spawn three bodies. It is on Input,
+// rather than a call main.cpp makes on the Run, because it changes the world, and
+// every change to the world has to be in the recorded stream or a replay of the
+// session is a different session.
+struct Command {
+    enum class Kind : uint8_t {
+        None,
+        // An enemy of species::at(arg), standing on the cursor: its feet on the
+        // cursor's row, centred on its column. Standing rather than centred, so a
+        // cursor on the ground puts a body on the ground rather than half in it
+        // (where the spawn would be refused).
+        SpawnEnemy,
+        Count
+    };
+    Kind kind = Kind::None;
+    uint8_t arg = 0;
+
+    static Command spawn(const Species& kind) {
+        return Command{Kind::SpawnEnemy, static_cast<uint8_t>(species::index_of(kind))};
+    }
+};
+
 struct Input {
     bool left = false;
     bool right = false;
@@ -42,18 +74,8 @@ struct Input {
     // The bow, held: looses an arrow at the cursor every Quiver::DRAW_STEPS.
     bool shoot = false;
 
-    // Puts an enemy down centred on the cursor, on this step. A one-shot rather
-    // than a held state, and main.cpp clears it after the first step of the frame
-    // that pressed it -- a frame that bought three steps would otherwise spawn
-    // three. It is on Input rather than being a call main.cpp makes on the Run
-    // directly because it changes the world, and every change to the world has to
-    // be in the recorded stream or a replay of the session is a different session.
-    bool spawn_enemy = false;
-
-    // The same, for a troll. Its own bit rather than a species field, because
-    // Input is recorded as button bits and a species field would be a byte the
-    // log carries on every step for a key pressed a handful of times a session.
-    bool spawn_troll = false;
+    // A one-shot action on this step, at the cursor -- see Command.
+    Command command;
 };
 
 // Everything one play session needs, held as a single object instead of three

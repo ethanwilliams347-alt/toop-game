@@ -11,11 +11,11 @@ namespace {
 // file is unrecognised.
 constexpr char MAGIC[8] = {'S', 'L', 'O', 'P', 'R', 'E', 'C', '\0'};
 
-// One record is eleven bytes, written field by field in little-endian rather
+// One record is thirteen bytes, written field by field in little-endian rather
 // than by dumping the struct. Input has padding and its layout is a compiler's
 // choice; a log written by one build and read by another has to agree about
 // bytes, not about a struct.
-constexpr size_t RECORD_BYTES = 11;
+constexpr size_t RECORD_BYTES = 13;
 
 void put8(std::vector<uint8_t>& b, uint8_t v) { b.push_back(v); }
 void put32(std::vector<uint8_t>& b, uint32_t v) {
@@ -126,10 +126,10 @@ bool write(const char* path, const Log& log, std::string* error) {
         const uint8_t buttons = static_cast<uint8_t>((in.left ? 1 : 0) | (in.right ? 2 : 0) |
                                                     (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
                                                     (in.brush_active ? 16 : 0) |
-                                                    (in.shoot ? 32 : 0) |
-                                                    (in.spawn_enemy ? 64 : 0) |
-                                                    (in.spawn_troll ? 128 : 0));
+                                                    (in.shoot ? 32 : 0));
         put8(buf, buttons);
+        put8(buf, static_cast<uint8_t>(in.command.kind));
+        put8(buf, in.command.arg);
         put8(buf, static_cast<uint8_t>(in.brush_type));
         put8(buf, static_cast<uint8_t>(in.brush_size));
         put32(buf, static_cast<uint32_t>(in.cursor_x));
@@ -206,8 +206,20 @@ bool read(const char* path, Log& log, std::string* error) {
         in.dig = (buttons & 8) != 0;
         in.brush_active = (buttons & 16) != 0;
         in.shoot = (buttons & 32) != 0;
-        in.spawn_enemy = (buttons & 64) != 0;
-        in.spawn_troll = (buttons & 128) != 0;
+        if (buttons & ~63u)
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " sets a button bit no input uses");
+        const uint8_t kind = buf[off++];
+        in.command.arg = buf[off++];
+        if (kind >= static_cast<uint8_t>(Command::Kind::Count))
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " names command " + std::to_string(kind) +
+                                   ", which is not a command");
+        in.command.kind = static_cast<Command::Kind>(kind);
+        if (in.command.kind == Command::Kind::SpawnEnemy && !species::at(in.command.arg))
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " spawns species " + std::to_string(in.command.arg) +
+                                   ", which is not a species");
 
         const uint8_t type = buf[off++];
         // A brush type outside the table would index MATERIALS out of range on the

@@ -631,7 +631,7 @@ int main() {
         Run run = troll_arena(10);
         run.enemies[0] = Enemy{};
         Input in;
-        in.spawn_troll = true;
+        in.command = Command::spawn(species::TROLL);
         in.cursor_x = 200;
         in.cursor_y = FLOOR_Y;
         run.step(in);

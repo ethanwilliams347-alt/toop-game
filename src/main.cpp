@@ -934,8 +934,8 @@ int main(int argc, char* argv[]) {
 
     ElementType current_brush = ElementType::Sand;
     int brush_size = 3;
-    bool spawn_requested = false;
-    bool troll_requested = false;
+    // The one-shot the next step takes (N, T), held until a step runs.
+    Command pending_command;
 
     // The settings menu is a state, not an overlay with a flag: while it is open
     // the fixed-step loop below does not run, so the world is frozen rather than
@@ -1208,9 +1208,9 @@ int main(int argc, char* argv[]) {
                 // request rather than a call on the Run: the spawn changes the world,
                 // so it has to arrive through Input and be in the recording. See the
                 // step loop below for why it is consumed by the first step only.
-                if (e.key.keysym.sym == SDLK_n && !repeat) spawn_requested = true;
+                if (e.key.keysym.sym == SDLK_n && !repeat) pending_command = Command::spawn(species::GHOUL);
                 // A troll at the cursor, standing on it -- point at the ground.
-                if (e.key.keysym.sym == SDLK_t && !repeat) troll_requested = true;
+                if (e.key.keysym.sym == SDLK_t && !repeat) pending_command = Command::spawn(species::TROLL);
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
@@ -1403,8 +1403,7 @@ int main(int argc, char* argv[]) {
         // the left and the brush on the right -- and E sits under the finger that
         // is already on W.
         input.shoot = !debug.free_camera && keys[SDL_SCANCODE_E];
-        input.spawn_enemy = spawn_requested;
-        input.spawn_troll = troll_requested;
+        input.command = pending_command;
 
         // The camera is centred and stays centred; nothing per-frame is left to do to
         // it besides the follow further down.
@@ -1426,15 +1425,13 @@ int main(int argc, char* argv[]) {
         const int steps = frame_pacer.steps(
             frame_time,
             pacer::world_advances(screen == Screen::Settings, run_over, debug.paused));
-        // The spawn is a one-shot carried on a per-frame sample, so the first step
+        // A command is a one-shot carried on a per-frame sample, so the first step
         // that runs takes it and the rest of this frame's steps run without it. A
-        // frame that runs no steps -- paused, or in the menu -- keeps the request
-        // for the next frame that does, rather than losing the keypress.
+        // frame that runs no steps -- paused, or in the menu -- keeps it for the
+        // next frame that does, rather than losing the keypress.
         auto consume_spawn = [&]() {
-            input.spawn_enemy = false;
-            spawn_requested = false;
-            input.spawn_troll = false;
-            troll_requested = false;
+            input.command = Command{};
+            pending_command = Command{};
         };
         for (int i = 0; i < steps; ++i) {
             advance_one_step(input);

@@ -55,7 +55,11 @@ namespace input_log {
 // 4: the header names the scene the session was played in. Without it a log
 //    could not say which world it belonged to, and the replay bench guessed --
 //    wrongly, once the fixture it guessed stopped being a scene.
-constexpr uint32_t FORMAT_VERSION = 4;
+//
+// 5: one-shot actions moved out of the button byte into a command slot (a kind
+//    byte and an argument byte; see Command in run.h). The spawn bits 64 and 128
+//    are gone, and a new one-shot no longer needs a bit or a version.
+constexpr uint32_t FORMAT_VERSION = 5;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt

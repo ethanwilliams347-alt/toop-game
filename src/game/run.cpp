@@ -76,16 +76,9 @@ bool Run::step(const Input& input) {
     // movable and a climb walks straight through it.
     // The spawn first of all, before the brush and the grid, for the brush's own
     // reason: what is put into the world on a step should not also move on it.
-    if (input.spawn_enemy) {
-        spawn_enemy(input.cursor_x - species::GHOUL.width / 2,
-                    input.cursor_y - species::GHOUL.height / 2);
-    }
-    // A troll stands on the cursor rather than being centred on it: its box is
-    // three bodies tall, and centred on a cursor over the ground it would start
-    // half buried and be refused.
-    if (input.spawn_troll) {
-        spawn_enemy(input.cursor_x - species::TROLL.width / 2,
-                    input.cursor_y - species::TROLL.height, species::TROLL);
+    if (input.command.kind == Command::Kind::SpawnEnemy) {
+        if (const Species* kind = species::at(input.command.arg))
+            spawn_enemy(input.cursor_x - kind->width / 2, input.cursor_y - kind->height, *kind);
     }
 
     if (input.brush_active) {

@@ -212,7 +212,8 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   turn on their joints rather than swapping to a drawn frame, so an arrow hits
   the arm where it is drawn mid-swing, and a hole shot in a shin stays in the
   shin as the leg moves.
-- **`N`** (development tool): Spawn a ghoul at the cursor.
+- **`N`** (development tool): Spawn a ghoul standing on the cursor -- point at
+  the ground.
 - **`T`** (development tool): Spawn a troll standing on the cursor -- point at
   the ground.
 - The HUD shows `FOES:` (alive) and `KILLS:`.
