@@ -40,3 +40,6 @@ __pycache__/
 .env
 .env.*
 *.local
+
+# Local session handoff notes -- written only on request, never shared
+/HANDOFF.md
