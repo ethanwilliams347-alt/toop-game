@@ -22,7 +22,7 @@
 // every step, because Run::step is in the step loop and allocates nothing. If a
 // step ever produces more than CAPACITY events the rest are counted in
 // `dropped` rather than written; the capacity is set from the pools that produce
-// them so that cannot happen in play, and run_test checks it does not.
+// them so that cannot happen in play, and enemy_test checks it does not.
 struct Event {
     enum class Kind : uint8_t {
         ArrowLoosed,     // x, y: where it left the bow

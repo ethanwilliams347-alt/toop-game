@@ -11,6 +11,14 @@
 //
 // Links SDL only for frame.h's record types; nothing here opens a window or
 // calls SDL.
+//
+// SDL_MAIN_HANDLED for the same reason as golden_frame_test: present.h reaches
+// SDL.h through render/frame.h, and on Windows SDL.h otherwise #defines `main`
+// to `SDL_main` and expects SDL2main, which no test links, to supply the real
+// one. Without it the link fails on an unresolved `main` -- on Windows only,
+// since SDL leaves `main` alone elsewhere. It has to come before every include
+// that can reach SDL.h.
+#define SDL_MAIN_HANDLED
 #include "game/boot.h"
 #include "present/present.h"
 #include "test_util.h"

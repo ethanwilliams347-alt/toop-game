@@ -15,6 +15,7 @@
 #include "physics/arrow.h"
 #include "physics/enemy.h"
 #include "test_util.h"
+#include <memory>
 #include <string>
 
 namespace {
@@ -97,6 +98,14 @@ Enemy standing_enemy(Grid& g, int x) {
 }  // namespace
 
 int main() {
+    // Every Run below is on the heap, behind a `Run&` of the name a stack Run
+    // would have had. A Run is about 100 KB -- 24 enemy slots, each carrying a
+    // pixel mask sized for the troll's 52x70 frame -- and this function declares
+    // a dozen of them in sibling blocks. MSVC does not reliably give sibling
+    // blocks the same stack slots, so on Windows' 1 MB default stack they add up
+    // and the suite died of a stack overflow before printing a line. Linux's 8 MB
+    // stack hid it, which is why it went unnoticed.
+
     // --- a fresh body ---
     {
         Grid g = make_world();
@@ -242,7 +251,8 @@ int main() {
 
     // --- the bow and the arrow ---
     {
-        Run run(WORLD_W, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x)
                 run.grid.set_element(x, y, ElementType::Wall);
@@ -291,7 +301,8 @@ int main() {
                   !run.enemies[0].is_alive());
 
         // A held bow fires on its draw, not on every step.
-        Run r2(WORLD_W, WORLD_H);
+        const auto r2_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& r2 = *r2_owner;
         Input held;
         held.shoot = true;
         held.cursor_x = WORLD_W - 1;
@@ -316,7 +327,8 @@ int main() {
 
     // --- it notices you, closes in, and swipes ---
     {
-        Run run(WORLD_W, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x)
                 run.grid.set_element(x, y, ElementType::Wall);
@@ -334,7 +346,8 @@ int main() {
               "hurt_steps=" + std::to_string(hurt_steps));
 
         // Disarmed, it cannot.
-        Run calm(WORLD_W, WORLD_H);
+        const auto calm_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& calm = *calm_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x)
                 calm.grid.set_element(x, y, ElementType::Wall);
@@ -354,7 +367,8 @@ int main() {
 
     // --- a reset is a fresh run ---
     {
-        Run run(WORLD_W, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
         run.spawn_enemy(100, 10);
         Input shoot;
         shoot.shoot = true;
@@ -371,7 +385,8 @@ int main() {
     {
         // A flat floor at the width of the shipped 10x scenes, with the player
         // standing in the middle as the scene loader leaves it.
-        Run run(688, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(688, WORLD_H);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < 688; ++x)
                 run.grid.set_element(x, y, ElementType::Wall);
@@ -401,7 +416,8 @@ int main() {
 
         // A world with no terrain at all -- the `floor` scenes -- stands them on the
         // bottom border, where the player stands.
-        Run empty(688, WORLD_H);
+        const auto empty_owner = std::make_unique<Run>(688, WORLD_H);
+        Run& empty = *empty_owner;
         empty.player = Player(344, WORLD_H - Player::HEIGHT);
         const boot::EnemyPlanting on_border = boot::plant_enemies(empty);
         bool on_floor = on_border.placed > 0;
@@ -414,7 +430,8 @@ int main() {
     // --- determinism: the same inputs make the same sand ---
     {
         auto play = []() {
-            Run run(WORLD_W, WORLD_H, 7);
+            const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H, 7);
+            Run& run = *run_owner;
             for (int y = FLOOR_Y; y < WORLD_H; ++y)
                 for (int x = 0; x < WORLD_W; ++x)
                     run.grid.set_element(x, y, ElementType::Wall);
@@ -445,7 +462,8 @@ int main() {
 
         // The same volley, reading the events: every kill the run counts is one
         // EnemyKilled, naming the slot that died.
-        Run run(WORLD_W, WORLD_H, 7);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H, 7);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.player = Player(40, FLOOR_Y - Player::HEIGHT);
@@ -598,7 +616,8 @@ int main() {
 
     // --- the slam: winds up, lands, breaks the ground ---
     auto troll_arena = [](int player_x) {
-        Run run(WORLD_W, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.player = Player(player_x, FLOOR_Y - Player::HEIGHT);
@@ -767,7 +786,8 @@ int main() {
     {
         // A ghoul wandering, then chasing and swiping, then hit: every pose sound,
         // and the feet swing both ahead of and behind where they stand at rest.
-        Run run(WORLD_W, WORLD_H);
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.player = Player(240, FLOOR_Y - Player::HEIGHT);
