@@ -26,6 +26,28 @@ struct Prop {
     float anchor_y;
 };
 
+// One enemy, as the frame draws it. The body is not a sheet cell: it is whatever
+// is left of it, rebuilt into a slot of `Params::enemy_atlas` by the caller from
+// the simulation's own pixel mask, so what is drawn is exactly what an arrow can
+// still hit. `src` is that slot.
+//
+// Position is the collision box's top-left, interpolated, in world cells -- the
+// same convention as the player -- and the frame anchors it bottom-centre with
+// Enemy::OFFSET_X/Y, like player_sprite::OFFSET_X/Y does for the owl.
+struct EnemySprite {
+    SDL_Rect src;
+    float x, y;
+    bool facing_left;
+};
+
+// One arrow: where its tip is, in world cells, and which way it points as a
+// unit vector. A direction of (0, 0) -- an arrow at rest -- is drawn pointing
+// down, which is how a dropped arrow lies.
+struct ArrowSprite {
+    float tip_x, tip_y;
+    float dir_x, dir_y;
+};
+
 // A multiply. 255 is unchanged, 128 is half, 0 is black -- the operation the
 // light pass cannot do.
 //
@@ -207,6 +229,12 @@ struct Params {
     // The fallback rectangle's size, in cells, when player_tex is null.
     int player_box_w = 0;
     int player_box_h = 0;
+
+    // The enemies and the arrows. Null, or empty, draws nothing -- which is every
+    // frame the golden test composes, so its checksum does not move.
+    SDL_Texture* enemy_atlas = nullptr;
+    const std::vector<EnemySprite>* enemies = nullptr;
+    const std::vector<ArrowSprite>* arrows = nullptr;
 
     // The field is read for any_light() and its block extent; the texture is what
     // gets drawn, and the caller has already uploaded it.

@@ -41,7 +41,13 @@ namespace input_log {
 // written by an older version is refused, not best-guessed: reading a struct
 // that has gained a field with the old layout produces inputs that are plausible
 // and wrong.
-constexpr uint32_t FORMAT_VERSION = 1;
+//
+// 2: the bow (`shoot`) and the enemy spawn key (`spawn_enemy`) joined Input, as
+//    button bits 32 and 64. A version-1 log would read back correctly -- neither
+//    bit was ever set -- but a version-2 log read by a version-1 build would drop
+//    every shot and every spawn and replay as a different session, so the bump is
+//    for the reader that cannot know what it is missing.
+constexpr uint32_t FORMAT_VERSION = 2;
 
 struct Header {
     uint32_t version = FORMAT_VERSION;

@@ -5,6 +5,7 @@
 #include "render/backdrop_layers.h"
 #include "render/backdrop_wrap.h"
 #include "render/player_sprite.h"
+#include "physics/enemy.h"
 
 namespace frame {
 namespace {
@@ -632,6 +633,68 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
     }
 }
 
+// The enemies, before the player so the player walks in front of them.
+//
+// Drawn exactly like the player -- a frame anchored bottom-centre on the box,
+// flipped for facing -- except that the frame comes out of an atlas the caller
+// rebuilds from each body's surviving pixels rather than out of a fixed sheet.
+// The flip is the same SDL_FLIP_HORIZONTAL over the same rect that Enemy's
+// world_x_of assumes, which is what keeps a pixel drawn over a cell and the
+// pixel an arrow finds in that cell the same pixel.
+void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+    if (!p.enemies || p.enemies->empty() || !p.enemy_atlas) return;
+    const Camera& camera = *p.camera;
+    apply_grade(p.enemy_atlas, g);
+    for (const EnemySprite& e : *p.enemies) {
+        const SDL_FRect body{
+            camera.world_to_screen_x(e.x - Enemy::OFFSET_X),
+            camera.world_to_screen_y(e.y - Enemy::OFFSET_Y),
+            static_cast<float>(camera.scale_length(Enemy::FRAME_W)),
+            static_cast<float>(camera.scale_length(Enemy::FRAME_H))
+        };
+        SDL_RenderCopyExF(renderer, p.enemy_atlas, &e.src, &body, 0.0, nullptr,
+                          e.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+    }
+}
+
+// Arrows, after the player, so a shot leaving the bow is in front of the body
+// that loosed it.
+//
+// Seven one-cell squares stepped back from the tip along the direction of
+// travel, rather than a line. A line is one screen pixel wide at any scale and
+// reads as a scratch on the glass; cell-sized squares are drawn in the world's
+// own unit, so an arrow is pixel art at the same resolution as everything it
+// flies past.
+void draw_arrows(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+    if (!p.arrows || p.arrows->empty()) return;
+    const Camera& camera = *p.camera;
+    struct Part { int from, to; uint8_t r, gg, b; };
+    // Head, shaft, fletching -- the head in the mask's bone so it reads against
+    // the dark moss, the fletching pale so the tail of a shot buried in a wall
+    // is still visible against the wall.
+    const Part parts[] = {
+        {0, 0, 0xC8, 0xC4, 0xB4},
+        {1, 4, 0x7A, 0x5A, 0x34},
+        {5, 6, 0xE4, 0xDE, 0xCC},
+    };
+    const float cell = static_cast<float>(camera.scale_length(1));
+    for (const ArrowSprite& a : *p.arrows) {
+        float dx = a.dir_x, dy = a.dir_y;
+        if (dx == 0.0f && dy == 0.0f) dy = 1.0f;
+        for (const Part& part : parts) {
+            SDL_SetRenderDrawColor(renderer, graded(part.r, g.r), graded(part.gg, g.g),
+                                   graded(part.b, g.b), 255);
+            for (int i = part.from; i <= part.to; ++i) {
+                const float wx = std::floor(a.tip_x - dx * static_cast<float>(i));
+                const float wy = std::floor(a.tip_y - dy * static_cast<float>(i));
+                const SDL_FRect r{camera.world_to_screen_x(wx), camera.world_to_screen_y(wy),
+                                  cell, cell};
+                SDL_RenderFillRectF(renderer, &r);
+            }
+        }
+    }
+}
+
 // --- the pass that can darken -------------------------
 //
 // One full-screen rectangle in SDL_BLENDMODE_MOD, which is dst = dst * src.
@@ -737,7 +800,9 @@ constexpr Layer TABLE[] = {
     {"props",             Lighting::Lit,   PLAIN,           draw_props},
     {"cells",             Lighting::Lit,   PLAIN,           draw_cells},
     {"objective",         Lighting::Lit,   PLAIN,           draw_objective},
+    {"enemies",           Lighting::Lit,   PLAIN,           draw_enemies},
     {"player",            Lighting::Lit,   PLAIN,           draw_player},
+    {"arrows",            Lighting::Lit,   PLAIN,           draw_arrows},
     {"custom_foreground", Lighting::Lit,   PLAIN,           draw_custom_foreground_layers},
     {"grade",             Lighting::Grade, PLAIN,           draw_grade},
     {"light",             Lighting::Light, PLAIN,           draw_light},

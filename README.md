@@ -156,7 +156,8 @@ described is worth reporting.
 | 9 | **Structures** | A wall or wood shape with nothing under it falls as one rigid piece and lands intact. A shape resting on solid ground never twitches or drifts. |
 | 10 | **Depth** | Walk a long way and watch the background. Sky drifts slowest, mountains faster, terrain fastest. No visible seams or repeating vertical lines anywhere in the backdrop. |
 | 11 | **The run** | Take falling damage from a real drop, take burn damage standing in fire, die and see `YOU DIED`, press `R` to restart, then fly east across the water channel to reach the objective. |
-| 12 | **Stability** | A few minutes of doing all of the above at once — digging near falling sand near fire near water — with no crash and no obvious slowdown during ordinary play. |
+| 12 | **Enemies** | Hold `E` and shoot a ghoul's arm below the shoulder: the forearm drops off as sand in the ghoul's colours and piles up on the ground. A shot between the eyes collapses the whole body into a heap. |
+| 13 | **Stability** | A few minutes of doing all of the above at once — digging near falling sand near fire near water — with no crash and no obvious slowdown during ordinary play. |
 
 `ctest` proves the mechanics in isolation; it cannot prove they compose. Run
 this pass by hand after any change to `src/physics/`, `src/game/` or
@@ -172,6 +173,27 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   aimed at, up to a limited range. The crosshair replaces the mouse pointer
   inside the window and shows whether the target is reachable: **solid white
   is in range, dim white is out of it.**
+
+- **`E` (hold):** Shoot arrows at the cursor, about three a second. An arrow
+  flies in a shallow arc, sticks in terrain for a few seconds, and slows in
+  water.
+
+**Enemies**
+- Moss ghouls stand around each scene (none close to where you start). They
+  wander, notice you within about a dozen body widths, walk over, and swipe
+  for 8 damage if they still have an arm to swipe with.
+- **They come apart where they are hit.** Every pixel of an enemy is a real
+  cell's worth of body: an arrow takes out the pixels around where it lands,
+  anything that bite cuts off from the chest comes off with it, and every
+  pixel lost drops into the world as sand in the body's own colours. Shoot an
+  arm below the shoulder and the forearm falls off as a little pile of sand;
+  shoot one leg and it limps on the other.
+- They die when the head (both eyes) is gone, when the chest is gone, when
+  both legs are cut through, or when less than 40% of them is left. Then the
+  whole body collapses into a heap of sand. Fire burns them away from
+  wherever the flame touches, feet first.
+- **`N`** (development tool): Spawn an enemy at the cursor.
+- The HUD shows `FOES:` (alive) and `KILLS:`.
 
 **World (development tools)**
 - **Right-Click & Drag:** Spawn elements onto the screen.

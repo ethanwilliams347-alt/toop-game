@@ -194,19 +194,43 @@ int main() {
     // A big piece touching down on a single cell is the worst case for the support
     // search: one cell of it answers "grounded" and the other few hundred have to be
     // judged from that one answer.
+    //
+    // It drops a single cell, so it arrives too slowly to break, and it is centred
+    // on the stub, so it is balanced there. Anything that moves after that is the
+    // support search shedding cells.
     {
         Grid g(60, 60);
         fill(g, 0, 55, 59, 59, ElementType::Wall);  // floor
         g.set_element(30, 54, ElementType::Wall);  // a one-cell stub on top of it
-        fill(g, 20, 40, 40, 44, ElementType::Wood);  // slab, floating
-        fill(g, 20, 45, 20, 54, ElementType::Wood);  // the leg holding it up
+        fill(g, 20, 48, 40, 52, ElementType::Wood);  // slab, one cell above the stub
+        fill(g, 20, 53, 20, 54, ElementType::Wood);  // the leg holding it up
 
-        fill(g, 20, 45, 20, 54, ElementType::Empty);  // kick the leg out
+        fill(g, 20, 53, 20, 54, ElementType::Empty);  // kick the leg out
 
         step(g, 200);
         check("a slab landing on a single stub stays a slab",
               rect_exactly_at(g, 20, 49, 40, 53, ElementType::Wood),
               "top wood row " + std::to_string(top_row_of(g, ElementType::Wood)));
+    }
+
+    // --- the same slab arriving fast breaks over the stub, and loses nothing ---
+    // Fracture splits it at the stub; each half is then standing on one edge with
+    // its weight hanging off the other side, so it goes over. What must hold is
+    // conservation and that it all stops.
+    {
+        Grid g(60, 60);
+        fill(g, 0, 55, 59, 59, ElementType::Wall);
+        g.set_element(30, 54, ElementType::Wall);
+        fill(g, 20, 40, 40, 44, ElementType::Wood);
+        fill(g, 20, 45, 20, 54, ElementType::Wood);
+        fill(g, 20, 45, 20, 54, ElementType::Empty);
+
+        const int before = count_of(g, ElementType::Wood);
+        step(g, 300);
+        check("a slab that breaks over a stub keeps every cell",
+              count_of(g, ElementType::Wood) == before,
+              std::to_string(count_of(g, ElementType::Wood)) + " of " + std::to_string(before));
+        check("and the pieces come to rest", !g.has_pending_support_checks());
     }
 
     // --- cutting a slab free drops it, shape intact ---
@@ -566,6 +590,133 @@ int main() {
         check("a piece over the size budget is assumed supported",
               count_of(g, ElementType::Wall) == before - 1 &&
               g.get_element(0, 0).type == ElementType::Wall);
+    }
+
+    // ------------------------------------------------------------------------
+    // Toppling. A piece that is held up, but whose centre of mass is not over
+    // what is holding it, pivots over its last supporting edge until it hits
+    // something.
+    // ------------------------------------------------------------------------
+
+    // --- a post landing on the lip of a ledge goes over the edge ---
+    // The case that used to be an elevator: the post came straight down, touched
+    // the ledge with one column and stood there, two thirds of it over nothing.
+    {
+        Grid g(80, 80);
+        fill(g, 0, 60, 30, 79, ElementType::Wall);  // a ledge, top at row 60, edge at x=30
+        fill(g, 31, 75, 79, 79, ElementType::Wall);  // low ground beyond it
+        fill(g, 30, 30, 32, 44, ElementType::Wood);  // a 3x15 post above the lip
+        g.set_element(31, 29, ElementType::Wall);
+        g.set_element(31, 29, ElementType::Empty);   // disturb it so it is asked
+
+        const int before = count_of(g, ElementType::Wood);
+        bool ever_tipped = false;
+        for (int i = 0; i < 400; ++i) {
+            g.update();
+            if (g.tipping_count() > 0) ever_tipped = true;
+        }
+
+        int min_x = 80, max_x = -1, min_y = 80, max_y = -1;
+        for (int y = 0; y < 80; ++y)
+            for (int x = 0; x < 80; ++x)
+                if (g.get_element(x, y).type == ElementType::Wood) {
+                    min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+                    min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                }
+
+        check("a post landing on a ledge's lip tips rather than standing on one column",
+              ever_tipped);
+        check("it ends up lying down, not standing up",
+              max_x - min_x > max_y - min_y,
+              "box " + std::to_string(max_x - min_x + 1) + "x" + std::to_string(max_y - min_y + 1));
+        check("it went over the edge, away from the ledge", max_x > 40,
+              "rightmost wood x " + std::to_string(max_x));
+        check("tipping creates and destroys nothing",
+              count_of(g, ElementType::Wood) == before,
+              std::to_string(count_of(g, ElementType::Wood)) + " of " + std::to_string(before));
+        check("and it comes to rest", !g.has_pending_support_checks());
+    }
+
+    // --- digging out under one side of a post tips it into the hole ---
+    // The at-rest case. The post is wood and the floor is stone: the support fill
+    // welds them into one piece, which is right for holding things up, but nobody
+    // glued the post down, so balance is judged on the post alone.
+    {
+        Grid g(60, 60);
+        fill(g, 0, 50, 59, 59, ElementType::Wall);   // floor
+        fill(g, 30, 35, 32, 49, ElementType::Wood);  // 3x15 post standing on it
+        step(g, 10);
+        check("a post standing squarely on the floor stays up",
+              rect_exactly_at(g, 30, 35, 32, 49, ElementType::Wood));
+
+        // Dig a pit under the left two columns and away to the left, leaving the
+        // post on its right-hand column alone.
+        fill(g, 14, 50, 31, 57, ElementType::Empty);
+
+        const int before = count_of(g, ElementType::Wood);
+        step(g, 400);
+
+        int min_x = 60, top = 60;
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x)
+                if (g.get_element(x, y).type == ElementType::Wood) {
+                    min_x = std::min(min_x, x);
+                    top = std::min(top, y);
+                }
+        check("a post undermined on one side falls over towards the hole",
+              min_x < 25 && top > 40,
+              "leftmost x " + std::to_string(min_x) + ", top row " + std::to_string(top));
+        check("and keeps every cell doing it", count_of(g, ElementType::Wood) == before);
+        check("and stops", !g.has_pending_support_checks());
+    }
+
+    // --- undermined, but still balanced: it stays put ---
+    // The negative case, and the one that matters more: a wrong topple wrecks a
+    // level. The centre of mass is over what is left, so nothing moves.
+    {
+        Grid g(60, 60);
+        fill(g, 0, 50, 59, 59, ElementType::Wall);
+        fill(g, 30, 35, 32, 49, ElementType::Wood);
+        fill(g, 20, 50, 30, 57, ElementType::Empty);  // only the leftmost column undermined
+        step(g, 200);
+        check("a post with its centre still over its footing does not tip",
+              rect_exactly_at(g, 30, 35, 32, 49, ElementType::Wood) && g.tipping_count() == 0);
+    }
+
+    // --- a piece tipping into water moves the water, it does not delete it ---
+    {
+        Grid g(60, 60);
+        fill(g, 0, 50, 59, 59, ElementType::Wall);
+        fill(g, 30, 35, 32, 49, ElementType::Wood);
+        fill(g, 10, 50, 31, 57, ElementType::Empty);
+        fill(g, 10, 52, 31, 57, ElementType::Water);  // a pool in the pit
+
+        const int water = count_of(g, ElementType::Water);
+        const int wood = count_of(g, ElementType::Wood);
+        g.set_element(31, 50, ElementType::Empty);  // and undermine the post
+        step(g, 400);
+        check("tipping into a pool conserves the water",
+              count_of(g, ElementType::Water) == water,
+              std::to_string(count_of(g, ElementType::Water)) + " of " + std::to_string(water));
+        check("and the wood", count_of(g, ElementType::Wood) == wood);
+    }
+
+    // --- toppling is deterministic ---
+    // It is the one part of the simulation with angles in it, so it is the one most
+    // likely to hide a float or an order dependence. Same writes, same world.
+    {
+        const auto run = [] {
+            Grid g(80, 80, 1234);
+            fill(g, 0, 60, 30, 79, ElementType::Wall);
+            fill(g, 31, 75, 79, 79, ElementType::Wall);
+            fill(g, 30, 30, 32, 44, ElementType::Wood);
+            fill(g, 20, 20, 27, 23, ElementType::Wood);  // a second, overlapping topple
+            nudge(g, 31, 29);
+            nudge(g, 21, 19);
+            step(g, 300);
+            return g.get_pixels();
+        };
+        check("two runs of the same topple end pixel-identical", run() == run());
     }
 
     return report();

@@ -113,6 +113,17 @@ cooldown, governed by five constants:
 
 ---
 
+## Toppling
+
+[src/physics/grid.h](src/physics/grid.h)
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `TIP_GRAVITY` | [776](src/physics/grid.h#L776) | 1/4 cell/step² | How hard a piece leaning over its edge is pulled round. Tied to `TICKS_PER_SPEEDUP` so tipping and falling share one gravity. Higher topples faster. |
+| `TIP_MAX_STEPS` | [783](src/physics/grid.h#L783) | 600 | Safety cap: a piece still tipping after this many steps is frozen where it is. A real topple ends long before. |
+
+---
+
 ## Light
 
 [src/render/light.h](src/render/light.h), [src/render/light.cpp](src/render/light.cpp)
@@ -184,10 +195,53 @@ factor moves together. The knobs are the camera and the motion.
 
 ---
 
+## Enemies
+
+[src/physics/enemy.h](src/physics/enemy.h). The body is the player's 8x20 box;
+the art (and so which pixels can be hit) is the ASCII grid in
+[src/physics/enemy_art.h](src/physics/enemy_art.h).
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `PATROL_SPEED` | [47](src/physics/enemy.h#L47) | 22 | Wandering walk speed, cells/s. |
+| `CHASE_SPEED` | [48](src/physics/enemy.h#L48) | 45 | Speed once it has noticed you. Asserted below the player's `MOVE_SPEED`, so it can always be walked away from. |
+| `JUMP_SPEED` | [54](src/physics/enemy.h#L54) | 120 | The hop it makes at a wall it cannot step over while chasing. |
+| `NOTICE_X` | [69](src/physics/enemy.h#L69) | 12 body widths | How close you have to be, horizontally, before it chases. |
+| `LEDGE_DROP` | [74](src/physics/enemy.h#L74) | 1 body height | A wandering enemy turns back at a drop deeper than this. |
+| `SWIPE_DAMAGE` | [81](src/physics/enemy.h#L81) | 8 | Damage per swipe when the boxes touch (needs an arm). |
+| `SWIPE_INTERVAL_STEPS` | [82](src/physics/enemy.h#L82) | 40 | Steps between swipes. |
+| `COLLAPSE_PERCENT` | [92](src/physics/enemy.h#L92) | 40 | Below this share of its pixels it collapses into sand. |
+| `BURN_PIXELS_PER_TICK` | [106](src/physics/enemy.h#L106) | 2 | Pixels burned away per burn tick, lowest first. |
+
+## Bow and arrows
+
+[src/physics/arrow.h](src/physics/arrow.h)
+
+| Knob | Line | Now | What it does |
+|---|---|---|---|
+| `LAUNCH_SPEED` | [57](src/physics/arrow.h#L57) | 480 | Arrow speed at release, cells/s (8 cells a step). |
+| `GRAVITY` | [64](src/physics/arrow.h#L64) | 150 | Arrow drop. About 8 cells over a 160-cell shot. |
+| `DRAW_STEPS` | [69](src/physics/arrow.h#L69) | 20 | Steps between shots while `E` is held. |
+| `STUCK_STEPS` | [72](src/physics/arrow.h#L72) | 240 | How long a stuck arrow stays in a wall. |
+| `BITE_RADIUS` | [79](src/physics/arrow.h#L79) | 2 | Radius of body an arrow takes out where it lands. Asserted wider than an arm. |
+| `FLUID_DRAG_PERCENT` | [84](src/physics/arrow.h#L84) | 80 | Speed kept per step through water or oil. |
+
+---
+
 ## History
 
 Record adjustments to tuning parameters and their rationale here.
 
+- **Enemies and the bow added** (all values above are first-pass). Arrow
+  gravity was taken down from 260 to 150 before landing: at 260 a shot across
+  160 cells dropped about 19, enough to land in the ground in front of a target
+  aimed at the chest. Enemy burning was capped at 2 pixels a tick after the
+  first version took every pixel in a flame at once, which removed both feet on
+  contact and killed the body the step it touched fire.
+- **2026-10-07** — Added `TIP_GRAVITY` (1/4 cell/step²) and `TIP_MAX_STEPS` (600)
+  with toppling. Gravity matches the falling-piece acceleration
+  (`TICKS_PER_SPEEDUP` = 4) so a post going over and one dropping read as the
+  same world; the step cap is a backstop, not a feel knob.
 - **2026-10-07, perspective rig (`bg_tarn`).** Added `vertical_strength` 0.75,
   `ripple_amplitude` 0.6, cloud `drift` -0.6, reeds 1.30. 0.75 because at 0.5 the
   valley drops out of a ceiling-height window and at 1.0 the plane smears at 3.6x;
