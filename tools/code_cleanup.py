@@ -9,7 +9,7 @@ In order:
   1. clang-format on the C++ lines this branch changed (.clang-format)
   2. clang-tidy on the C++ files this branch changed (.clang-tidy)
   3. ruff format + ruff check --fix on the Python files this branch changed (ruff.toml)
-  4. cmake --build, then ctest -- the 19 suites, golden_frame_test included
+  4. cmake --build, then ctest -- every suite, golden_frame_test included
 
 Every step runs even if an earlier one failed, so one pass shows everything, and
 the exit code is non-zero if any of them did.

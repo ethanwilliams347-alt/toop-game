@@ -13,7 +13,7 @@ Windows x64, MSVC, CMake 3.14+. SDL2 2.30.0 is built statically via `FetchConten
 | `src/scene/` | BMP + text parsers → records | No SDL, no physics |
 | `src/ui/`, `src/render/frame.cpp` | SDL draw calls only | `FRAME_SOURCES` |
 | `src/main.cpp` | Window, event pump, blit | The only place SDL may leak in |
-| `tests/` | 19 CTest suites + 6 probes | Plain C++, no framework |
+| `tests/` | 21 CTest suites + 6 probes | Plain C++, no framework |
 | `tools/` | Python asset pipeline | Staged at build time |
 
 `CMakeLists.txt` splits sources into five variables. **That split is the
@@ -60,7 +60,7 @@ cmake --build build --config Release --target grid_bench
 # run
 .\build\Release\SlopPhysics.exe          # F9 writes session.rec for replay
 
-# test — 19 suites
+# test — 21 suites
 ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Release -R golden_frame_test --output-on-failure
 
@@ -80,7 +80,7 @@ Run in this order. Do not report success having skipped a stage.
                reformat whole files: the tree predates .clang-format.
 
 1. UNIT        ctest --test-dir build -C Release --output-on-failure
-               -> 19/19. No exceptions.
+               -> 21/21. No exceptions.
 
 2. VISUAL      golden_frame_test must pass with its checksum UNCHANGED.
                It composites a real frame, including a lit fire, through the

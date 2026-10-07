@@ -10,6 +10,7 @@ Checks: >
   -bugprone-narrowing-conversions,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-inc-dec-in-conditions,
+  -bugprone-signed-bitwise,
   clang-analyzer-*,
   -clang-analyzer-security.insecureAPI.*,
   performance-*,
@@ -28,6 +29,9 @@ Checks: >
 #   implicit-widening-...        and MSVC's own warnings report the narrowings that matter.
 #   inc-dec-in-conditions        `swing >= 0 && ++swing >= N` is well-defined (&& sequences)
 #                                and is how the step counters are written.
+#   signed-bitwise               SDL's flags are int-typed, so every
+#                                `SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC`
+#                                trips it; it was 21 of the findings on the pre-tidy tree.
 #   insecureAPI                  fopen/sscanf; MSVC's C4996 already says so.
 #   enum-size                    an enum's width is a layout decision made where
 #                                it matters (SceneMode : uint8_t), not everywhere.
