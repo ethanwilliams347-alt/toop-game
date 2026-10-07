@@ -115,8 +115,8 @@ cooldown, governed by three constants:
 
 | Knob | Line | Now | What it does |
 |---|---|---|---|
-| `TIP_GRAVITY` | [776](src/physics/grid.h#L776) | 1/4 cell/step² | How hard a piece leaning over its edge is pulled round. Tied to `TICKS_PER_SPEEDUP` so tipping and falling share one gravity. Higher topples faster. |
-| `TIP_MAX_STEPS` | [783](src/physics/grid.h#L783) | 600 | Safety cap: a piece still tipping after this many steps is frozen where it is. A real topple ends long before. |
+| `TIP_GRAVITY` | [779](src/physics/grid.h#L779) | 1/4 cell/step² | How hard a piece leaning over its edge is pulled round. Tied to `TICKS_PER_SPEEDUP` so tipping and falling share one gravity. Higher topples faster. |
+| `TIP_MAX_STEPS` | [786](src/physics/grid.h#L786) | 600 | Safety cap: a piece still tipping after this many steps is frozen where it is. A real topple ends long before. |
 
 ---
 
