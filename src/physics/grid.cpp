@@ -95,6 +95,7 @@ void Grid::reset(uint64_t seed) {
     tip_displaced.clear();
     std::fill(balance_visit.begin(), balance_visit.end(), 0);
     balance_epoch = 0;
+    balance_pass_start = 1;
 
     frame_tag = 0;
     step_count = 0;
@@ -381,9 +382,13 @@ void Grid::resolve_support() {
             std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
             scratch_epoch = 1;
         }
-        if (++balance_epoch == 0) {
+        // Balance is stamped per check rather than per pass (see balance_visit),
+        // so a pass only marks where its own stamps begin.
+        balance_pass_start = static_cast<uint8_t>(balance_epoch + 1);
+        if (balance_pass_start == 0) {
             std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
-            balance_epoch = 1;
+            balance_epoch = 0;
+            balance_pass_start = 1;
         }
 
         for (const int seed : support_seeds) {

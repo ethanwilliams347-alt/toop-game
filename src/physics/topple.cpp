@@ -53,7 +53,10 @@ namespace {
 
 bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
     const int seed = get_index(x, y);
-    if (balance_visit[seed] == balance_epoch) return false;  // judged already this pass
+    const auto stamped_this_pass = [&](int idx) {
+        return balance_visit[idx] != 0 && balance_visit[idx] >= balance_pass_start;
+    };
+    if (stamped_this_pass(seed)) return false;  // judged already this pass
 
     const uint8_t tag = cells[seed].piece_tag;
     if (tip_tag_live[tag]) return false;
@@ -78,6 +81,15 @@ bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
         return in_flight ? e.ticks > 0 : material_family(e.type) == family;
     };
 
+    // A new stamp for this check. On the rare wrap the whole array is cleared,
+    // which forgets earlier checks this pass; that costs them being repeated,
+    // never a wrong answer.
+    if (++balance_epoch == 0) {
+        std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
+        balance_epoch = 1;
+        balance_pass_start = 1;
+    }
+
     balance_component.clear();
     balance_component.push_back(seed);
     balance_visit[seed] = balance_epoch;
@@ -99,6 +111,8 @@ bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
                 const int nidx = get_index(nx, ny);
                 if (balance_visit[nidx] == balance_epoch) continue;
                 if (!member(nidx)) continue;
+                // An earlier check's piece: one it gave up on. See balance_visit.
+                if (stamped_this_pass(nidx)) return false;
                 balance_visit[nidx] = balance_epoch;
                 balance_component.push_back(nidx);
             }

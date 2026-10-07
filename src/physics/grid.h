@@ -865,8 +865,19 @@ private:
     // Stamps for topple_if_unbalanced, so a piece with hundreds of seeds queued is
     // judged once per pass. Separate from scratch_visit because fracture_landing
     // runs immediately before on the same piece and has already stamped it there.
+    //
+    // A fresh epoch per check, not per pass, and balance_pass_start marks the
+    // first one this pass. That lets a check tell its own stamps from an earlier
+    // one's: reaching a cell of the same piece that an earlier check this pass
+    // stamped means this is a piece already judged -- and since a judgement that
+    // finished stamps its whole piece, one only reachable this way is a piece
+    // that check gave up on as too big. So it gives up at once instead of walking
+    // another MAX_SUPPORT_CELLS of it. Without that, fire eating along a large
+    // welded slab queues seeds a few cells apart, each far enough from the last
+    // to start its own walk, and every walk is a full budget.
     std::vector<uint8_t> balance_visit;
     uint8_t balance_epoch = 0;
+    uint8_t balance_pass_start = 1;
 
     // Randomness for the step in progress. These fold in the seed and the step
     // count so that a call site names only what varies: where it is asking from,
