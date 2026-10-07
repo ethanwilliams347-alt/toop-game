@@ -210,9 +210,116 @@ void draw_authored_bands(SDL_Renderer* renderer, const Params& p,
     }
 }
 
+// A layer of a perspective-rig set. render/depth_rig.h has the argument; what is
+// here is the placing.
+//
+// Three things differ from draw_backdrop_layer's authored branch, all of them
+// from the rig:
+//
+//   - Placed about the anchor, -(anchor + f * (cam - anchor)), on both axes, so
+//     the painting is exact where a standing player's camera sits rather than at
+//     the world's top-left corner.
+//   - Vertical parallax, at depth_rig::vertical_factor of the horizontal factor.
+//   - Every layer wraps horizontally through backdrop_wrap::wrap_axis, which is
+//     what lifts the 1.00 cap: a factor above 1 on a world-sized layer runs out of
+//     image at the world's edge, and a wrapping one has no edge.
+//
+// A plain layer is one draw per wrapped copy. The plane (line_scroll) and any
+// rippled rows are drawn one texture row at a time: the plane because every row
+// is its own depth, the ripple because every row is its own phase. Paint lying on
+// the plane (on_plane -- the sun's reflection) takes the plane's rows vertically
+// and its own factor horizontally: the reflection of something at infinity stays
+// under it, but it must stay on the water it was painted on, and as the plane
+// stretches under a rising camera only the plane's own row placement does that. Each row's
+// top and bottom are placed by the same edge function, so a row's bottom and the
+// next row's top are one number rounded once -- the reason draw_authored_bands
+// rounds per boundary, at a finer grain.
+//
+// At 1080p about 75 plane rows and 27 rippled glint rows are on screen, two
+// copies each at most, so the per-row path is a couple of hundred single-row
+// copies a frame. SDL batches them into one draw per texture; it is small next
+// to the light field, which is where the frame's measured cost is.
+void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l) {
+    if (!l.texture || l.tex_h <= 0) return;
+    int tex_w = 0;
+    SDL_QueryTexture(l.texture, nullptr, nullptr, &tex_w, nullptr);
+    if (tex_w <= 0) return;
+
+    const Camera& camera = *p.camera;
+    const Backdrop& b = p.backdrop;
+    const int scale = camera.scale();
+    const int window_w = p.padded_w * scale;
+    const int window_h = p.padded_h * scale;
+    const float cam_x = camera.view_fx();
+    const float cam_y = camera.view_fy();
+    const int row_px = l.h / l.tex_h;  // one art row on screen; an integer scale
+
+    // The clouds' own motion, folded into the horizontal origin. Reduced mod the
+    // tile here, not left to wrap_axis, so a long session's growing product never
+    // reaches the magnitude where a float stops resolving a pixel.
+    float drift_px = 0.0f;
+    if (l.drift != 0.0f && l.w > 0)
+        drift_px = std::fmod(l.drift * p.time_s * static_cast<float>(scale),
+                             static_cast<float>(l.w));
+
+    const auto draw_span = [&](float x, const SDL_Rect* src, float y, float h) {
+        const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(x, l.w, window_w);
+        for (int c = 0; c < t.count; ++c) {
+            const SDL_FRect dst{t.first + static_cast<float>(c * l.w), y,
+                                static_cast<float>(l.w), h};
+            SDL_RenderCopyF(renderer, l.texture, src, &dst);
+        }
+    };
+
+    const float flat_y = depth_rig::origin(cam_y, b.rig_anchor_y, l.parallax_y, scale);
+    const float flat_x =
+        depth_rig::origin(cam_x, b.rig_anchor_x, l.parallax_x, scale) + drift_px;
+
+    const bool rippled = l.ripple_row1 > l.ripple_row0;
+    const bool plane_rows = l.line_scroll || l.on_plane;
+    if (!l.line_scroll && !rippled) {
+        draw_span(flat_x, nullptr, flat_y, static_cast<float>(l.h));
+        return;
+    }
+
+    // Rows drawn one at a time. For a rippled object layer that is only the ripple
+    // range -- rig_test holds its paint inside it -- and for the plane it is every
+    // row from the horizon down.
+    const int row0 = l.line_scroll ? std::max(0, b.rig.horizon_row) : l.ripple_row0;
+    const int row1 = l.line_scroll ? l.tex_h : std::min(l.ripple_row1, l.tex_h);
+    const auto edge = [&](int row) {
+        const float y = plane_rows
+                            ? depth_rig::plane_edge_y(b.rig, row, cam_y, b.rig_anchor_y, row_px)
+                            : flat_y + static_cast<float>(row * row_px);
+        return std::floor(y + 0.5f);
+    };
+
+    float top = edge(row0);
+    for (int row = row0; row < row1; ++row) {
+        const float bottom = edge(row + 1);
+        if (bottom > top && bottom > 0.0f && top < static_cast<float>(window_h)) {
+            // The row's horizontal factor is taken at its centre: one depth standing
+            // in for the row's whole range, and the middle is least wrong at both
+            // edges -- plane_strip's reasoning.
+            float x = flat_x;
+            if (l.line_scroll) {
+                const float f = depth_rig::plane_factor(b.rig, static_cast<float>(row) + 0.5f);
+                x = depth_rig::origin(cam_x, b.rig_anchor_x, f, scale) + drift_px;
+            }
+            if (row >= l.ripple_row0 && row < l.ripple_row1)
+                x += depth_rig::ripple_cells(row, p.time_s, b.ripple_amplitude) *
+                     static_cast<float>(scale);
+            const SDL_Rect src{0, row, tex_w, 1};
+            draw_span(x, &src, top, bottom - top);
+        }
+        top = bottom;
+    }
+}
+
 void draw_custom_background_layers(SDL_Renderer* renderer, const Params& p, const Grade&) {
     for (const ParallaxLayer& l : p.backdrop.layers) {
         if (l.is_foreground || !l.texture) continue;
+        if (p.backdrop.rig_on) { apply_grade(l.texture, l.grade); draw_rig_layer(renderer, p, l); continue; }
         if (!l.bands.empty()) { apply_grade(l.texture, l.grade); draw_authored_bands(renderer, p, l); continue; }
         // A per-layer spec built here rather than stored: backdrop_layers::Layer
         // is the generated table's row type and carries a generated size, which
@@ -226,6 +333,7 @@ void draw_custom_background_layers(SDL_Renderer* renderer, const Params& p, cons
 void draw_custom_foreground_layers(SDL_Renderer* renderer, const Params& p, const Grade&) {
     for (const ParallaxLayer& l : p.backdrop.layers) {
         if (!l.is_foreground || !l.texture) continue;
+        if (p.backdrop.rig_on) { apply_grade(l.texture, l.grade); draw_rig_layer(renderer, p, l); continue; }
         if (!l.bands.empty()) { apply_grade(l.texture, l.grade); draw_authored_bands(renderer, p, l); continue; }
         const backdrop_layers::Layer spec{l.parallax_x, l.parallax_y, l.w, l.h};
         draw_backdrop_layer(renderer, p, l.texture, l.w, l.h, spec, l.grade, true);

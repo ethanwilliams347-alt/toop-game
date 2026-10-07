@@ -40,3 +40,48 @@ Columns: 4
 148  81  40  char_accent
  26  41  50  water_fill
  46  73  85  water_rim
+ 11  77  92  tarn_sky_top
+ 47 111 122  tarn_sky_high
+125 161 149  tarn_sky_mid
+201 185 138  tarn_sky_low
+232 168  98  tarn_sky_horizon
+246 208 128  tarn_sun_halo
+255 243 200  tarn_sun
+224 158 120  tarn_cloud_lit
+143 158 142  tarn_cloud
+ 94 122 120  tarn_cloud_shade
+ 62 110 120  tarn_peak
+ 46  90 103  tarn_peak_shade
+216 226 214  tarn_snow
+156 184 182  tarn_snow_shade
+244 200 130  tarn_peak_rim
+ 88 116 110  tarn_ridge
+ 69  96  94  tarn_ridge_shade
+ 99 160 132  tarn_ridge_rim
+138  90  70  tarn_mesa
+110  62  48  tarn_mesa_band
+ 90  56  46  tarn_mesa_shade
+192 126  82  tarn_mesa_lit
+164 152 128  tarn_dune
+128 108  71  tarn_dune_shade
+214 174  94  tarn_dune_rim
+ 44  62  46  tarn_shore_far
+ 19  52  49  tarn_lake_deep
+ 30  74  70  tarn_lake
+111 154 146  tarn_lake_sky
+176 138  94  tarn_lake_warm
+255 230 166  tarn_glint
+226 166  98  tarn_glint_dim
+ 44  58  18  tarn_meadow_far
+ 31  42  12  tarn_meadow
+ 12  39  20  tarn_meadow_near
+ 90  98  34  tarn_meadow_lit
+200 154  72  tarn_flower
+ 30  60  54  tarn_pine_far
+142 138  82  tarn_pine_far_rim
+ 16  42  30  tarn_pine
+ 10  30  22  tarn_pine_shade
+196 150  78  tarn_pine_rim
+ 42  29  20  tarn_trunk
+  8  22  14  tarn_fg
+106  92  42  tarn_fg_rim
