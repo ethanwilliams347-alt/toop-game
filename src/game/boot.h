@@ -34,19 +34,18 @@ namespace boot {
 inline constexpr int GRID_WIDTH = 1920;
 inline constexpr int GRID_HEIGHT = 1080;
 
-// The objective, as a column rather than a point, because the row it sits at is
-// scanned off the terrain below it (see terrain_surface). Placing a y here would
-// be the mistake the prop format refuses by construction -- a number an author
-// tunes for an afternoon while the loader ignores it.
+// The objective's column when a level does not state one, as a column rather
+// than a point because the row it sits at is scanned off the terrain below it
+// (see terrain_surface).
 //
-// The column is chosen for what stands between it and the spawn rather than for
-// where it is: past the jump ledges, across the water channel, and out onto the
-// sleeper run. That is a traverse the character cannot walk, which makes flight
-// the thing the run is actually about.
-//
-// Hard-coded, which is this spike's stated limit. A real objective is placed by
-// a generator into a level format with a slot for it, and neither exists yet.
-inline constexpr int OBJECTIVE_X = 1700;
+// This used to be a single constant, 1700, chosen for the 1920-wide fixture:
+// past its jump ledges, across the water channel, out onto the sleeper run. Every
+// authored scene since is 344 or 688 cells wide, so the column fell outside all
+// of them and no shipped scene had an objective at all. A level that cares where
+// its objective is says so in its level file (scene/level_list.h); this is the
+// fallback, an eighth of the world in from the far edge -- away from the
+// middle-of-the-world spawn, and clear of the border wall.
+constexpr int default_objective_column(int world_w) { return world_w - world_w / 8; }
 
 // The first solid row in a column, or -1 if the column is open all the way down.
 // Kept separate from the prop planter's scan rather than shared with it: that
@@ -137,8 +136,10 @@ inline Standing stand_player_on_ground(Run& run) {
 // This puts it there directly, so the drop is removed rather than shortened and
 // Player::has_landed is still unspent when the player takes their first real
 // fall.
-inline void stand_player_on_floor(Run& run) {
-    run.player = Player(run.grid.get_width() / 2,
+//
+// `left` is the body's left column; -1 keeps the old middle-of-the-world spot.
+inline void stand_player_on_floor(Run& run, int left = -1) {
+    run.player = Player(left >= 0 ? left : run.grid.get_width() / 2,
                         run.grid.get_height() - Player::HEIGHT);
 }
 
@@ -159,7 +160,7 @@ struct Objective {
 // of the world, and an objective hanging in the sky is exactly as wrong as one
 // buried. A run with no objective is still playable, so the caller warns rather
 // than refusing to start.
-inline Objective place_objective(Run& run, int column = OBJECTIVE_X) {
+inline Objective place_objective(Run& run, int column) {
     const int surface = terrain_surface(run.grid, column);
     if (surface < 0) return Objective{};
     const int y = surface - Player::HEIGHT / 2;

@@ -311,6 +311,7 @@ int main() {
             out.header.grid_w = 90;
             out.header.grid_h = 50;
             out.header.seed = 4040;
+            out.header.scene = "bg_tarn";
             out.header.scene_cells = 0;
             out.header.start_fingerprint = 12345;
             out.header.end_fingerprint = input_log::fingerprint(a.grid);
@@ -327,6 +328,7 @@ int main() {
             check("...with every header field intact",
                   in.header.grid_w == out.header.grid_w && in.header.grid_h == out.header.grid_h &&
                   in.header.seed == out.header.seed &&
+                  in.header.scene == out.header.scene &&
                   in.header.scene_cells == out.header.scene_cells &&
                   in.header.start_fingerprint == out.header.start_fingerprint &&
                   in.header.end_fingerprint == out.header.end_fingerprint &&

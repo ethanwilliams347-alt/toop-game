@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace scene_list {
 
@@ -131,6 +132,37 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
             return fail("scene '" + def.name +
                         "' names no material map, so it has no terrain to stand on; "
                         "its spawn must be floor");
+
+        // --- named fields ----------------------------------------------------
+        //
+        // `key=value`, anywhere after the five required fields. Named rather than
+        // positional because the positional tail is already three optional fields
+        // deep, and a fourth would make every row that wants it spell out a mode,
+        // a size and a scale it does not care about. Pulled out first so the
+        // positional reading below sees exactly what it always did.
+        {
+            std::string rest, token;
+            std::vector<std::string> positional;
+            while (fields >> token) {
+                const size_t eq = token.find('=');
+                if (eq == std::string::npos) {
+                    positional.push_back(token);
+                    continue;
+                }
+                const std::string key = token.substr(0, eq);
+                const std::string value = token.substr(eq + 1);
+                if (key == "level") {
+                    if (!def.level.empty())
+                        return fail("scene '" + def.name + "' names `level=` twice");
+                    if (!file_field(value, def.level) || def.level.empty())
+                        return fail("'" + value + "' is not a usable level file name");
+                } else {
+                    return fail("'" + key + "=' is not a scene field (level)");
+                }
+            }
+            for (const std::string& p : positional) rest += p + " ";
+            fields = std::istringstream(rest);
+        }
 
         // --- the optional trailing fields ------------------------------------
         //

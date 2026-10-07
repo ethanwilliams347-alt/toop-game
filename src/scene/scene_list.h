@@ -30,6 +30,10 @@
 // they mean derive it from the material BMP's own dimensions, or the engine
 // default when the scene names no BMP.
 //
+// Named fields, `key=value`, may follow anywhere after the five required ones:
+//
+//     level=<file>     the level file (scene/level_list.h), resolved under assets/
+//
 // Every field is read, which is why there is no `seed` column and no x/y spawn
 // column: a number the loader ignores is one an author eventually spends an
 // afternoon tuning. `spawn` is a word rather than a coordinate for the same
@@ -71,6 +75,9 @@ struct SceneDef {
     std::string material;  // asset stem or empty; resolves to assets/<stem>
     std::string albedo;     // asset stem or empty
     std::string props;      // asset stem or empty
+    // `level=<file>`: what the level puts in its world -- player column,
+    // objective, enemies (scene/level_list.h). Empty means every default.
+    std::string level;
     Spawn spawn = Spawn::Terrain;
     SceneMode mode = SceneMode::Fixed;
     // 0 means "not stated" and not "zero cells", which is why these are not

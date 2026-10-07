@@ -55,6 +55,7 @@ set(ENGINE_SOURCES
     src/physics/enemy.cpp
     src/physics/arrow.cpp
     src/game/run.cpp
+    src/game/level.cpp
     src/game/input_log.cpp
     src/scene/scene.cpp
 )
@@ -84,6 +85,8 @@ set(SCENE_PROP_SOURCES
     src/scene/sprites.cpp
     src/scene/bmp.cpp
     src/scene/scene_list.cpp
+    src/scene/level_list.cpp
+    src/scene/level_files.cpp
 )
 
 # Frame composition and the screen-space layer. A fifth variable rather than a
@@ -287,6 +290,13 @@ if(BUILD_TESTING)
     add_executable(boot_test tests/test_boot.cpp ${ENGINE_SOURCES} ${SCENE_PROP_SOURCES})
     target_include_directories(boot_test PRIVATE src tests)
     add_test(NAME boot_test COMMAND boot_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    # Starting a level: the level-file parser, the scene list's named fields and
+    # level::start, plus every shipped scene started as the game starts it. From
+    # the source tree for that last part, like boot_test.
+    add_executable(level_test tests/test_level.cpp ${ENGINE_SOURCES} ${SCENE_PROP_SOURCES})
+    target_include_directories(level_test PRIVATE src tests)
+    add_test(NAME level_test COMMAND level_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The shell's decisions: the frame pacer's freeze rule, its step count and
     # interpolation alpha, and the settings menu's navigation and selection. All

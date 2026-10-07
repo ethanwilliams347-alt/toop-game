@@ -21,7 +21,7 @@ task seems to require breaking one, stop and say so rather than working around i
 - **The step loop allocates nothing.** `Run::step()` / `Grid::update()` reuse
   persistent scratch vectors cleared with `.clear()`. No local `std::vector`,
   `std::string`, or `std::function` in anything reachable from `Grid::update()`.
-- **Parsers reject the whole file, never a single line.** `load_prop_list`,
+- **Parsers reject the whole file, never a single line.** `load_prop_list`, `load_level`,
   `load_scene_list`, and `load_sprite_manifest` return empty and set `*error` on
   the first malformed record; callers log to `stderr` and continue degraded. Don't
   add per-line skip-and-continue — a scene that renders wrong silently is the

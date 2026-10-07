@@ -43,7 +43,11 @@ bool fail(std::string* error, const std::string& msg) {
     return false;
 }
 
-constexpr size_t HEADER_BYTES = 8 + 4 + 4 + 4 + 8 + 4 + 8 + 8 + 4 + 4 + 4;  // + step count
+// Fixed part only; the scene name's bytes follow its length field.
+constexpr size_t HEADER_BYTES = 8 + 4 + 4 + 4 + 8 + 4 + 4 + 8 + 8 + 4 + 4 + 4;  // + step count
+// What follows the name: scene_cells, both fingerprints, the end position and
+// the step count.
+constexpr size_t AFTER_NAME_BYTES = 4 + 8 + 8 + 4 + 4 + 4;
 
 } // namespace
 
@@ -69,7 +73,38 @@ uint64_t fingerprint(const Grid& grid) {
     return h;
 }
 
+uint64_t fingerprint(const Run& run) {
+    uint64_t h = fingerprint(run.grid);
+    auto mix = [&h](uint64_t v) {
+        for (int i = 0; i < 8; ++i) {
+            h ^= (v >> (8 * i)) & 0xFF;
+            h *= 1099511628211ull;
+        }
+    };
+    auto mix_int = [&mix](int v) { mix(static_cast<uint64_t>(static_cast<int64_t>(v))); };
+    mix_int(run.player.cell_x());
+    mix_int(run.player.cell_y());
+    mix_int(run.player.health());
+    mix_int(run.has_objective() ? 1 : 0);
+    mix_int(run.objective_x());
+    mix_int(run.objective_y());
+    for (const Enemy& e : run.enemies) {
+        if (!e.is_alive()) {
+            mix_int(-1);
+            continue;
+        }
+        mix_int(species::index_of(e.species()));
+        mix_int(e.cell_x());
+        mix_int(e.cell_y());
+        mix_int(e.pixel_count());
+    }
+    return h;
+}
+
 bool write(const char* path, const Log& log, std::string* error) {
+    if (log.header.scene.size() > MAX_SCENE_NAME)
+        return fail(error, std::string(path) + ": scene name '" + log.header.scene +
+                               "' is longer than a log can hold");
     std::vector<uint8_t> buf;
     buf.reserve(HEADER_BYTES + log.steps.size() * RECORD_BYTES);
 
@@ -78,6 +113,8 @@ bool write(const char* path, const Log& log, std::string* error) {
     put32(buf, static_cast<uint32_t>(log.header.grid_w));
     put32(buf, static_cast<uint32_t>(log.header.grid_h));
     put64(buf, log.header.seed);
+    put32(buf, static_cast<uint32_t>(log.header.scene.size()));
+    for (char c : log.header.scene) buf.push_back(static_cast<uint8_t>(c));
     put32(buf, static_cast<uint32_t>(log.header.scene_cells));
     put64(buf, log.header.start_fingerprint);
     put64(buf, log.header.end_fingerprint);
@@ -138,6 +175,13 @@ bool read(const char* path, Log& log, std::string* error) {
     h.grid_w = static_cast<int32_t>(get32(buf, off));
     h.grid_h = static_cast<int32_t>(get32(buf, off));
     h.seed = get64(buf, off);
+    {
+        const uint32_t name_len = get32(buf, off);
+        if (name_len > MAX_SCENE_NAME || buf.size() - off < name_len + AFTER_NAME_BYTES)
+            return fail(error, std::string(path) + ": header names a scene of impossible length");
+        h.scene.assign(reinterpret_cast<const char*>(buf.data() + off), name_len);
+        off += name_len;
+    }
     h.scene_cells = static_cast<int32_t>(get32(buf, off));
     h.start_fingerprint = get64(buf, off);
     h.end_fingerprint = get64(buf, off);

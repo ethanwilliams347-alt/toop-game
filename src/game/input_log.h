@@ -51,13 +51,25 @@ namespace input_log {
 // 3: the troll spawn key (`spawn_troll`), as button bit 128 -- the last free bit
 //    in the byte, so the next button grows the record. Bumped for the reason 2
 //    was.
-constexpr uint32_t FORMAT_VERSION = 3;
+//
+// 4: the header names the scene the session was played in. Without it a log
+//    could not say which world it belonged to, and the replay bench guessed --
+//    wrongly, once the fixture it guessed stopped being a scene.
+constexpr uint32_t FORMAT_VERSION = 4;
+
+// The longest scene name a log stores. Scene names are short identifiers
+// (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt
+// length rather than allocate whatever it says.
+constexpr uint32_t MAX_SCENE_NAME = 64;
 
 struct Header {
     uint32_t version = FORMAT_VERSION;
     int32_t grid_w = 0;
     int32_t grid_h = 0;
     uint64_t seed = 0;
+    // The scene_list name of the scene the session was played in. The replay
+    // rebuilds the world from it with level::start, exactly as the game did.
+    std::string scene;
 
     // The world the recording started in, captured after the scene was stamped and
     // before the first step. `scene_cells` is load_scene's own return value, and
@@ -84,6 +96,16 @@ struct Log {
 // worlds_match compares, so "the fingerprints agree" and "the suites' notion of
 // an identical world" mean the same thing.
 uint64_t fingerprint(const Grid& grid);
+
+// The grid's fingerprint plus everything else in a Run that a level puts there:
+// the player's position and health, every live enemy's species, position and
+// pixel count, and the objective. This is what the header's start and end
+// fingerprints hold.
+//
+// The grid alone was not enough. A replay that rebuilt the right terrain with the
+// wrong enemies -- a stale level file, a planter that changed -- matched the
+// grid fingerprint exactly and then replayed a different fight without a word.
+uint64_t fingerprint(const Run& run);
 
 bool write(const char* path, const Log& log, std::string* error);
 bool read(const char* path, Log& log, std::string* error);

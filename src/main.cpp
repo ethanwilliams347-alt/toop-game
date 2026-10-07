@@ -10,6 +10,7 @@
 #include "game/debug_view.h"
 #include "game/display.h"
 #include "game/input_log.h"
+#include "game/level.h"
 #include "game/pacer.h"
 #include "game/run.h"
 #include "game/scene_activation.h"
@@ -24,6 +25,7 @@
 #include "render/player_anim.h"
 #include "render/surface_plane.h"
 #include "scene/bmp.h"
+#include "scene/level_files.h"
 #include "scene/props.h"
 #include "scene/scene.h"
 #include "scene/scene_list.h"
@@ -48,19 +50,6 @@ constexpr int GRID_HEIGHT = boot::GRID_HEIGHT;
 // viewport's position in the world, so mouse and render coordinates are correct
 // at any grid size and any camera offset. The texture is sized to the viewport
 // rather than to the whole grid, so upload cost does not scale with world size.
-
-// The scene loader lives in src/scene/bmp.cpp; this is all that is left of it
-// here. As SDL_LoadBMP calls in this file, nothing headless could stamp the
-// world the game actually plays in -- and the replayed benchmark row has to, or
-// it measures a session replayed into a world it was not recorded in.
-Scene load_scene_from_bmp(const char* material_path, const char* albedo_path) {
-    std::string error, warning;
-    Scene scene = bmp::load(material_path, albedo_path, &error, &warning);
-    if (!error.empty()) std::fprintf(stderr, "Failed to load scene: %s\n", error.c_str());
-    if (!warning.empty()) std::fprintf(stderr, "WARNING: %s\n", warning.c_str());
-    return scene;
-}
-
 
 // Loads a plain (non-scene) authored BMP as a texture -- the backdrop and prop
 // art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see
@@ -630,18 +619,6 @@ int main(int argc, char* argv[]) {
                                                   // is what puts it down, once there is
                                                   // terrain to put it on
     
-    // Load the active scene. A scene that resolves to no cells at all is reported
-    // rather than shrugged off: the launch check is "terrain is visible
-    // immediately", and a blank world is what a broken legend, a missing file and
-    // an empty file all look like from here.
-    //
-    // A scene that is declared empty is a fourth thing and must not be confused
-    // with those three, which is why SceneDef::declared_empty() asks about the
-    // declaration and not about the result. Warning on a world that is empty
-    // because it was asked to be would make the launch check a liar.
-    Scene scene;
-    int scene_cells = 0;
-
     // The world's size and paradigm are variables, not the two constants at the
     // top of this file. boot::GRID_WIDTH/HEIGHT are still the engine default and
     // still what Run is built with; a scene row may replace them, and everything
@@ -652,101 +629,6 @@ int main(int argc, char* argv[]) {
     int world_w = GRID_WIDTH;
     int world_h = GRID_HEIGHT;
     bool world_infinite = false;
-    // Loading the art and stamping it are two steps, and the split is forced
-    // rather than tidy. A scene may size the world, and when it does not state a
-    // size the size is the material BMP's -- which cannot be known until the BMP
-    // is open. Stamping requires a grid of the right size, so the read has to come
-    // first. activate_scene is the only caller and runs them in that order.
-    auto load_scene_art = [&](const scene_list::SceneDef& def) {
-        scene = Scene{};
-        scene_cells = 0;
-        if (!def.declared_empty()) {
-            scene = load_scene_from_bmp(("assets/" + def.material).c_str(),
-                                        ("assets/" + def.albedo).c_str());
-        }
-    };
-
-    auto stamp_scene = [&](const scene_list::SceneDef& def) {
-        scene_cells = 0;
-        if (!def.declared_empty() && scene.width > 0) {
-            scene_cells = load_scene(run.grid, scene, 0, 0);
-        }
-        std::printf("Scene: %s, %dx%d, %d cells placed\n", def.name.c_str(),
-                    scene.width, scene.height, scene_cells);
-        if (scene_cells == 0 && !def.declared_empty()) {
-            std::fprintf(stderr, "WARNING: the scene named no material anywhere - the world is empty.\n");
-        }
-    };
-
-    // The body starts mid-air because Run is built before the scene is; now that
-    // there is terrain, stand it on the terrain. The scan is in game/boot.h so a
-    // suite can reach it; what is left here is the warning, because a body that
-    // could not find ground is something the player is about to experience and
-    // cannot otherwise account for.
-    //
-    // `floor` is a second rule and not a fallback for the first, which is the
-    // distinction scene_list::Spawn is written around. A scene with no terrain has
-    // nothing to scan, so it says so in the file; using `floor` when a terrain
-    // scan merely failed would turn a broken scene into a playable-looking one.
-    auto spawn_player = [&](const scene_list::SceneDef& def) {
-        if (def.spawn == scene_list::Spawn::Floor) {
-            boot::stand_player_on_floor(run);
-            return;
-        }
-        if (!boot::stand_player_on_ground(run).placed) {
-            std::fprintf(stderr, "WARNING: no ground under the spawn column; "
-                                 "the player starts in mid-air and will fall.\n");
-            return;
-        }
-        // The launch check for an authored floor. player_sprite.h's
-        // OFFSET_Y == FRAME_H - Player::HEIGHT turns the art's floor row into a
-        // specific pos_y, and that this scan lands on it without anyone typing
-        // the number is the evidence the material map's floor row is the row the
-        // art was drawn around. Eyeballing the window cannot tell those apart.
-        std::printf("Spawn: standing at y=%d (feet on row %d)\n",
-                    run.player.cell_y(), run.player.cell_y() + Player::HEIGHT);
-    };
-
-    // The objective, planted on whatever terrain is actually at boot::OBJECTIVE_X
-    // the same way a prop is. The decision lives in game/boot.h; what is left here
-    // is the warning, because a run that cannot be won is a thing the player has
-    // to be told about.
-    //
-    // Cleared first. Run::reset keeps the objective on purpose -- it is a property
-    // of the level, and the caller used to always re-stamp the same level.
-    // Switching to a scene with no terrain would otherwise leave the previous
-    // level's objective hanging in empty space: placed, unreachable, and claiming
-    // the run is winnable.
-    auto place_objective_for = [&](const scene_list::SceneDef& def) {
-        run.clear_objective();
-        if (def.declared_empty()) return;  // nothing to plant it on, and none is owed
-        if (!boot::place_objective(run).placed) {
-            // Two different failures, and telling them apart is the point.
-            // boot::OBJECTIVE_X is hard-coded, so a scene narrower than it leaves
-            // the column not merely unsupported but off the edge of the world.
-            // Reported as the same sentence, that reads as "the terrain generator
-            // left a hole", which is a bug, where this is a scene the hard-coded
-            // objective does not fit. A warning either way, but not the same
-            // warning.
-            if (boot::OBJECTIVE_X >= run.grid.get_width()) {
-                std::fprintf(stderr, "WARNING: scene '%s' is %d cells wide and the objective "
-                                     "column is hard-coded at x=%d, so this run has no "
-                                     "objective and cannot be won.\n",
-                             def.name.c_str(), run.grid.get_width(), boot::OBJECTIVE_X);
-            } else {
-                std::fprintf(stderr, "WARNING: no ground under the objective column x=%d; "
-                                     "this run has no objective and cannot be won.\n",
-                             boot::OBJECTIVE_X);
-            }
-            return;
-        }
-        // Printed for the same reason the seed and the scene count are: an
-        // objective that silently failed to place is a run that cannot be won,
-        // and that is not something a player can tell apart from one they have
-        // not found yet.
-        std::printf("Objective: (%d, %d)\n", run.objective_x(), run.objective_y());
-    };
-
     // --- the session recorder ---
     //
     // Recording is always on, and F9 saves what has been recorded so far. The
@@ -972,16 +854,15 @@ int main(int argc, char* argv[]) {
         active_scene = index;
         const scene_list::SceneDef& def = scenes[static_cast<size_t>(index)];
 
-        // The size and the scale are resolved before anything is built, and the
-        // resolving is not done here. The art is read first because a scene that
-        // states no size is the material BMP's size, and that cannot be known
-        // until the BMP is open; then scene_activation::resolve says what the
-        // numbers mean. The precedence rule and the
-        // rebuild-only-when-the-scale-changed rule live at that function, under
-        // boot_test, rather than as prose at this call site checked by nobody.
-        load_scene_art(def);
+        // The files first, because a scene that states no size is the material
+        // BMP's size, and that cannot be known until the BMP is open. The loader
+        // is shared with the replay bench (scene/level_files.h), so the two read a
+        // scene the same way.
+        const level_files::Loaded loaded = level_files::load(def, "assets/", level::is_species);
+        for (const std::string& e : loaded.errors) std::fprintf(stderr, "ERROR: %s\n", e.c_str());
+        for (const std::string& w : loaded.warnings) std::fprintf(stderr, "WARNING: %s\n", w.c_str());
         const scene_activation::Resolved resolved =
-            scene_activation::resolve(def, scene.width, scene.height,
+            scene_activation::resolve(def, loaded.scene.width, loaded.scene.height,
                                       GRID_WIDTH, GRID_HEIGHT, view_scale);
         world_infinite = resolved.infinite;
         world_w = resolved.world_w;
@@ -1019,19 +900,19 @@ int main(int argc, char* argv[]) {
             load_rig_layers(*rs);
         else clear_custom_layers();
 
-        run.reset(world_seed, world_w, world_h);
-        stamp_scene(def);
-        spawn_player(def);
-        place_objective_for(def);
+        // The world itself: one call, shared with the replay bench and the tests,
+        // so there is no second path that puts a world together. See game/level.h
+        // for what it does and why it is not here.
+        const level::Report built = level::start(run, def, loaded.scene, loaded.level, world_seed);
+        for (const level::Line& line : level::describe(built, def)) {
+            if (line.warning) std::fprintf(stderr, "WARNING: %s\n", line.text.c_str());
+            else std::printf("%s\n", line.text.c_str());
+        }
+
+        // Props after the world, because they are planted on the terrain it
+        // stamped. Render-only, so not part of what level::start rebuilds.
         load_props_for(def);
         plant_props_now(def);
-
-        // After the player stands, because the planter keeps clear of where the
-        // player is; after the props only because that is the order the launch
-        // lines have always come out in.
-        const boot::EnemyPlanting enemies_planted = boot::plant_enemies(run);
-        std::printf("Enemies: %d placed (%d troll%s)\n", enemies_planted.placed,
-                    enemies_planted.trolls, enemies_planted.trolls == 1 ? "" : "s");
 
         // The world is new, so a log of inputs into the old one is not a log of
         // anything.
@@ -1041,8 +922,9 @@ int main(int argc, char* argv[]) {
         // cannot replay into.
         recording.header.grid_w = run.grid.get_width();
         recording.header.grid_h = run.grid.get_height();
-        recording.header.scene_cells = scene_cells;
-        recording.header.start_fingerprint = input_log::fingerprint(run.grid);
+        recording.header.scene = def.name;
+        recording.header.scene_cells = built.scene_cells;
+        recording.header.start_fingerprint = input_log::fingerprint(run);
         recording_full = false;
     };
     activate_scene(active_scene);
@@ -1389,7 +1271,7 @@ int main(int argc, char* argv[]) {
                     // of the session, because this is the end of the recording being
                     // written -- the replay has to check against the world the last
                     // recorded step produced.
-                    recording.header.end_fingerprint = input_log::fingerprint(run.grid);
+                    recording.header.end_fingerprint = input_log::fingerprint(run);
                     recording.header.end_player_x = run.player.cell_x();
                     recording.header.end_player_y = run.player.cell_y();
 

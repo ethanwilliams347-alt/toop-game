@@ -272,10 +272,11 @@ void test_shipped_fixture() {
     // The objective's position stops being a line to read. A run with no objective
     // cannot be won, and the only thing that otherwise says so is a stderr warning
     // nobody sees unless they are looking.
-    const boot::Objective obj = boot::place_objective(run);
+    const int column = boot::default_objective_column(run.grid.get_width());
+    const boot::Objective obj = boot::place_objective(run, column);
     check("fixture: the objective plants on the shipped scene",
-          obj.placed && obj.x == boot::OBJECTIVE_X,
-          "no ground under x=" + std::to_string(boot::OBJECTIVE_X));
+          obj.placed && obj.x == column,
+          "no ground under x=" + std::to_string(column));
     check("fixture: ...on ground rather than at the top of the world",
           obj.placed && obj.y > 0, std::to_string(obj.y));
 

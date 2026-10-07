@@ -19,8 +19,11 @@
 #include "render/light.h"
 #include "game/display.h"
 #include "game/input_log.h"
+#include "game/level.h"
 #include "game/run.h"
 #include "scene/bmp.h"
+#include "scene/level_files.h"
+#include "scene/scene_list.h"
 #include "scene/scene.h"
 #include <algorithm>
 #include <chrono>
@@ -509,6 +512,44 @@ void take_sample(const Grid& g, SessionContents& c, bool dug_recently, bool is_b
     }
 }
 
+// The scene a log was played in, read the way the game reads it. Shared by both
+// replay rows below so they cannot rebuild different worlds.
+struct ReplayWorld {
+    scene_list::SceneDef def;
+    level_files::Loaded loaded;
+};
+
+bool load_replay_world(const input_log::Log& log, ReplayWorld& out, std::string& why) {
+    std::string scene_error;
+    const std::vector<scene_list::SceneDef> scenes =
+        scene_list::load_scene_list("assets/scenes.txt", &scene_error);
+    for (const scene_list::SceneDef& d : scenes) {
+        if (d.name != log.header.scene) continue;
+        out.def = d;
+        out.loaded = level_files::load(d, "assets/", level::is_species);
+        if (!out.loaded.errors.empty()) {
+            why = out.loaded.errors.front();
+            return false;
+        }
+        return true;
+    }
+    why = "the log was played in scene '" + log.header.scene +
+          "', which assets/scenes.txt does not list" +
+          (scene_error.empty() ? "" : " (" + scene_error + ")") +
+          ". Run this from the build directory, where assets/ is";
+    return false;
+}
+
+// Builds the logged world into `run` and says whether it is the world the log
+// started in: same terrain, same bodies, same objective (input_log::fingerprint
+// of the whole Run, not just the grid).
+bool rebuild_matches(Run& run, const input_log::Log& log, const ReplayWorld& world, int& placed) {
+    placed = level::start(run, world.def, world.loaded.scene, world.loaded.level,
+                          log.header.seed).scene_cells;
+    return placed == log.header.scene_cells &&
+           input_log::fingerprint(run) == log.header.start_fingerprint;
+}
+
 // A scenario that is a real frame, replayed from a recorded session.
 //
 // Every other row in this file is hand-built, and whether any of them counts as
@@ -545,30 +586,29 @@ void run_replay(const char* log_path) {
         return;
     }
 
-    Run run(log.header.grid_w, log.header.grid_h, log.header.seed);
-
-    std::string scene_error, scene_warning;
-    const Scene scene = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp",
-                                  &scene_error, &scene_warning);
-    if (!scene_error.empty()) {
-        std::printf("  replay    not run: %s\n", scene_error.c_str());
-        std::printf("            Run this from `code/`, where assets/ is.\n");
+    // The world the session was played in, rebuilt by the call the game made:
+    // the scene the header names, read through the game's loader and started by
+    // level::start. Before the header named a scene this row stamped a fixture
+    // and planted nothing, so a session played in the game could not replay at
+    // all.
+    ReplayWorld world;
+    std::string why;
+    if (!load_replay_world(log, world, why)) {
+        std::printf("  replay    not run: %s\n", why.c_str());
         return;
     }
-    if (!scene_warning.empty()) std::printf("  replay    WARNING: %s\n", scene_warning.c_str());
-
-    const int placed = load_scene(run.grid, scene, 0, 0);
-    const uint64_t start = input_log::fingerprint(run.grid);
+    Run run(log.header.grid_w, log.header.grid_h, log.header.seed);
+    int placed = 0;
+    const bool same_start = rebuild_matches(run, log, world, placed);
 
     // The staleness check. A log replayed into a world it was not recorded in
     // produces a number with nothing wrong-looking about it. Refused rather than
     // warned: there is no partial version of "this is the same world".
-    if (placed != log.header.scene_cells || start != log.header.start_fingerprint) {
-        std::printf("  replay    not run: the fixture scene has changed since this log was recorded\n"
-                    "            (%d cells placed now, %d when recorded; start fingerprints %s).\n"
-                    "            Re-record the session with F9 in the game.\n",
-                    placed, log.header.scene_cells,
-                    start == log.header.start_fingerprint ? "agree" : "differ");
+    if (!same_start) {
+        std::printf("  replay    not run: scene '%s' has changed since this log was recorded\n"
+                    "            (%d cells placed now, %d when recorded; the terrain, the bodies or\n"
+                    "            the objective differ). Re-record the session with F9 in the game.\n",
+                    world.def.name.c_str(), placed, log.header.scene_cells);
         return;
     }
 
@@ -618,7 +658,7 @@ void run_replay(const char* log_path) {
     // state -- and that is a physics change working as intended, with the row still
     // perfectly valid. The two are indistinguishable from here, so this says what it
     // saw and lets the reader decide.
-    const uint64_t end = input_log::fingerprint(run.grid);
+    const uint64_t end = input_log::fingerprint(run);
     const bool same_world = end == log.header.end_fingerprint;
     const bool same_player = run.player.cell_x() == log.header.end_player_x &&
                              run.player.cell_y() == log.header.end_player_y;
@@ -653,7 +693,7 @@ void run_replay(const char* log_path) {
     }
 
     Run census_run(log.header.grid_w, log.header.grid_h, log.header.seed);
-    load_scene(census_run.grid, scene, 0, 0);
+    level::start(census_run, world.def, world.loaded.scene, world.loaded.level, log.header.seed);
 
     // Sample the world before the first step, and keep those counts as the baseline
     // the peaks are read against. See start_cells.
@@ -773,12 +813,10 @@ void run_replay_configs(const char* log_path, const char* what,
         return;
     }
 
-    std::string scene_error, scene_warning;
-    const Scene scene = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp",
-                                  &scene_error, &scene_warning);
-    if (!scene_error.empty()) {
-        std::printf("  %-9s not run: %s\n", what, scene_error.c_str());
-        std::printf("            Run this from `code/`, where assets/ is.\n");
+    ReplayWorld world;
+    std::string why;
+    if (!load_replay_world(log, world, why)) {
+        std::printf("  %-9s not run: %s\n", what, why.c_str());
         return;
     }
 
@@ -799,10 +837,9 @@ void run_replay_configs(const char* log_path, const char* what,
         run.grid.set_seek_level_enabled(cfg.seek_level);
         run.grid.set_room_above_enabled(cfg.room_above);
 
-        const int placed = load_scene(run.grid, scene, 0, 0);
-        if (placed != log.header.scene_cells ||
-            input_log::fingerprint(run.grid) != log.header.start_fingerprint) {
-            std::printf("  %-9s not run: the fixture scene has changed since this log was\n"
+        int placed = 0;
+        if (!rebuild_matches(run, log, world, placed)) {
+            std::printf("  %-9s not run: the scene has changed since this log was\n"
                         "            recorded. Same refusal, and the same reason, as the row above.\n",
                         what);
             return;
@@ -830,7 +867,7 @@ void run_replay_configs(const char* log_path, const char* what,
         std::vector<double> sorted = step_ms;
         std::sort(sorted.begin(), sorted.end());
 
-        const bool exact = input_log::fingerprint(run.grid) == log.header.end_fingerprint &&
+        const bool exact = input_log::fingerprint(run) == log.header.end_fingerprint &&
                            run.player.cell_x() == log.header.end_player_x &&
                            run.player.cell_y() == log.header.end_player_y;
 
