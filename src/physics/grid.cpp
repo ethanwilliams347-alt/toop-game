@@ -90,6 +90,7 @@ void Grid::reset(uint64_t seed) {
     tip_count = 0;
     std::fill(std::begin(tip_tag_live), std::end(tip_tag_live), false);
     balance_component.clear();
+    balance_stack.clear();
     tip_next.clear();
     tip_carry.clear();
     tip_displaced.clear();
@@ -505,7 +506,18 @@ void Grid::fall_if_unsupported(int x, int y) {
             // down its supported column, which no post has ever done. The halves
             // of a break are re-queued and get asked about balance on their own
             // next time round.
-            const bool tipped = topple_if_unbalanced(x, y, was_moving);
+            //
+            // At rest, one case is skipped without asking: the fill came straight
+            // down through the seed's own material to the bottom of the world.
+            // That is terrain, or a piece standing on the world floor, and
+            // weighing it means walking it, which on a wide burning slab -- a
+            // seed queued every few cells, every step -- costs more than the
+            // fire. Crossing into another material on the way, or landing on
+            // something other than the floor, still gets asked.
+            const bool on_world_floor_alone =
+                !was_moving && cy + 1 >= height &&
+                material_family(cells[idx].type) == material_family(cells[seed].type);
+            const bool tipped = !on_world_floor_alone && topple_if_unbalanced(x, y, was_moving);
             if (!tipped && was_falling) fracture_landing(x, y);
 
             settle_marks(SupportState::Supported, idx);
@@ -545,8 +557,15 @@ void Grid::fall_if_unsupported(int x, int y) {
                     // part it started in, and balance is judged per material (see
                     // topple_if_unbalanced), so a wooden post on a stone floor is
                     // only ever weighed by a seed that is in the post.
+                    //
+                    // Only across a joint, though: if the settled neighbour is the
+                    // same material, this is the same run of it, and the fill
+                    // that settled it has nearly always asked already. When it
+                    // has not -- its trail crossed in from another material --
+                    // the cost is a piece that stays standing, the harmless way.
                     if (!was_moving &&
-                        static_cast<SupportState>(support_state[nidx]) == SupportState::Supported) {
+                        static_cast<SupportState>(support_state[nidx]) == SupportState::Supported &&
+                        material_family(cells[nidx].type) != material_family(cells[seed].type)) {
                         topple_if_unbalanced(x, y, false);
                     }
                     settle_marks(SupportState::Supported, idx);

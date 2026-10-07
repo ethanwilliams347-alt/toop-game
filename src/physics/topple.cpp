@@ -13,12 +13,6 @@
 // and the writes), and nothing here knows a renderer exists.
 
 namespace {
-    // Charred is a state of Wood, not a different thing: a beam that has caught in
-    // the middle is still one beam.
-    ElementType material_family(ElementType t) {
-        return t == ElementType::Charred ? ElementType::Wood : t;
-    }
-
     // floor(n / d) for d > 0. The shear below has to round the same way on both
     // sides of the pivot, and C++ division truncates toward zero, which would
     // round a row a hair left of the pivot the opposite way from one a hair right.
@@ -92,19 +86,31 @@ bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
 
     balance_component.clear();
     balance_component.push_back(seed);
+    balance_stack.clear();
+    balance_stack.push_back(seed);
     balance_visit[seed] = balance_epoch;
 
-    for (size_t head = 0; head < balance_component.size(); ++head) {
-        // Too big to judge is too big to tip, for the reason MAX_SUPPORT_CELLS
-        // gives: when the question costs more than it is worth, the answer that
-        // leaves the level standing is the one to guess. This is also what keeps a
-        // whole authored landscape -- one welded piece standing on the bottom of
-        // the world -- from being weighed every time the player digs it.
-        if (static_cast<int>(balance_component.size()) > MAX_SUPPORT_CELLS) return false;
-
-        const int idx = balance_component[head];
+    // Depth first, downhill first -- neighbours are pushed in reading order, so the
+    // row below comes off the stack first -- for the same reason the support fill
+    // runs that way: the ground is down there, and so is the early way out below.
+    while (!balance_stack.empty()) {
+        const int idx = balance_stack.back();
+        balance_stack.pop_back();
         const int cy = idx / width;
         const int cx = idx - cy * width;
+
+        // At rest and standing on the bottom of the world: assume it is standing
+        // up. That is nearly always terrain -- one welded piece the width of the
+        // level -- and walking it to the size cap on every disturbance is the
+        // single biggest cost this check could add: fire eating along a wide slab
+        // queues a seed every few cells, each too far from the last to share its
+        // walk. Heading downhill gets here in about the depth of the piece rather
+        // than a full budget. What it gives up -- an odd shape at rest on the
+        // world floor with its weight past its foot -- only ever exists if someone
+        // authored it, and leaving it standing is the harmless direction. A piece
+        // that has just landed is still weighed, wherever it landed.
+        if (!in_flight && cy + 1 >= height) return false;
+
         for (int ny = cy - 1; ny <= cy + 1; ++ny) {
             for (int nx = cx - 1; nx <= cx + 1; ++nx) {
                 if (!is_within_bounds(nx, ny)) continue;
@@ -115,6 +121,13 @@ bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
                 if (stamped_this_pass(nidx)) return false;
                 balance_visit[nidx] = balance_epoch;
                 balance_component.push_back(nidx);
+                balance_stack.push_back(nidx);
+
+                // Too big to judge is too big to tip, for the reason
+                // MAX_SUPPORT_CELLS gives: when the question costs more than it is
+                // worth, the answer that leaves the level standing is the one to
+                // guess.
+                if (static_cast<int>(balance_component.size()) > MAX_SUPPORT_CELLS) return false;
             }
         }
     }

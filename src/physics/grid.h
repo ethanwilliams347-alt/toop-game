@@ -823,6 +823,12 @@ private:
     // ownership test, at no cost per cell.
     bool tip_tag_live[256] = {};
 
+    // What balance treats as one material. Charred is a state of Wood, not a
+    // different thing: a beam that has caught in the middle is still one beam.
+    static ElementType material_family(ElementType t) {
+        return t == ElementType::Charred ? ElementType::Wood : t;
+    }
+
     bool is_tipping(int idx) const {
         return is_structural(cells[idx].type) && tip_tag_live[cells[idx].piece_tag];
     }
@@ -858,6 +864,7 @@ private:
     void end_tipping(int i, bool requeue);
 
     std::vector<int> balance_component;  // scratch, reused across checks
+    std::vector<int> balance_stack;      // scratch, reused across checks
     std::vector<int> tip_next;           // scratch: the pose being tried
     std::vector<Element> tip_carry;      // scratch: the body's cells in transit
     std::vector<Element> tip_displaced;  // scratch: fluid the body moves into
