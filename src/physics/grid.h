@@ -1,6 +1,7 @@
 #pragma once
 #include "element.h"
 #include "random.h"
+#include "fixed_trig.h"
 #include <vector>
 #include <cstdint>
 
@@ -133,7 +134,15 @@ public:
     // resolve_support(). Exposed for the same reason active_chunk_count() is: it is
     // the one piece of internal state a reset test needs to see to prove the queue
     // was cleared rather than merely idle.
-    bool has_pending_support_checks() const { return !pending_support.empty(); }
+    //
+    // A piece tipping over its edge counts as one still waiting: it is a structure
+    // in motion exactly as a falling one is, and every caller of this asks "has the
+    // building stopped moving yet", which a half-toppled tower has not.
+    bool has_pending_support_checks() const { return !pending_support.empty() || tip_count > 0; }
+
+    // How many pieces are pivoting over an edge right now. Exposed for tests and
+    // the diagnostic for the same reason active_chunk_count() is.
+    int tipping_count() const { return tip_count; }
 
     // How far vent_fluid searches for somewhere to put displaced fluid. See
     // vent_radius in the private section for what the number means; this trio
@@ -582,10 +591,12 @@ private:
     // --- fracture ---
     //
     // drop_component translates an unsupported piece straight down with its shape
-    // intact, so masonry descends like an elevator. Fracture is the answer rather
-    // than rotation: true rigid-body rotation on a cell grid means resampling the
-    // piece every step it turns, which destroys the exact authored pixels. Masonry
-    // mostly breaks rather than tips anyway.
+    // intact, so masonry descends like an elevator. Fracture was originally the
+    // whole answer, on the grounds that rotation on a cell grid means resampling
+    // the piece and destroying its authored pixels. Rotation by shears does not
+    // resample, so pieces now tip as well (see "toppling" below); fracture keeps
+    // the landings where most of the weight is over solid ground, and toppling
+    // takes the ones where most of it is not.
     //
     // A piece breaks when it lands, not while it falls, and that timing is what
     // makes the feature safe. Every "nothing must move here" test in the suite is
@@ -721,6 +732,159 @@ private:
     // Falling writes cells, and those writes would otherwise queue support
     // checks for the fall that is already in progress.
     bool resolving_support = false;
+
+    // --- toppling ---
+    //
+    // Support used to be one yes/no question: is any cell of this piece standing on
+    // anything? Yes meant it stayed exactly where it was, however little of it was
+    // underneath -- a tall post with one corner on a ledge stood there forever, and
+    // a slab landing on the lip of a cliff hung off it by a single cell. Nothing
+    // could fall over, only fall down.
+    //
+    // A held-up piece is now asked a second question: is its centre of mass over
+    // what it is standing on? The cells it stands on span some range of columns;
+    // if the mean of all its cells lies outside that range, gravity has a lever
+    // arm about the last supporting edge and the piece tips over it.
+    //
+    // The objection in "fracture" below -- that rotating on a grid means
+    // resampling the piece and destroying its authored pixels -- is answered by
+    // rotating with three shears (Paeth's method) instead of by sampling. Each
+    // shear slides whole rows, or whole columns, by an integer number of cells,
+    // which is a permutation of the lattice: no cell is dropped, duplicated or
+    // recoloured, so a tipped piece is the same cells in a new arrangement and
+    // matter is conserved by construction. Every pose is re-derived from the shape
+    // the piece had when it started tipping, never from the previous pose, so the
+    // small staircase a shear leaves at an angle does not compound frame on frame.
+    //
+    // A tipping piece lives in the grid the whole time, exactly as a falling one
+    // does, so rendering, the player, digging and fire all see it unchanged. What
+    // it has that a falling piece does not is identity between steps -- an angle,
+    // a spin and an original shape -- which is why it is a TipBody here rather
+    // than something re-discovered by flood fill. It gets a fresh piece_tag when it
+    // starts, which is both how its cells are recognised and how it stays a
+    // separate piece from whatever it lands on afterwards.
+    //
+    // It stops the moment its next pose would overlap anything solid, and hands
+    // back to the ordinary support logic, which asks both questions again from
+    // where it lies. That is the whole collision model: no bounce, no slide. A
+    // tower lands on its side and is balanced; one that clips a boulder on the
+    // way down is re-judged about its new contact and may tip again from there.
+
+    // Gravity for a tipping piece, in cells per step per step. The same quarter
+    // cell that a falling piece gains every TICKS_PER_SPEEDUP steps, so a post
+    // toppling and one dropping read as the same world.
+    static constexpr fx::v TIP_GRAVITY = fx::from_ratio(1, TICKS_PER_SPEEDUP);
+
+    // A tipping piece gives up and is handed back after this many steps, whatever
+    // it is doing. Torque only ever grows as a piece goes over, so a real topple
+    // ends by collision or by its centre passing below the pivot long before this;
+    // the cap exists so that a case nobody thought of costs a frozen piece rather
+    // than one that is simulated forever.
+    static constexpr int TIP_MAX_STEPS = 600;
+
+    struct TipCell { int16_t x, y; };  // relative to the pivot, in cells
+
+    // A piece that is going over. Pool entries are reused rather than freed (see
+    // tip_count), so the vectors inside keep their capacity across topples.
+    struct TipBody {
+        // The corner it pivots about, as a lattice point: (px, py) is the top-left
+        // corner of cell (px, py), so it is shared by the four cells around it.
+        int px = 0, py = 0;
+
+        // The cell under the supporting corner, or -1 for the floor of the world.
+        // Dig that out and the piece has nothing to pivot on, so it stops tipping
+        // and goes back to falling.
+        int ground_idx = -1;
+
+        uint8_t tag = 0;
+        int age = 0;
+        bool moved = false;  // whether any cell has changed place since it started
+
+        fx::v theta = 0;  // radians, clockwise on screen (y points down)
+        fx::v omega = 0;  // radians per step
+
+        // Sums over the original shape, taken in doubled coordinates so that the
+        // half-cell offset of a cell's centre stays an integer: X2 = 2*lx + 1.
+        // What gravity needs is the lever arm and the moment of inertia, and both
+        // are linear in these, so they are computed once rather than per step.
+        int64_t sx2 = 0, sy2 = 0;  // sum X2, sum Y2
+        int64_t i4 = 0;            // sum X2^2 + Y2^2, which is 4 * moment of inertia
+        int reach = 1;             // furthest cell centre from the pivot, rounded up
+
+        std::vector<TipCell> shape;  // as it was when it started tipping
+        std::vector<int> at;         // where each of those cells is now (grid index)
+    };
+
+    std::vector<TipBody> tip_bodies;
+    int tip_count = 0;  // live bodies are tip_bodies[0, tip_count)
+
+    // Which piece tags belong to a tipping body. A per-tag flag rather than a
+    // per-cell array: a body's cells all wear its fresh tag, so the tag is the
+    // ownership test, at no cost per cell.
+    bool tip_tag_live[256] = {};
+
+    // What balance treats as one material. Charred is a state of Wood, not a
+    // different thing: a beam that has caught in the middle is still one beam.
+    static ElementType material_family(ElementType t) {
+        return t == ElementType::Charred ? ElementType::Wood : t;
+    }
+
+    bool is_tipping(int idx) const {
+        return is_structural(cells[idx].type) && tip_tag_live[cells[idx].piece_tag];
+    }
+
+    // Called by fall_if_unsupported at the point it concludes a piece is held up.
+    // Fills the piece, compares its centre of mass with the span of columns it
+    // stands on, and starts it tipping if the centre is outside. `in_flight` means
+    // the piece has just landed: it is then the cells that were moving (ticks > 0),
+    // because the instant it touches down it is connected to the floor it landed
+    // on, and the floor is not part of what is falling over.
+    //
+    // Returns whether it started one.
+    bool topple_if_unbalanced(int x, int y, bool in_flight);
+
+    // Turns balance_component into a TipBody pivoting about corner (px, py).
+    void start_tipping(int px, int py, int ground_idx);
+
+    // Advances every tipping body by one step. Runs after resolve_support() and
+    // before the sweep, for the same reason that does.
+    void step_tipping();
+
+    // Where body `b`'s cells would be at angle `theta`, into tip_next. False if
+    // any of them would leave the world.
+    bool tip_pose(const TipBody& b, fx::v theta);
+
+    // Tries to move body `b` to the pose in tip_next. False, with nothing
+    // written, if that pose overlaps anything solid that is not the body itself.
+    bool tip_move(TipBody& b);
+
+    // Ends body `i`: its cells stay where they are and become an ordinary piece.
+    // With `requeue`, they are queued for support so they fall, settle or tip
+    // again from there; without, they are left at rest where they stopped.
+    void end_tipping(int i, bool requeue);
+
+    std::vector<int> balance_component;  // scratch, reused across checks
+    std::vector<int> balance_stack;      // scratch, reused across checks
+    std::vector<int> tip_next;           // scratch: the pose being tried
+    std::vector<Element> tip_carry;      // scratch: the body's cells in transit
+    std::vector<Element> tip_displaced;  // scratch: fluid the body moves into
+
+    // Stamps for topple_if_unbalanced, so a piece with hundreds of seeds queued is
+    // judged once per pass. Separate from scratch_visit because fracture_landing
+    // runs immediately before on the same piece and has already stamped it there.
+    //
+    // A fresh epoch per check, not per pass, and balance_pass_start marks the
+    // first one this pass. That lets a check tell its own stamps from an earlier
+    // one's: reaching a cell of the same piece that an earlier check this pass
+    // stamped means this is a piece already judged -- and since a judgement that
+    // finished stamps its whole piece, one only reachable this way is a piece
+    // that check gave up on as too big. So it gives up at once instead of walking
+    // another MAX_SUPPORT_CELLS of it. Without that, fire eating along a large
+    // welded slab queues seeds a few cells apart, each far enough from the last
+    // to start its own walk, and every walk is a full budget.
+    std::vector<uint8_t> balance_visit;
+    uint8_t balance_epoch = 0;
+    uint8_t balance_pass_start = 1;
 
     // Randomness for the step in progress. These fold in the seed and the step
     // count so that a call site names only what varies: where it is asking from,

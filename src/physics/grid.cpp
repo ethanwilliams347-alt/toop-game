@@ -49,6 +49,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     support_visit.resize(width * height, 0);
     support_state.resize(width * height, 0);
     scratch_visit.resize(width * height, 0);
+    balance_visit.resize(width * height, 0);
 
     // Nothing to seed. The seed is stored and read straight out of world_seed by
     // the hash in random.h, so the whole 64 bits reach the work by construction.
@@ -82,6 +83,20 @@ void Grid::reset(uint64_t seed) {
     fracture_component.clear();
     fracture_lowest.clear();
     next_piece_tag = 1;
+
+    // The pool keeps its entries, and each entry its capacity -- the same "cleared,
+    // not freed" rule as every other scratch vector here. tip_count is what says
+    // none of them is live.
+    tip_count = 0;
+    std::fill(std::begin(tip_tag_live), std::end(tip_tag_live), false);
+    balance_component.clear();
+    balance_stack.clear();
+    tip_next.clear();
+    tip_carry.clear();
+    tip_displaced.clear();
+    std::fill(balance_visit.begin(), balance_visit.end(), 0);
+    balance_epoch = 0;
+    balance_pass_start = 1;
 
     frame_tag = 0;
     step_count = 0;
@@ -368,10 +383,23 @@ void Grid::resolve_support() {
             std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
             scratch_epoch = 1;
         }
+        // Balance is stamped per check rather than per pass (see balance_visit),
+        // so a pass only marks where its own stamps begin.
+        balance_pass_start = static_cast<uint8_t>(balance_epoch + 1);
+        if (balance_pass_start == 0) {
+            std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
+            balance_epoch = 0;
+            balance_pass_start = 1;
+        }
 
         for (const int seed : support_seeds) {
             if (!is_structural(cells[seed].type)) continue;
             if (support_visit[seed] == support_epoch) continue;  // its piece already moved this pass
+
+            // Part of a piece that is tipping over. step_tipping() owns it until it
+            // stops, and re-queues every cell of it then; asking the fill about it
+            // now would have one system drop a piece the other is rotating.
+            if (is_tipping(seed)) continue;
 
             // Too slow for this pass. It keeps its place in the queue so the next step
             // picks it up again; it just does not travel any further this one.
@@ -437,6 +465,7 @@ void Grid::fall_if_unsupported(int x, int y) {
 
     // Read now, because settle_marks zeroes ticks the moment this concludes.
     const bool was_falling = cells[seed].ticks >= FRACTURE_MIN_TICKS;
+    const bool was_moving = cells[seed].ticks > 0;
 
     support_stack.push_back(seed);
     support_visit[seed] = support_epoch;
@@ -466,7 +495,30 @@ void Grid::fall_if_unsupported(int x, int y) {
             // "grounded" at the bottom of the world, far away and stationary. Handing
             // that cell to fracture asks about the wrong piece, and fails quietly,
             // because the seed is at rest and nothing ever breaks.
-            if (was_falling) fracture_landing(x, y);
+            //
+            // Held up -- but held up by what? A piece standing on one corner with
+            // the rest of it hanging in the air is "supported" by the rule above
+            // and is going over regardless, so balance is asked first, and a piece
+            // that is going over does not also break. The two split the cases
+            // between them: land with most of the weight over the ledge and the
+            // overhang snaps off; land with most of it over the drop and the whole
+            // thing tips off. Breaking first would split a tall post lengthwise
+            // down its supported column, which no post has ever done. The halves
+            // of a break are re-queued and get asked about balance on their own
+            // next time round.
+            //
+            // At rest, one case is skipped without asking: the fill came straight
+            // down through the seed's own material to the bottom of the world.
+            // That is terrain, or a piece standing on the world floor, and
+            // weighing it means walking it, which on a wide burning slab -- a
+            // seed queued every few cells, every step -- costs more than the
+            // fire. Crossing into another material on the way, or landing on
+            // something other than the floor, still gets asked.
+            const bool on_world_floor_alone =
+                !was_moving && cy + 1 >= height &&
+                material_family(cells[idx].type) == material_family(cells[seed].type);
+            const bool tipped = !on_world_floor_alone && topple_if_unbalanced(x, y, was_moving);
+            if (!tipped && was_falling) fracture_landing(x, y);
 
             settle_marks(SupportState::Supported, idx);
             return;
@@ -499,6 +551,23 @@ void Grid::fall_if_unsupported(int x, int y) {
                     // Supported means held up, and Moved means it has already had its turn
                     // this pass, so this half waits for the next one rather than falling on
                     // its own. Either way nothing here moves now.
+                    //
+                    // Held up still gets the balance question, though. The earlier
+                    // fill that answered for this piece asked it about whatever
+                    // part it started in, and balance is judged per material (see
+                    // topple_if_unbalanced), so a wooden post on a stone floor is
+                    // only ever weighed by a seed that is in the post.
+                    //
+                    // Only across a joint, though: if the settled neighbour is the
+                    // same material, this is the same run of it, and the fill
+                    // that settled it has nearly always asked already. When it
+                    // has not -- its trail crossed in from another material --
+                    // the cost is a piece that stays standing, the harmless way.
+                    if (!was_moving &&
+                        static_cast<SupportState>(support_state[nidx]) == SupportState::Supported &&
+                        material_family(cells[nidx].type) != material_family(cells[seed].type)) {
+                        topple_if_unbalanced(x, y, false);
+                    }
                     settle_marks(SupportState::Supported, idx);
                     return;
                 }
@@ -524,7 +593,9 @@ uint8_t Grid::alloc_piece_tag() {
         next_piece_tag = static_cast<uint8_t>(next_piece_tag + 1);
         if (next_piece_tag == 0) next_piece_tag = 1;  // 0 means "never broken"
 
-        bool in_use = false;
+        // A tipping body is in the air too, but is not in pending_support while it
+        // turns, so its tag has to be refused by name.
+        bool in_use = tip_tag_live[candidate];
         for (const int idx : pending_support) {
             if (cells[idx].ticks > 0 && cells[idx].piece_tag == candidate) {
                 in_use = true;
@@ -1452,6 +1523,10 @@ void Grid::update() {
     // vacates land in the bounds that are about to be simulated -- whatever was
     // displaced out from under it starts flowing on this step rather than the next.
     resolve_support();
+
+    // After support, so a piece that started tipping during this step's resolve
+    // turns for the first time on this step rather than sitting out one first.
+    step_tipping();
 
     ++frame_tag;
 
