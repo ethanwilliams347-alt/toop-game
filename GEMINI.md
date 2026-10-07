@@ -46,7 +46,7 @@ test. Read the comments above each `set()` before touching them.
 | Make `updated_tag` a `bool` | Reintroduces a full-world reset pass every step. |
 | Raise `MAX_SUPPORT_CELLS` "for correctness" | It guesses *supported* on purpose. A wrong collapse destroys a level; a missed one is invisible. |
 | Suppress a failing `static_assert` | Those messages are the cross-file design review (`player.h:344-400`). |
-| Cite `TUNING.md` as ground truth | It has drifted — see warning below. |
+| Edit `TUNING.md` rows by hand without running `tuning_test` | The test checks every linked row's line number and every `player.h` value; it is what keeps the doc from drifting again. |
 
 ## Commands
 
@@ -106,13 +106,6 @@ folding varies by platform. Velocities are cells/second; `fx::per_step()` conver
 One cell = `Camera::DEFAULT_SCALE` (4) screen pixels. `steps` always means a fixed
 60 Hz simulation step, never a rendered frame.
 
-> ⚠ **`TUNING.md` is stale.** It lists `WALL_SLIDE_SPEED`, `COYOTE_STEPS`,
-> `JUMP_BUFFER_STEPS`, `FLAP_FALL_CANCEL`, `GLIDE_GRAVITY`, `CRUSH_PERCENT` —
-> **none exist in the tree**. `MAX_STEP_HEIGHT` is 3 (documented 2).
-> `BURN_DAMAGE`/`BURN_INTERVAL_STEPS` are 2/6 (documented 5/10). Every `player.h`
-> line number is wrong. **`src/physics/player.h` is ground truth.** Do not
-> implement a mechanic because `TUNING.md` mentions it.
-
 ## Performance baseline (measured, 1920×1080, Release)
 
 ```
@@ -120,14 +113,12 @@ churning    50.2 ms/step  301%   <- vent_fluid is 25.5 ms of this (ablation-prov
 cascading   41.1 ms/step  247%
 burning      8.0 ms/step   48%
 collapsing   2.7 ms/step   16%
-light/fire  15.2 ms/frame  91%   <- 88% is the 22-iteration propagate sweep
-light/dark   1.2 ms/frame   7%
+light/fire   4.3 ms/frame  26%   <- was 15.2; propagate sweep threaded
+light/dark   0.6 ms/frame   3%
 settled      0.0005 ms/step       <- chunk sleeping works; keep it working
 ```
 
 Never claim an optimization without back-to-back `grid_bench` output.
-`main.cpp:1566` calls the light field "too cheap to measure" — that comment is
-contradicted by the benchmark; do not trust it.
 
 ## Determinism contract
 
@@ -143,6 +134,6 @@ two fields will not be caught by a replay check.
 ## Style
 
 Comments carry the reasoning, in full, at the point of use — this codebase argues
-with itself in prose and that is deliberate. Match the density. `/W4` is clean
-except six `C4996` (`fopen`/`sscanf`); do not add warnings. Tests are plain C++
+with itself in prose and that is deliberate. Match the density. `/W4 /permissive-`
+is on and the tree builds with zero warnings; do not add warnings. Tests are plain C++
 returning non-zero — no framework. `*_probe.exe` assert nothing by design.

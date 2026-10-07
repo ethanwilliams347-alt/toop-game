@@ -16,6 +16,7 @@
 #include "game/settings_menu.h"
 #include "render/backdrop_layers.h"
 #include "render/bg1_backdrop.h"
+#include "render/rig_backdrop.h"
 #include "render/backdrop_wrap.h"
 #include "render/frame.h"
 #include "render/light.h"
@@ -821,6 +822,7 @@ int main(int argc, char* argv[]) {
         for (frame::ParallaxLayer& l : backdrop.layers)
             if (l.texture) SDL_DestroyTexture(l.texture);
         backdrop.layers.clear();
+        backdrop.rig_on = false;
     };
 
     // An authored backdrop set: nine images at the set's own native size, listed
@@ -899,6 +901,50 @@ int main(int argc, char* argv[]) {
                          missing, set.scene);
     };
 
+    // A perspective-rig set (render/rig_backdrop.h). The loading is load_bg1_layers'
+    // -- native-size textures stretched by the scale, colour-keyed unless opaque --
+    // and what differs is only what is read off each row: the factor is derived
+    // from the layer's feet by the rig, the vertical factor from that, and the
+    // plane, ripple and drift flags are carried through for draw_rig_layer.
+    auto load_rig_layers = [&](const rig_backdrop::Set& set) {
+        const int scale = camera.scale();
+        clear_custom_layers();
+        backdrop.layers.reserve(static_cast<size_t>(set.layer_count));
+        int missing = 0;
+        for (int i = 0; i < set.layer_count; ++i) {
+            const rig_backdrop::Layer& sp = set.layers[i];
+            const std::string path = std::string(set.dir) + sp.file;
+            SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
+            if (!tex) { ++missing; continue; }
+            frame::ParallaxLayer l;
+            l.texture = tex;
+            l.w = set.native_w * scale;
+            l.h = set.native_h * scale;
+            l.tex_h = set.native_h;
+            l.parallax_x = rig_backdrop::factor_of(set, sp);
+            l.parallax_y = depth_rig::vertical_factor(set.rig, l.parallax_x);
+            l.line_scroll = sp.line_scroll;
+            l.on_plane = sp.on_plane;
+            l.ripple_row0 = sp.ripple_row0;
+            l.ripple_row1 = sp.ripple_row1;
+            l.drift = sp.drift;
+            l.grade = frame::Grade{};
+            l.is_foreground = sp.is_foreground;
+            backdrop.layers.push_back(l);
+        }
+        backdrop.rig_on = true;
+        backdrop.rig = set.rig;
+        backdrop.ripple_amplitude = set.ripple_amplitude;
+        std::printf("Backdrop: %d of %d %s layers at %dx, perspective rig "
+                    "(horizon row %d, contact row %d)\n",
+                    static_cast<int>(backdrop.layers.size()), set.layer_count, set.scene,
+                    scale, set.rig.horizon_row, set.rig.contact_row);
+        if (missing)
+            std::fprintf(stderr, "WARNING: %d %s layer(s) failed to load - rerun "
+                                 "python tools/generate_bg_tarn.py and rebuild.\n",
+                         missing, set.scene);
+    };
+
     // Everything building a world is, in the order it has to happen, and the only
     // caller of the steps above. Boot calls it once, the scene key calls it to
     // switch scenes, and restart_run calls it on a win or a loss. There is
@@ -957,6 +1003,8 @@ int main(int argc, char* argv[]) {
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
         if (const bg1::Set* set = bg1::find(def.name.c_str())) load_bg1_layers(*set);
+        else if (const rig_backdrop::Set* rs = rig_backdrop::find(def.name.c_str()))
+            load_rig_layers(*rs);
         else clear_custom_layers();
 
         run.reset(world_seed, world_w, world_h);
@@ -1604,31 +1652,53 @@ int main(int argc, char* argv[]) {
             plane_row_scale[static_cast<size_t>(wy)] = scale;
         }
 
-        const size_t window_cells =
-            static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
-        if (cell_window.size() != window_cells) cell_window.assign(window_cells, 0u);
-        if (cell_depth.size() != window_cells) cell_depth.assign(window_cells, -1);
+        // With the pass off, every row is a straight copy, and a straight copy is what
+        // SDL_UpdateTexture already does given the grid's own pitch. So the upload
+        // reads the grid directly and skips both apply's copy and its depth_map, which
+        // runs over the whole window unconditionally and whose output only the
+        // (unreachable) blend path reads. Only when the window lies wholly inside the
+        // grid, though: apply is what clears rows past the grid's edge, and a scene
+        // with the horizontal clamp dropped can put the window there. Turning the pass
+        // back on is still the one constant above.
+        const int grid_w = run.grid.get_width();
+        const int view_x = camera.view_x(), view_y = camera.view_y();
+        const bool window_inside_grid = view_x >= 0 && view_y >= 0 &&
+                                        view_x + visible_w <= grid_w &&
+                                        view_y + visible_h <= run.grid.get_height();
+        if (!PLANE_ON_NEAR_TERRAIN && window_inside_grid) {
+            SDL_UpdateTexture(targets.cells, &visible_rect,
+                              pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
+                              grid_w * static_cast<int>(sizeof(uint32_t)));
+        } else {
+            const size_t window_cells =
+                static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h);
+            if (cell_window.size() != window_cells) cell_window.assign(window_cells, 0u);
+            if (cell_depth.size() != window_cells) cell_depth.assign(window_cells, -1);
 
-        const surface_plane::View view{camera.view_x(), camera.view_y(), visible_w, visible_h};
-        const surface_plane::TileRows tile_rows{
-            ground_rows.empty() ? nullptr : ground_rows.data(),
-            static_cast<int>(ground_rows.size() / 3)
-        };
-        surface_plane::apply(pixels.data(), run.grid.get_width(), run.grid.get_height(), view,
-                             tile_rows, plane_src_row_for.data(), plane_row_scale.data(),
-                             ground_grade.r, ground_grade.g, ground_grade.b,
-                             cell_depth.data(), cell_window.data());
-        SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
-                          visible_w * sizeof(uint32_t));
+            const surface_plane::View view{view_x, view_y, visible_w, visible_h};
+            const surface_plane::TileRows tile_rows{
+                ground_rows.empty() ? nullptr : ground_rows.data(),
+                static_cast<int>(ground_rows.size() / 3)
+            };
+            surface_plane::apply(pixels.data(), grid_w, run.grid.get_height(), view,
+                                 tile_rows, plane_src_row_for.data(), plane_row_scale.data(),
+                                 ground_grade.r, ground_grade.g, ground_grade.b,
+                                 cell_depth.data(), cell_window.data());
+            SDL_UpdateTexture(targets.cells, &visible_rect, cell_window.data(),
+                              visible_w * static_cast<int>(sizeof(uint32_t)));
+        }
 
         // Computed against the same view origin the cell upload just used, and after
         // camera.follow for the same reason that upload is: a light field built from
         // last frame's view would slide against the world it is lighting.
         //
-        // Recomputed from scratch every frame rather than carried between them. It is
-        // affordable, and the alternative is a cache keyed on both the camera and
-        // every temperature in view -- a correctness problem in exchange for saving
-        // something already too cheap to measure.
+        // Recomputed from scratch every frame rather than carried between them. Not
+        // cheap: grid_bench's light/fire row measured ~15 ms (91% of a 60 Hz frame)
+        // before the propagate sweep was threaded and ~4.3 ms (26%) after, on a
+        // 20-thread machine; a dark view is ~0.6 ms. Still the right trade, because
+        // the alternative is a cache keyed on both the camera and every temperature in
+        // view -- a correctness problem. If this needs to get cheaper, the sweep's
+        // iteration count is the lever, not a cache.
         targets.light.update(run.grid, camera.view_x(), camera.view_y());
         if (targets.light.any_light()) {
             SDL_UpdateTexture(targets.light_texture, nullptr, targets.light.pixels().data(),
@@ -1715,6 +1785,23 @@ int main(int argc, char* argv[]) {
         fp.arrows = &arrow_sprites;
         fp.light = &targets.light;
         fp.light_texture = targets.light_texture;
+
+        // The rig's anchor is where the camera sits with the player standing on the
+        // contact row: there the stack is exactly the painting. Per frame and not
+        // at load, because it depends on the viewport, which the display mode can
+        // change under a loaded scene. Horizontally the world's centre -- every rig
+        // layer wraps, so this only chooses which columns line up where.
+        if (fp.backdrop.rig_on) {
+            fp.backdrop.rig_anchor_x =
+                0.5f * static_cast<float>(std::max(0, world_w - fp.padded_w));
+            fp.backdrop.rig_anchor_y = depth_rig::standing_anchor_y(
+                fp.backdrop.rig, Player::HEIGHT, fp.padded_h, Camera::VERTICAL_ANCHOR, world_h);
+        }
+        // Wall clock, for drifting clouds and rippling water. Render-only; see
+        // Params::time_s. Not wrapped: any wrap period that is not a whole number of
+        // cloud tiles makes the clouds jump at the wrap, and a float second count
+        // still resolves a millisecond after a day of play.
+        fp.time_s = static_cast<float>(static_cast<double>(SDL_GetTicks64()) / 1000.0);
         frame::compose(renderer, fp);
 
         // --- the screen-space layer ---

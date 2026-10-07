@@ -18,6 +18,16 @@ set(SDL_SHARED OFF CACHE BOOL "Build SDL shared library" FORCE)
 set(SDL_STATIC ON CACHE BOOL "Build SDL static library" FORCE)
 FetchContent_MakeAvailable(SDL2)
 
+# Warnings on, for our code only: this comes after SDL is added, so SDL's own
+# sources keep their flags. /W4 was clean apart from six C4996 on std::fopen /
+# std::sscanf. Those are silenced with the define rather than by switching to
+# fopen_s, which is MSVC-flavoured Annex K and would stop the tree building
+# anywhere else.
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    add_compile_options(/W4 /permissive-)
+endif()
+
 # AddressSanitizer, off by default: `just asan` builds it in build-asan/.
 # It catches the out-of-bounds reads and use-after-free that a falling-sand grid
 # indexed by hand is most likely to have, at roughly 2x run time, which is why it
@@ -146,6 +156,13 @@ if(BUILD_TESTING)
     target_include_directories(player_test PRIVATE src tests)
     add_test(NAME player_test COMMAND player_test)
 
+    # TUNING.md against the source it documents. Runs from the source tree because
+    # the file under test lives there; links ENGINE_SOURCES only for the Player
+    # constants it compares, never SDL.
+    add_executable(tuning_test tests/test_tuning.cpp ${ENGINE_SOURCES})
+    target_include_directories(tuning_test PRIVATE src tests)
+    add_test(NAME tuning_test COMMAND tuning_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     add_executable(tool_test tests/test_tool.cpp ${ENGINE_SOURCES})
     target_include_directories(tool_test PRIVATE src tests)
     add_test(NAME tool_test COMMAND tool_test)
@@ -229,6 +246,15 @@ if(BUILD_TESTING)
     target_include_directories(surface_plane_test PRIVATE src tests)
     add_test(NAME surface_plane_test COMMAND surface_plane_test)
 
+    # The perspective rig: the pinhole arithmetic in render/depth_rig.h, and every
+    # rig set in render/rig_backdrop.h checked against its BMPs -- feet, plane,
+    # ripple ranges, seamless wrap. Header-only and SDL-free like backdrop_test;
+    # SCENE_PROP_SOURCES only for scene/bmp.cpp, and WORKING_DIRECTORY so the
+    # assets resolve.
+    add_executable(rig_test tests/test_depth_rig.cpp ${SCENE_PROP_SOURCES})
+    target_include_directories(rig_test PRIVATE src tests)
+    add_test(NAME rig_test COMMAND rig_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     # The camera's view arithmetic: the framing, the world-edge clamps, and the
     # anchor the clamps have to survive. Links no sources -- camera.h is an
     # SDL-free header.
@@ -297,6 +323,14 @@ if(BUILD_TESTING)
     # it through tools/rawpng.py.
     add_executable(preview_light tests/preview_light.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES})
     target_include_directories(preview_light PRIVATE src tests)
+
+    # The same idea for a perspective-rig backdrop (render/rig_backdrop.h): stills
+    # and a flight through the scene, composed by the real frame::compose. Links
+    # SDL for the software renderer, as golden_frame_test does; asserts nothing.
+    add_executable(preview_backdrop tests/preview_backdrop.cpp
+                   ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES} ${FRAME_SOURCES})
+    target_include_directories(preview_backdrop PRIVATE src tests)
+    target_link_libraries(preview_backdrop PRIVATE SDL2-static)
 
     # Burn timing and burn shape, in numbers. Not an add_test() for the same
     # reason preview_light is not: what it reports is a matter of taste, and a
