@@ -201,6 +201,17 @@ def step_clang_tidy(files, build_dir, jobs):
 
     say(f'\n== {name} ==')
     flags = ['-std=c++20', '-Isrc', '-Itests']
+    if os.name == 'nt':
+        # On Windows clang-tidy targets MSVC, so SDL_endian.h takes its _MSC_VER
+        # path. Under __clang__, SDL 2.30.0 works around a Clang 11 clash with
+        # winnt.h by defining its own _m_prefetch inside prfchwintrin.h's
+        # include guard. Newer clang makes _m_prefetch a builtin, so that
+        # definition is a hard error in every file that includes SDL, and no
+        # amount of -isystem hides an error. Predefining the guard skips SDL's
+        # stand-in header, which is all the workaround wanted; nothing of ours
+        # uses the prefetch intrinsics. Here rather than in SDL, which is
+        # fetched, not ours to patch.
+        flags += ['-D__PRFCHWINTRIN_H']
     for d in sdl_include_dirs(build_dir):
         flags += ['-isystem', d]
 
