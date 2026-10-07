@@ -1,6 +1,7 @@
 #include "render/frame.h"
 
 #include <algorithm>
+#include <cmath>
 #include "render/backdrop_layers.h"
 #include "render/backdrop_wrap.h"
 #include "render/player_sprite.h"

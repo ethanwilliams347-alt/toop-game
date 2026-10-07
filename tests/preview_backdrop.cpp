@@ -13,10 +13,17 @@
 // golden_frame_test does; only the world is stood in for. The cells are the
 // scene's own albedo where its material map is solid, and there is no player and
 // no light. Run from the repo root, so assets/ resolves.
+//
+// SDL_MAIN_HANDLED before SDL.h for golden_frame_test's reason: this is a console
+// program with a plain main() that does not link SDL2main, and without it SDL
+// renames main to SDL_main and the link fails on an unresolved `main`.
+#define SDL_MAIN_HANDLED
 #include <SDL.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 

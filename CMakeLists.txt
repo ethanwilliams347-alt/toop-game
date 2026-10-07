@@ -200,9 +200,6 @@ if(BUILD_TESTING)
     target_include_directories(surface_plane_test PRIVATE src tests)
     add_test(NAME surface_plane_test COMMAND surface_plane_test)
 
-    # The camera's view arithmetic: the framing, the world-edge clamps, and the
-    # anchor the clamps have to survive. Links no sources -- camera.h is an
-    # SDL-free header.
     # The perspective rig: the pinhole arithmetic in render/depth_rig.h, and every
     # rig set in render/rig_backdrop.h checked against its BMPs -- feet, plane,
     # ripple ranges, seamless wrap. Header-only and SDL-free like backdrop_test;
@@ -212,6 +209,9 @@ if(BUILD_TESTING)
     target_include_directories(rig_test PRIVATE src tests)
     add_test(NAME rig_test COMMAND rig_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+    # The camera's view arithmetic: the framing, the world-edge clamps, and the
+    # anchor the clamps have to survive. Links no sources -- camera.h is an
+    # SDL-free header.
     add_executable(camera_test tests/test_camera.cpp)
     target_include_directories(camera_test PRIVATE src tests)
     add_test(NAME camera_test COMMAND camera_test)
