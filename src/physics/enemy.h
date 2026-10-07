@@ -55,6 +55,10 @@ enum class Attack : uint8_t { Swipe, Slam };
 // Everything that differs between kinds of enemy. Velocities in cells/second,
 // times in fixed steps, lengths in cells, as for Player.
 struct Species {
+    // What a level file calls it (`enemy troll 520`) and what the HUD and the
+    // log print. Lower case, one word: scene/level_list.cpp reads it as a token.
+    const char* name;
+
     const body_art::Art* art;
     int pixel_count;
 
@@ -117,53 +121,54 @@ namespace species {
 // The moss ghoul: the player's box and the player's scale, a wander and a chase
 // both under the player's walk, and a swipe when it touches you.
 inline constexpr Species GHOUL{
-    &enemy_art::ART,
-    enemy_art::PIXEL_COUNT,
-    Player::WIDTH,
-    Player::HEIGHT,
+    .name = "ghoul",
+    .art = &enemy_art::ART,
+    .pixel_count = enemy_art::PIXEL_COUNT,
+    .width = Player::WIDTH,
+    .height = Player::HEIGHT,
     // A wander and a chase, both well under the player's MOVE_SPEED: the player
     // has to be able to walk away from one, and has to be able to stand still and
     // line up a shot at one that is coming. The chase is the faster of the two so
     // that noticing you reads as a change of gait rather than as nothing.
-    fx::from_int(22),
-    fx::from_int(45),
+    .patrol_speed = fx::from_int(22),
+    .chase_speed = fx::from_int(45),
     // A hop, not the player's leap: enough to clear the lip of a dug trench or a
     // sand pile taller than a step, which is all it is for.
-    fx::from_int(120),
-    Player::MAX_STEP_HEIGHT,
+    .jump_speed = fx::from_int(120),
+    .max_step_height = Player::MAX_STEP_HEIGHT,
     // A dozen body widths: well inside the screen at every scale the shipped
     // scenes use (half the view at the zoomed-in 10x scenes, a fifth of it at
     // 4x), because an enemy that starts chasing from off-screen is one the player
     // never saw decide to.
-    12 * Player::WIDTH,
-    3 * Player::HEIGHT,
-    Player::HEIGHT,
+    .notice_x = 12 * Player::WIDTH,
+    .notice_y = 3 * Player::HEIGHT,
+    .ledge_drop = Player::HEIGHT,
     // A swipe, landed when the boxes touch, and only while it still has an arm
     // to swipe with. Rate-limited for the reason Player's burn is: per-step
     // contact damage empties the bar before the player has seen what hit them.
     // Reach is the arms' overhang either side of the box, so a swipe lands where
     // the drawn claws are rather than where the collision box is.
-    Attack::Swipe,
-    8,
-    40,
-    0,
-    enemy_art::BOX_LEFT,
-    0,
+    .attack = Attack::Swipe,
+    .damage = 8,
+    .attack_interval = 40,
+    .windup_steps = 0,
+    .reach = enemy_art::BOX_LEFT,
+    .crush_radius = 0,
     // Losing the whole head, the whole heart, or both feet kills it, or falling
     // below this share of its pixels: what stops a body whittled to a torso and
     // one shoulder walking about as a floating lump.
-    40,
+    .collapse_percent = 40,
     // Without a cap, a fire three cells deep takes every pixel in it on the first
     // tick, which is both feet at once and a body that is simply gone the step it
     // touches a flame. Two per tick is a body that visibly smoulders from the
     // ground up for most of a second before the feet give way.
-    2,
-    false,
+    .burn_pixels_per_tick = 2,
+    .wades = false,
     // Moss ghoul. Short legs swinging wide, so its scuttle reads at four screen
     // pixels per cell; arms held out in front once it has seen you, which is the
     // read that says "it is coming for you" from across the screen; and a swipe
     // that is a slash from overhead down past its hip.
-    rig::Rig{
+    .rig = rig::Rig{
         .hip_row = 21,
         .leg_split = 7,
         .neck_row = 10,
@@ -201,64 +206,65 @@ inline constexpr Species GHOUL{
 // The troll: nearly three times the player's height, slow, and hitting hard
 // enough that the fight is about not being under the club when it lands.
 inline constexpr Species TROLL{
-    &troll_art::ART,
-    troll_art::PIXEL_COUNT,
+    .name = "troll",
+    .art = &troll_art::ART,
+    .pixel_count = troll_art::PIXEL_COUNT,
     // The torso and legs. The arms and the club hang outside it, as the ghoul's
     // claws do; an arrow finds them, terrain does not.
-    24,
-    66,
+    .width = 24,
+    .height = 66,
     // Slower than the ghoul both ways. It does not need to be fast: its reach is
     // two of the player's bodies, and a chase that closes slowly is what gives
     // the player time to look up at it.
-    fx::from_int(14),
-    fx::from_int(32),
+    .patrol_speed = fx::from_int(14),
+    .chase_speed = fx::from_int(32),
     // Enough to heave itself up a ledge of about twenty cells, under the player's
     // gravity. A troll that a two-body ledge stops dead is one the player farms
     // from the top of it.
-    fx::from_int(140),
+    .jump_speed = fx::from_int(140),
     // Its legs step over what would stop the player: a mound of sand, a fallen
     // plank, the lip of a crater it made itself.
-    6,
+    .max_step_height = 6,
     // It sees farther because it is taller -- and because its slam is slow, it
     // has to start closing in sooner to be a threat at all.
-    20 * Player::WIDTH,
-    90,
-    33,
-    Attack::Slam,
+    .notice_x = 20 * Player::WIDTH,
+    .notice_y = 90,
+    .ledge_drop = 33,
+    .attack = Attack::Slam,
     // A third of the bar. Survivable twice; the third is the lesson.
-    30,
+    .damage = 30,
     // Spent after a slam for most of a second: the window to get a shot into
     // the eyes, or to get out from under it.
-    50,
+    .attack_interval = 50,
     // Seven-tenths of a second from deciding to landing. Long enough to see and
     // walk out of at the player's speed (more than eighty cells), short enough
     // that standing still to aim through it is a decision with a price.
-    42,
+    .windup_steps = 42,
     // The club's length past the front of the box, which is the fist's overhang
     // plus the club swung out at arm's length: everything from the troll's front
     // edge to here is under it. Two and a half of the player's bodies.
-    20,
+    .reach = 20,
     // The crater. Radius 5 is a bite eleven cells across out of whatever it
     // lands on: visible, enough to break a thin floor or a plank bridge, not
     // enough to dig the troll a pit to fall into in a few swings. At 4 the hole
     // sat under the club's own head and read as nothing.
-    5,
-    40,
+    .crush_radius = 5,
+    .collapse_percent = 40,
     // Twice the ghoul's: a body ten times the size smouldering at the ghoul's
     // rate would stand in a fire for a minute.
-    4,
+    .burn_pixels_per_tick = 4,
     // Its own arm, shot off, is a pile of a few hundred grains around its feet,
     // far deeper than any step. Colliding with it, the first version stood
     // buried in it for the rest of the run -- the fight ended in a statue -- and
     // once it could climb out, it stood perched on the cone's tip with its legs
     // in the air. A body this heavy goes through sand, not over it.
-    true,
+    .wades = true,
     // The troll. A slow, heavy stride -- the feet swing less and the cycle is
     // long, so each step reads as weight -- and the slam as the Elden Ring
     // troll does it: the club goes back and up over the head as it leans away,
     // hangs, and comes over and down in the last tenth of a second, the body
     // following it forward.
-    rig::Rig{
+    .rig = rig::Rig{
         .hip_row = 57,
         .leg_split = 26,
         // No separate head: it is sunk into the shoulders, and a head that
@@ -293,6 +299,42 @@ inline constexpr Species TROLL{
         .pad = 56,
     },
 };
+
+// Every species, in a fixed order. The order is an index the session log
+// records (Command::arg for SpawnEnemy), so a new species is appended, never
+// inserted: inserting would make old logs spawn the wrong body.
+inline constexpr const Species* ALL[] = {&GHOUL, &TROLL};
+inline constexpr int COUNT = static_cast<int>(sizeof(ALL) / sizeof(ALL[0]));
+
+constexpr bool same_name(const char* a, const char* b) {
+    while (*a && *a == *b) { ++a; ++b; }
+    return *a == *b;
+}
+
+// The species a level file or a log names, or nullptr. By name for the level
+// file, by index for the log.
+constexpr const Species* find(const char* name) {
+    for (const Species* s : ALL)
+        if (same_name(s->name, name)) return s;
+    return nullptr;
+}
+constexpr const Species* at(int index) {
+    return index >= 0 && index < COUNT ? ALL[index] : nullptr;
+}
+constexpr int index_of(const Species& kind) {
+    for (int i = 0; i < COUNT; ++i)
+        if (ALL[i] == &kind) return i;
+    return -1;
+}
+
+constexpr bool names_are_unique() {
+    for (int i = 0; i < COUNT; ++i)
+        for (int j = i + 1; j < COUNT; ++j)
+            if (same_name(ALL[i]->name, ALL[j]->name)) return false;
+    return true;
+}
+static_assert(names_are_unique(), "two species share a name, so a level file "
+                                  "naming one could mean either");
 
 }  // namespace species
 
