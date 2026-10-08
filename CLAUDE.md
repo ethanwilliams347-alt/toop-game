@@ -44,6 +44,10 @@ Leave these as they are; each has a rationale comment at the definition.
 - `fx::trunc` truncates toward zero and isn't `>>`; flooring drifts left-moving
   bodies.
 - `is_grounded` compares `piece_tag`, not material, so cracks survive movement.
+- An enemy's arm is geometry (pixels outside the box's columns) except where the
+  art names arm letters (`body_art::Art::arm`), which only the fish does. Its
+  lure arm grows out of the top of its head, where no column rule fits. Keep
+  geometry for any body whose arms do hang beside the box.
 - `MAX_SUPPORT_CELLS` assumes "supported" when it gives up — a missed collapse is
   invisible, a wrong one is rubble.
 - Cross-file invariants are `static_assert`s (`player.h`, `element.h`,

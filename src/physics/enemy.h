@@ -4,6 +4,7 @@
 #include "body_art.h"
 #include "box_body.h"
 #include "enemy_art.h"
+#include "fish_art.h"
 #include "fixed.h"
 #include "grid.h"
 #include "player.h"
@@ -303,10 +304,101 @@ inline constexpr Species TROLL{
         },
 };
 
+// The fish: a largemouth bass on a man's legs, with a man's arm growing out of
+// the top of its head and the hand dangling in front of its mouth like an
+// anglerfish's lure. A fifth taller than the troll, quicker on its feet, and
+// hitting by casting: the arm goes back over its head, then whips over and down
+// in front of it, the hand landing where the lure hung.
+//
+// The cast is a Slam -- it stops, winds up and stands spent after -- for the
+// troll's reason: a blow from a body this size has to be one the player saw
+// coming. It is a hand, not a club, so it breaks no ground (crush_radius 0, see
+// Enemy::attack), and it hits less hard and comes round sooner.
+inline constexpr Species FISH{
+    .name = "fish",
+    .art = &fish_art::ART,
+    .pixel_count = fish_art::PIXEL_COUNT,
+    // The fish's middle and the legs. The tail, the snout and the arm overhang
+    // it, as the troll's arms do: an arrow finds them, terrain does not.
+    .width = 30,
+    .height = 66,
+    // Faster than the troll and slower than the ghoul: legs this long walking,
+    // not a giant lumbering. Under the player's walk, as every chase is.
+    .patrol_speed = fx::from_int(18),
+    .chase_speed = fx::from_int(40),
+    .jump_speed = fx::from_int(140),
+    .max_step_height = 6,
+    // The troll's, for the troll's reasons: tall enough to see over things, and
+    // an attack slow enough that it has to start closing early.
+    .notice_x = 20 * Player::WIDTH,
+    .notice_y = 90,
+    .ledge_drop = 33,
+    .attack = Attack::Slam,
+    // A fifth of the bar: a slap, not a club.
+    .damage = 20,
+    // Spent for half a second after a cast, the arm still down in front of it.
+    .attack_interval = 36,
+    // Six-tenths of a second from deciding to landing -- the arm going back over
+    // the head is the tell. Asserted escapable below, as the troll's is.
+    .windup_steps = 36,
+    // Where the hand lands past the front of the box: the lure's own distance
+    // out, about two of the player's bodies.
+    .reach = 18,
+    // A hand breaks nothing; see Enemy::attack.
+    .crush_radius = 0,
+    .collapse_percent = 40,
+    .burn_pixels_per_tick = 4,
+    // The troll's reason: its own arm shot off is a pile far deeper than a step.
+    .wades = true,
+    // A long, loose human stride under a body that rocks with it; the lure
+    // swaying ahead of the mouth with every breath and bobbing with every step,
+    // held out further toward you once it has seen you; and the cast, back over
+    // the head and then over and down the front, the body leaning into it.
+    .rig =
+        rig::Rig{
+            .hip_row = fish_art::HIP_ROW,
+            .leg_split = fish_art::LEG_SPLIT,
+            // No separate head: the arm is what moves up there.
+            .neck_row = 0,
+            .waist = {47, 52},
+            .neck = {47, 0},
+            // No rear arm; the lettered arm is the front one (rig::part_of).
+            .rear_shoulder = {fish_art::SHOULDER_X, fish_art::SHOULDER_Y},
+            .front_shoulder = {fish_art::SHOULDER_X, fish_art::SHOULDER_Y},
+            .rear_hip = {38, 52},
+            .front_hip = {53, 52},
+            // Long legs, a long stride: two box widths a cycle.
+            .stride = 40,
+            .leg_swing = rig::deg(24),
+            .arm_swing = rig::deg(6),
+            .bob = 1,
+            .chase_lean = rig::deg(5),
+            // Clockwise from the rest pose -- forward and down -- holding the lure
+            // out toward what it has seen.
+            .chase_arms = rig::deg(12),
+            // A quicker breath than the troll's and a wider sway, which on this
+            // body is mostly the lure swinging: it is never still.
+            .breathe_steps = 90,
+            .breathe = rig::deg(5),
+            // Back over the head toward the tail, then over the top and down the
+            // front: a cast.
+            .raise = rig::deg(-130),
+            .strike = rig::deg(25),
+            .strike_steps = 6,
+            .windup_lean = rig::deg(-4),
+            .strike_lean = rig::deg(14),
+            .flinch_steps = 12,
+            .flinch = rig::deg(-6),
+            // The hand over the head at the top of the wind-up reaches about a
+            // dozen cells above the frame.
+            .pad = 16,
+        },
+};
+
 // Every species, in a fixed order. The order is an index the session log
 // records (Command::arg for SpawnEnemy), so a new species is appended, never
 // inserted: inserting would make old logs spawn the wrong body.
-inline constexpr const Species* ALL[] = {&GHOUL, &TROLL};
+inline constexpr const Species* ALL[] = {&GHOUL, &TROLL, &FISH};
 inline constexpr int COUNT = static_cast<int>(sizeof(ALL) / sizeof(ALL[0]));
 
 constexpr bool same_name(const char* a, const char* b) {
@@ -349,8 +441,8 @@ public:
     // The largest frame any species has. Every pool slot carries a pixel mask
     // this big, whichever species is in it, so a slot can hold any species and
     // the pool stays one fixed, allocation-free block.
-    static constexpr int MAX_FRAME_W = troll_art::W;
-    static constexpr int MAX_FRAME_H = troll_art::H;
+    static constexpr int MAX_FRAME_W = troll_art::W > fish_art::W ? troll_art::W : fish_art::W;
+    static constexpr int MAX_FRAME_H = troll_art::H > fish_art::H ? troll_art::H : fish_art::H;
     static constexpr int MAX_FRAME_PIXELS = MAX_FRAME_W * MAX_FRAME_H;
 
     // The most any species' pose reaches outside its frame (Rig::pad). The
@@ -457,7 +549,7 @@ public:
     // Whether frame pixel (x, y) is still there. The renderer builds the sprite from
     // this and the art's colours, so what is drawn is exactly what an arrow can
     // hit, with no second copy of the body to drift from it.
-    bool has_pixel(int x, int y) const { return pixels[y * kind->frame_w() + x] != 0; }
+    bool has_pixel(int x, int y) const { return pixel(y * kind->frame_w() + x) != 0; }
     int pixel_count() const { return remaining; }
 
     // Where this body's slam lands: the crater's centre, given where it stands
@@ -497,14 +589,27 @@ private:
     int windup = 0;
     int burn_timer = 0;
 
-    // One byte per frame pixel: 0 once it is gone, and while it exists, one
+    // Four bits per frame pixel: 0 once it is gone, and while it exists, one
     // more than the rig::Part it belongs to -- looked up once at spawn, because
     // every pixel's part is asked for every step (where is it, is it burning)
     // and the answer never changes. Indexed y * frame_w + x for
     // the species' own frame. A fixed array on the body rather than a vector, so
     // a pool of enemies is one allocation-free block and the step never touches
     // the heap.
-    std::array<uint8_t, MAX_FRAME_PIXELS> pixels{};
+    //
+    // Two pixels a byte rather than one because every slot is sized for the
+    // largest frame, and the fish's 94x84 doubled it: at a byte a pixel a Run
+    // grew from about 110 KB to 210 KB, and the tests that keep several Runs on
+    // the stack are the ones that already overflowed Windows' 1 MB default once
+    // (see test_enemy.cpp). A part index fits in a nibble with room to spare.
+    std::array<uint8_t, (MAX_FRAME_PIXELS + 1) / 2> pixels{};
+    static_assert(rig::PART_COUNT < 16, "a pixel's part, plus one, has to fit in four bits");
+    uint8_t pixel(int i) const { return (pixels[i >> 1] >> ((i & 1) * 4)) & 0xF; }
+    void set_pixel(int i, uint8_t v) {
+        const int shift = (i & 1) * 4;
+        uint8_t& b = pixels[i >> 1];
+        b = static_cast<uint8_t>((b & ~(0xF << shift)) | (v << shift));
+    }
     int remaining = 0;
 
     // --- the pose ------------------------------------------------------------
@@ -569,7 +674,8 @@ constexpr bool species_is_sound(const Species& s) {
            (s.attack != Attack::Slam || s.rig.strike_steps < s.windup_steps) &&
            s.rig.strike_steps < s.attack_interval;
 }
-static_assert(species_is_sound(species::GHOUL) && species_is_sound(species::TROLL),
+static_assert(species_is_sound(species::GHOUL) && species_is_sound(species::TROLL) &&
+                  species_is_sound(species::FISH),
               "a species breaks one of: chasing slower than the player walks (the "
               "escape is the whole counterplay to being noticed), wandering slower "
               "than it chases, a frame at least as big as its box, the art's "
@@ -604,3 +710,23 @@ static_assert(species::TROLL.reach >= Player::WIDTH,
 static_assert(species::TROLL.reach >= 3 * species::TROLL.crush_radius + 4,
               "the troll's crater is too big for its reach: the debris thrown back "
               "toward it would land in its own footing");
+
+// The fish is the troll and a fifth: its art stands 80 cells from the crown of
+// the arm to the soles against the troll's 66.
+static_assert(fish_art::H * 5 == troll_art::H * 6,
+              "the fish's frame is no longer a fifth taller than the troll's");
+
+// Its box is what its art was drawn round, and its arm turns where it grows.
+static_assert(species::FISH.width == fish_art::BOX_RIGHT - fish_art::BOX_LEFT &&
+                  species::FISH.rig.front_shoulder.x == fish_art::SHOULDER_X &&
+                  species::FISH.rig.front_shoulder.y == fish_art::SHOULDER_Y,
+              "species::FISH and fish_art disagree on the box or the shoulder");
+
+// The cast is a slam, so it is held to the slam's two promises: the wind-up is
+// long enough to walk out from under, and it reaches a player standing against
+// its front.
+static_assert(fx::per_step(Player::MOVE_SPEED) * species::FISH.windup_steps >
+                  fx::from_int(species::FISH.reach + species::FISH.width),
+              "the fish's cast winds up too fast to walk out from under");
+static_assert(species::FISH.reach >= Player::WIDTH,
+              "the fish's cast cannot reach a player standing against it");
