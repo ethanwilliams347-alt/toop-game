@@ -1098,12 +1098,46 @@ bool Grid::vent_fluid(int fx, int fy) {
     const int idx = get_index(fx, fy);
     const ElementType fluid = cells[idx].type;
 
+    // The box, clipped to the world once rather than tested a cell at a time. This
+    // scan was the largest cost in `churning` -- a grain sinking through bulk water
+    // looks at every cell of the box and almost never finds one free -- so the loops
+    // below walk rows directly instead of paying a bounds check and an index
+    // multiply per cell.
+    const int r = vent_radius;
+    const int x_lo = fx - r > 0 ? fx - r : 0;
+    const int x_hi = fx + r < width - 1 ? fx + r : width - 1;
+    const int y_lo = fy - r > 0 ? fy - r : 0;
+    const int y_hi = fy + r < height - 1 ? fy + r : height - 1;
+
+    // Every destination is an Empty cell inside the box, so a box with none in it
+    // has no answer whatever order it is read in. Checked first, in plain memory
+    // order, because that is the common case and it lets the direction hash below
+    // be skipped along with the ordered scan. The result is unchanged: the ordered
+    // scan visits exactly these cells, only in a different order.
+    bool any_empty = false;
+    for (int ny = y_lo; ny <= y_hi && !any_empty; ++ny) {
+        const Element* row = &cells[static_cast<size_t>(ny) * width];
+        for (int nx = x_lo; nx <= x_hi; ++nx) {
+            if (row[nx].type == ElementType::Empty) {
+                any_empty = true;
+                break;
+            }
+        }
+    }
+    if (!any_empty) return false;
+
     // The destination must be this fluid's own free surface -- an Empty cell with
     // more of the same fluid directly beneath it -- and not merely any Empty within
     // reach. Any-Empty reproduces the defect this was written to fix: the nearest
     // empty cell to a grain entering the water is very often the air just above the
     // sand pile, so the water is deposited back on top of the pile.
     const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::FluidDirection) ? -1 : 1;
+
+    // The same clip expressed as offsets, in the mirrored frame: nx = fx + ox * dir,
+    // and ox still runs low to high, so ties break in exactly the order they did
+    // when every cell of the full box was visited and the out-of-world ones skipped.
+    const int ox_lo = dir > 0 ? x_lo - fx : fx - x_hi;
+    const int ox_hi = dir > 0 ? x_hi - fx : fx - x_lo;
 
     // Two kinds of destination. Sending the fluid to its own surface fixes the
     // pour, and then the defect returns once the sand pile has grown into a cone
@@ -1119,18 +1153,21 @@ bool Grid::vent_fluid(int fx, int fy) {
     int drain_x = -1, drain_y = -1, drain_score = 0;
 
     int best_x = -1, best_y = -1, best_score = 0;
-    for (int oy = -vent_radius; oy <= vent_radius; ++oy) {
-        for (int ox = -vent_radius; ox <= vent_radius; ++ox) {
+    for (int ny = y_lo; ny <= y_hi; ++ny) {
+        const int oy = ny - fy;
+        const Element* row = &cells[static_cast<size_t>(ny) * width];
+        // The bottom row of the world stands on the border, which reads as Wall --
+        // the same answer get_element gives for the cell past the edge.
+        const Element* below = ny + 1 < height ? row + width : nullptr;
+        for (int ox = ox_lo; ox <= ox_hi; ++ox) {
             // `dir` mirrors the scan rather than steering it, so the choice between
             // two equally good cells either side of a grain is not always the left
             // one. Same trick and same stream as the fluid direction pick: a fixed
             // order here would comb every pour in one direction.
             const int nx = fx + ox * dir;
-            const int ny = fy + oy;
-            if (!is_within_bounds(nx, ny)) continue;
-            if (cells[get_index(nx, ny)].type != ElementType::Empty) continue;
+            if (row[nx].type != ElementType::Empty) continue;
 
-            const ElementType under = get_element(nx, ny + 1).type;
+            const ElementType under = below ? below[nx].type : ElementType::Wall;
             const int score = std::abs(ox) + std::abs(oy);
 
             if (under == fluid) {
