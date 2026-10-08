@@ -69,10 +69,12 @@ no float.
 - `tool.h` / `tool.cpp` -- the player's verbs (dig, bow). The only player-side
   code that writes to the grid.
 - `enemy.h` / `enemy.cpp`, `rig.h` -- enemies and the skeleton their pixels
-  hang on. `species::GHOUL`, `species::TROLL`.
-- `body_art.h`, `enemy_art.h`, `troll_art.h` -- enemy bodies as character grids.
-  They live here, not in `assets/`, because for an enemy the picture *is* the
-  body: which pixels exist decides where an arrow hits.
+  hang on. `species::GHOUL`, `species::TROLL`, `species::FISH`.
+- `body_art.h`, `enemy_art.h`, `troll_art.h`, `fish_art.h` -- enemy bodies as
+  character grids. They live here, not in `assets/`, because for an enemy the
+  picture *is* the body: which pixels exist decides where an arrow hits. An arm
+  is geometry (outside the box's columns) unless the art names arm letters, which
+  only the fish does: its lure arm grows out of the top of its head.
 - `arrow.h` / `arrow.cpp` -- arrows, as points outside the grid.
 - `random.h` -- stateless randomness: a value is a function of position, step
   and seed, so a run reproduces from the seed alone.

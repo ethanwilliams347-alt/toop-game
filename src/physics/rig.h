@@ -131,8 +131,12 @@ struct Rig {
 
 // Which part a rest pixel belongs to. Geometry, as body_art's is_arm/is_foot are:
 // a pixel is in the arm because of where it is, and a letter could disagree.
+//
+// A lettered arm (body_art::Art::arm) is always the front arm, wherever its
+// pixels sit: the one body that letters its arm has one, it reaches the way the
+// body faces, and it is drawn over everything else.
 constexpr Part part_of(const body_art::Art& a, const Rig& r, int x, int y) {
-    if (a.is_arm(x, y)) return x < a.box_left ? RearArm : FrontArm;
+    if (a.is_arm(x, y)) return a.arm == nullptr && x < a.box_left ? RearArm : FrontArm;
     if (y >= r.hip_row && x >= a.box_left && x < a.box_right())
         return x < r.leg_split ? RearLeg : FrontLeg;
     if (y < r.neck_row) return Head;
@@ -145,6 +149,10 @@ struct Box {
     int x0, y0, x1, y1;
 };
 constexpr Box rest_box(const body_art::Art& a, const Rig& r, Part p) {
+    if (a.arm != nullptr && (p == RearArm || p == FrontArm)) {
+        if (p == RearArm) return {0, 0, 0, 0};
+        return {a.arm_box.x0, a.arm_box.y0, a.arm_box.x1, a.arm_box.y1};
+    }
     switch (p) {
         case RearArm:  return {0, a.arm_top, a.box_left, a.h};
         case FrontArm: return {a.box_right(), a.arm_top, a.w, a.h};

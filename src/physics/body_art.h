@@ -46,6 +46,25 @@ struct Art {
     // legs cut through -- and there is nothing left to stand on.
     int foot_rows;
 
+    // The arm by letter, for a body whose arm is not where the box would put one.
+    // The fish's grows out of the top of its head and reaches forward over the
+    // snout: part of it is above the box, part inside the box's columns, and the
+    // head and tail it passes are outside them -- no rule about columns says which
+    // of those pixels are arm. So the art names them, and from then on they are
+    // the arm everywhere the geometric rule would have been asked (has_arms, the
+    // rig's parts). Null for every body whose arms do hang outside the box, which
+    // keeps the geometric rule, and its reason, where it fits.
+    //
+    // A lettered arm is one arm, the front one -- see rig::part_of. `arm_box` is
+    // where its letters are in the rest frame, [x0, x1) x [y0, y1): computed by
+    // with_arm_box below rather than typed, because a bound that missed a pixel
+    // would make that pixel undrawable and unhittable while still counting.
+    const char* arm = nullptr;
+    struct Rect {
+        int x0, y0, x1, y1;
+    };
+    Rect arm_box{0, 0, 0, 0};
+
     constexpr int box_right() const { return w - box_left; }  // one past the last box column
     constexpr char at(int x, int y) const { return rows[y][x]; }
 
@@ -68,6 +87,7 @@ struct Art {
         return is_body(x, y) && y >= h - foot_rows && x >= box_left && x < box_right();
     }
     constexpr bool is_arm(int x, int y) const {
+        if (arm != nullptr) return is_body(x, y) && y >= arm_top && contains(arm, at(x, y));
         return is_body(x, y) && y >= arm_top && (x < box_left || x >= box_right());
     }
 
@@ -77,6 +97,23 @@ struct Art {
         return false;
     }
 };
+
+// The art with its lettered arm's bounding box filled in. Unchanged for an art
+// without one.
+constexpr Art with_arm_box(Art a) {
+    if (a.arm == nullptr) return a;
+    Art::Rect r{a.w, a.h, 0, 0};
+    for (int y = 0; y < a.h; ++y)
+        for (int x = 0; x < a.w; ++x)
+            if (a.is_arm(x, y)) {
+                r.x0 = x < r.x0 ? x : r.x0;
+                r.y0 = y < r.y0 ? y : r.y0;
+                r.x1 = x + 1 > r.x1 ? x + 1 : r.x1;
+                r.y1 = y + 1 > r.y1 ? y + 1 : r.y1;
+            }
+    a.arm_box = r;
+    return a;
+}
 
 // --- the checks every art has to pass -------------------------------------
 

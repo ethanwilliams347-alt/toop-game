@@ -220,11 +220,20 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   if it is that arm) drops as a heap of sand. It needs one arrow in each eye,
   not one between them. With both arms gone it has nothing to slam with. It
   wades through sand, so the pile of its own arm does not trap it.
+- **Fish.** A largemouth bass a fifth taller than a troll, walking on a man's
+  legs, with a man's arm growing out of the top of its head and the hand hanging
+  limp in front of its mouth like an anglerfish's lure. Not placed in any scene
+  yet; spawn one with `B`. When you are in front of it within reach it stops,
+  its eye heats, the arm goes back over its head and whips down in front for 20
+  damage -- a hand, so it breaks no ground. Two shots through the shoulder take
+  the arm off, and with it the attack; the eye takes two arrows, not one.
 - **They are animated, and the animation is the body.** Legs stride in step
   with the ground they cover, arms swing, the body breathes, leans into a
   chase and rocks back when hit. A ghoul that has seen you reaches for you and
   slashes from over its head; a troll swings its club back over its shoulder
-  as its eyes heat, then over the top and down into the crater. The limbs
+  as its eyes heat, then over the top and down into the crater; a fish dangles
+  its lure hand ahead of its mouth, then casts it back over its head and down
+  on whatever came to look. The limbs
   turn on their joints rather than swapping to a drawn frame, so an arrow hits
   the arm where it is drawn mid-swing, and a hole shot in a shin stays in the
   shin as the leg moves.
@@ -232,6 +241,8 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   the ground.
 - **`T`** (development tool): Spawn a troll standing on the cursor -- point at
   the ground.
+- **`B`** (development tool): Spawn a fish -- the legged bass with the lure arm
+  -- standing on the cursor.
 - The HUD shows `FOES:` (alive) and `KILLS:`.
 
 **World (development tools)**
