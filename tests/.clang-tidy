@@ -1,0 +1,16 @@
+# The checks in the root .clang-tidy, less one, for the test executables.
+InheritParentConfig: true
+
+# bugprone-exception-escape fires on every test main(): it follows a std::string
+# or std::vector allocation down into the standard library to a throw nothing
+# catches. In a test that is the behaviour wanted. An uncaught exception ends the
+# process non-zero, ctest reports the suite as failed, and the message names the
+# exception -- which is everything a try/catch in each main() would add, written
+# twenty-odd times. It stays on under src/, where an escaping exception is a crash
+# in the player's hands rather than a failed suite.
+#
+# Seen first with LLVM 23 against MSVC's headers, where it reaches the throws
+# inside <xmemory>; a Linux run against libstdc++ did not report it. Turning it
+# off here rather than pinning an LLVM version keeps the answer the same on both.
+Checks: >
+  -bugprone-exception-escape

@@ -95,8 +95,14 @@ int main(int argc, char* argv[]) {
                          DISPLAY_MODES[mode_index].window_w, DISPLAY_MODES[mode_index].window_h);
             break;
         case ModeChoice::Why::StoredTooBig:
+            // choose_display_mode only answers StoredTooBig for a stored index it
+            // has already checked is inside the table (display.h). The analyzer
+            // does not carry that check back out of the call, so it sees a
+            // stored_mode that could still be -1 here.
+            // NOLINTBEGIN(clang-analyzer-security.ArrayBound)
             std::fprintf(stderr, "Stored mode %dx%d does not fit this display; ignoring it.\n",
                          DISPLAY_MODES[stored_mode].window_w, DISPLAY_MODES[stored_mode].window_h);
+            // NOLINTEND(clang-analyzer-security.ArrayBound)
             break;
         case ModeChoice::Why::Stored:
         case ModeChoice::Why::Largest:
