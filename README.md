@@ -303,8 +303,14 @@ to allow inspecting the world, freezing steps, and observing cell states at runt
   slab is carried by the support queue rather than by the chunk rects, so the
   counter can read zero the whole way down.
 
+- **`F6`**: Switch enemies between the two animation styles: limbs turning a
+  little every step (the default), or held key poses that change a few times a
+  stride, like a pixel-art walk cycle. A line under the HUD says which. It is
+  recorded like the spawn keys, because the pose is where an arrow hits, and a
+  reset or scene change puts it back to the default.
+
 - **`F7`**: Cycle to the next scene in `assets/scenes.txt`, rebuilding the world
-  in place. The shipped list holds `empty`, `bg1`, `bg1_ext`, `bg_gemini`, and `bg_forest`. The
+  in place. The shipped list holds `empty`, `bg1`, `bg1_ext`, `bg_gemini`, `bg_forest`, and `bg_tarn`. The
   scene's name appears under the HUD and on stdout. It is a cycle rather than a
   key per scene because the list is authored and a fixed set of bindings
   pretending to be a variable-length list is the same mistake as a format field
@@ -371,5 +377,6 @@ brush still works for drawing more terrain anywhere else.
 
 The reasoning that is not in this file is at the code it belongs to: the header
 comment on a constant says why it holds that value, and the comment on a test
-says which regression it exists to catch. [TUNING.md](TUNING.md) is the one
-separate document kept here, and it is the index of the feel constants.
+says which regression it exists to catch. Two separate documents are kept here:
+[ARCHITECTURE.md](ARCHITECTURE.md), the map of the modules and how a frame moves
+through them, and [TUNING.md](TUNING.md), the index of the feel constants.

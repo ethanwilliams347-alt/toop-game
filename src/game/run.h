@@ -41,6 +41,10 @@ struct Command {
         // cursor on the ground puts a body on the ground rather than half in it
         // (where the spawn would be refused).
         SpawnEnemy,
+        // Flips every enemy between the continuous pose and held key poses (see
+        // Run::snapped_poses). A command and not a render setting, because the
+        // pose is where an arrow hits. arg is unused.
+        TogglePoseSnap,
         Count
     };
     Kind kind = Kind::None;
@@ -211,6 +215,12 @@ public:
     // the readout, and the readout wants the number.
     int kills() const { return kill_count; }
 
+    // Whether enemies hold key poses rather than turning continuously -- the
+    // comparison switch for the two animation styles, flipped by
+    // Command::TogglePoseSnap. Off in a fresh Run and after reset(): a recording
+    // starts from a reset, so a replay has to start in the style the session did.
+    bool snapped_poses() const { return snap_poses; }
+
     // What the last step() did -- see game/events.h. Cleared at the start of each
     // step, so a frame that runs several steps reads each step's events after it.
     const EventLog& events() const { return events_; }
@@ -228,6 +238,7 @@ private:
     // must not have the answer flicker back.
     Outcome run_outcome = Outcome::Playing;
     int kill_count = 0;
+    bool snap_poses = false;
     EventLog events_;
 
     // The objective survives reset(), and this is the second documented exception to

@@ -95,8 +95,14 @@ int main(int argc, char* argv[]) {
                          DISPLAY_MODES[mode_index].window_w, DISPLAY_MODES[mode_index].window_h);
             break;
         case ModeChoice::Why::StoredTooBig:
+            // choose_display_mode only answers StoredTooBig for a stored index it
+            // has already checked is inside the table (display.h). The analyzer
+            // does not carry that check back out of the call, so it sees a
+            // stored_mode that could still be -1 here.
+            // NOLINTBEGIN(clang-analyzer-security.ArrayBound)
             std::fprintf(stderr, "Stored mode %dx%d does not fit this display; ignoring it.\n",
                          DISPLAY_MODES[stored_mode].window_w, DISPLAY_MODES[stored_mode].window_h);
+            // NOLINTEND(clang-analyzer-security.ArrayBound)
             break;
         case ModeChoice::Why::Stored:
         case ModeChoice::Why::Largest:
@@ -812,6 +818,15 @@ int main(int argc, char* argv[]) {
                 // A troll at the cursor, standing on it -- point at the ground.
                 if (e.key.keysym.sym == SDLK_t && !repeat)
                     pending_command = Command::spawn(species::TROLL);
+                // Enemies' animation style: continuous turn or held key poses, for
+                // comparing the two. A command for the spawn keys' reason -- the
+                // pose is where arrows hit -- and a function key for F9's.
+                if (e.key.keysym.sym == SDLK_F6 && !repeat) {
+                    pending_command = Command{Command::Kind::TogglePoseSnap, 0};
+                    record_notice =
+                        run.snapped_poses() ? "ENEMY POSES  SMOOTH" : "ENEMY POSES  SNAPPED";
+                    record_notice_timer = 2.0;
+                }
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
