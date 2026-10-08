@@ -34,6 +34,21 @@ namespace {
         }
         return flow;
     }
+
+    // Which materials appear as the target of any row in REACTIONS. try_react's two
+    // loops only ever act on rows whose target is the cell's own type, so for a
+    // material no row names they are a full walk of the table that can do nothing
+    // -- and Sand, the commonest moving material, is one. Built from the table at
+    // compile time so a new row is picked up without anyone remembering this.
+    struct ReactionTargets {
+        bool is_target[static_cast<int>(ElementType::Count)] = {};
+    };
+    constexpr ReactionTargets make_reaction_targets() {
+        ReactionTargets t{};
+        for (const Reaction& r : REACTIONS) t.is_target[static_cast<int>(r.target)] = true;
+        return t;
+    }
+    constexpr ReactionTargets REACTION_TARGETS = make_reaction_targets();
 }
 
 Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height), world_seed(seed) {
@@ -1315,6 +1330,9 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
 bool Grid::try_react(int x, int y) {
     const int idx = get_index(x, y);
     Element& cell = cells[idx];
+
+    // Exactly what both loops below would conclude, without walking them.
+    if (!REACTION_TARGETS.is_target[static_cast<int>(cell.type)]) return false;
 
     // This spot's own ignition point. Both loops below go through it, and that is
     // load-bearing rather than tidy: the first decides whether a cell is allowed to
