@@ -62,6 +62,7 @@ ctest --test-dir build -C Release -R grid_test --output-on-failure
 
 .\build\Release\SlopPhysics.exe                       # F9 writes session.rec
 .\build\Release\grid_bench.exe                        # timings, not a test
+.\build\Release\grid_bench.exe --focus                # the four A/B rows, 5 reps, ~4 min
 .\build\Release\preview_light.exe                     # headless frame dump
 python tools/rawpng.py out.raw out.png 804 604
 
@@ -86,13 +87,25 @@ turn them into `add_test()`.
   comment saying why; never edit `.clang-tidy` to make one change pass.
 - **`src/physics/`:** run the full ctest suite. `golden_frame_test` must pass
   unchanged — it checksums a composited frame, so a new checksum means visible
-  output changed; confirm that was intended before re-baselining. Run `grid_bench`
-  before and after in the same sitting and report both; `churning` and `cascading`
-  at 1920×1080 are the rows that matter.
-- **`src/render/`:** `golden_frame_test` plus before/after `grid_bench`, including
-  the `light/fire` and `light/dark` rows.
-- **Perf claims** need back-to-back `grid_bench` numbers; run-to-run noise on the
-  heavy rows is about ±10%.
+  output changed; confirm that was intended before re-baselining. Run
+  `grid_bench --focus` before and after in the same sitting and report both;
+  `churning` and `cascading` at 1920×1080 are the rows that matter.
+- **`src/render/`:** `golden_frame_test` plus before/after `grid_bench --focus`,
+  which includes the `light/fire` and `light/dark` rows.
+- **Perf claims** need back-to-back `grid_bench --focus` runs: compare medians and
+  quote the spread beside them. Check the `placement:` line first. `grid_bench`
+  keeps its main thread on the P-cores with power throttling off, because on a
+  hybrid CPU a thread that drifts to an E-core runs `churning` at 87.6 ms instead
+  of 46.7, and that drift, not the code, is the ±20% that used to appear between
+  builds. If the line doesn't say `on`, the numbers are not comparable. With it,
+  one binary repeats to 1–3% (worse with other work running, so close other
+  heavy programs and don't build in parallel). Code layout also moves timings
+  with no code change: across six MSVC builds that differed only in
+  `SLOP_BENCH_PAD`, the spread was churning 2.5%, light/fire 3%, cascading 7%,
+  light/dark 13%. A difference smaller than that on its row is unproven until it
+  survives rebuilding both sides with `-DSLOP_BENCH_PAD=16` (or `32`). `/GL` +
+  `/LTCG` doesn't remove this: it shrank light/dark's spread to 3% but one layout
+  put churning 10% above the rest.
 - **Feel constants:** update `TUNING.md` in the same commit (value, the file that
   declares it, and a `History` entry with the reason). Rows link files, never
   lines; `tuning_test` finds each constant by name and rejects `#L` anchors.
