@@ -139,12 +139,44 @@ void Grid::reset(uint64_t seed) {
 // neighbourhood, and because the neighbourhood is resolved per cell it crosses
 // chunk borders correctly -- otherwise the same bug reappears as seams along
 // the invisible chunk lines.
+//
+// The 3x3 is applied a chunk at a time rather than a cell at a time, and the
+// two are the same thing: a chunk's rect is a bounding box, so including nine
+// cells one by one leaves it covering exactly the part of the 3x3 that falls
+// inside that chunk -- which is what including that part as one box does. The
+// set of cells woken is identical; only the cost changes. That cost was the
+// largest single item in the step: every swap marks both of its ends, so a
+// moving grain paid eighteen bounds checks, chunk divisions and rect updates,
+// and in `cascading` this function alone was over 60% of Grid::update.
+//
+// Almost every 3x3 lies inside one chunk -- only cells on a chunk's outer ring
+// straddle a border -- so that case gets a path of its own, and the general
+// loop below it handles the up-to-four chunks a corner cell can touch.
 void Grid::mark_dirty(int x, int y) {
-    for (int ny = y - 1; ny <= y + 1; ++ny) {
-        for (int nx = x - 1; nx <= x + 1; ++nx) {
-            if (!is_within_bounds(nx, ny)) continue;
-            const int ci = (ny / CHUNK_SIZE) * chunks_x + (nx / CHUNK_SIZE);
-            chunk_next[ci].include(nx, ny);
+    // Clip to the world first, so everything below works on cells that exist.
+    // Non-negative from here on, which is also what makes the divisions by
+    // CHUNK_SIZE plain floors.
+    const int x0 = x - 1 > 0 ? x - 1 : 0;
+    const int y0 = y - 1 > 0 ? y - 1 : 0;
+    const int x1 = x + 1 < width - 1 ? x + 1 : width - 1;
+    const int y1 = y + 1 < height - 1 ? y + 1 : height - 1;
+    if (x0 > x1 || y0 > y1) return;  // the whole 3x3 is outside the world
+
+    const int cx0 = x0 / CHUNK_SIZE, cx1 = x1 / CHUNK_SIZE;
+    const int cy0 = y0 / CHUNK_SIZE, cy1 = y1 / CHUNK_SIZE;
+
+    if (cx0 == cx1 && cy0 == cy1) {
+        chunk_next[cy0 * chunks_x + cx0].include_box(x0, y0, x1, y1);
+        return;
+    }
+
+    for (int cy = cy0; cy <= cy1; ++cy) {
+        const int by0 = std::max(y0, cy * CHUNK_SIZE);
+        const int by1 = std::min(y1, cy * CHUNK_SIZE + CHUNK_SIZE - 1);
+        for (int cx = cx0; cx <= cx1; ++cx) {
+            const int bx0 = std::max(x0, cx * CHUNK_SIZE);
+            const int bx1 = std::min(x1, cx * CHUNK_SIZE + CHUNK_SIZE - 1);
+            chunk_next[cy * chunks_x + cx].include_box(bx0, by0, bx1, by1);
         }
     }
 }

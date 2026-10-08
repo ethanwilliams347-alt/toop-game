@@ -196,22 +196,33 @@ public:
 private:
     // Bounds of the cells within one chunk that may still move, in world
     // coordinates, inclusive at both ends. max < min means the chunk is asleep.
+    //
+    // Empty is stored as an inverted rect at the extremes of int rather than as
+    // (0, 0, -1, -1), so that growing it is four plain min/max operations with no
+    // "was it empty?" branch: the first box included replaces both ends outright
+    // because anything is smaller than INT_MAX and larger than INT_MIN. Every
+    // reader checks is_empty() before looking at the bounds, which is the only
+    // thing the sentinel values have to survive.
     struct DirtyRect {
-        int min_x = 0, min_y = 0, max_x = -1, max_y = -1;
+        static constexpr int NONE_MIN = 0x7FFFFFFF;
+        static constexpr int NONE_MAX = -0x7FFFFFFF - 1;
+        int min_x = NONE_MIN, min_y = NONE_MIN, max_x = NONE_MAX, max_y = NONE_MAX;
 
         bool is_empty() const { return max_x < min_x; }
-        void clear() { min_x = 0; min_y = 0; max_x = -1; max_y = -1; }
+        void clear() {
+            min_x = NONE_MIN;
+            min_y = NONE_MIN;
+            max_x = NONE_MAX;
+            max_y = NONE_MAX;
+        }
 
-        void include(int x, int y) {
-            if (is_empty()) {
-                min_x = max_x = x;
-                min_y = max_y = y;
-                return;
-            }
-            if (x < min_x) min_x = x;
-            if (x > max_x) max_x = x;
-            if (y < min_y) min_y = y;
-            if (y > max_y) max_y = y;
+        // Grows the rect to cover [x0, x1] x [y0, y1]. The caller guarantees
+        // x0 <= x1 and y0 <= y1.
+        void include_box(int x0, int y0, int x1, int y1) {
+            min_x = x0 < min_x ? x0 : min_x;
+            min_y = y0 < min_y ? y0 : min_y;
+            max_x = x1 > max_x ? x1 : max_x;
+            max_y = y1 > max_y ? y1 : max_y;
         }
     };
 
