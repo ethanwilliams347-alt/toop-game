@@ -435,6 +435,15 @@ public:
     bool facing_left() const { return face_left; }
     bool is_chasing() const { return chasing; }
 
+    // Held key poses rather than a continuous turn -- see "snapped poses" in
+    // enemy.cpp. Where pixels are is where they are hit, so this is simulation
+    // state: Run sets it, from a recorded Command, on every body it holds. It
+    // shows from the end of the next update, where the pose is computed, so a
+    // body never changes pose under the arrows of the step it is set on. spawn()
+    // clears it like everything else; Run::spawn_enemy sets it back.
+    void set_snapped_poses(bool on) { snap = on; }
+    bool snapped_poses() const { return snap; }
+
     // Steps until a slam that is winding up lands, or 0 when none is. Public for
     // the renderer's telegraph -- the eyes flare as it winds up -- and for tests.
     int windup_left() const { return windup; }
@@ -515,6 +524,8 @@ private:
     int breath = 0;
     // Steps of flinch left.
     int flinch = 0;
+    // See set_snapped_poses.
+    bool snap = false;
 
     void compute_pose();
     void advance_gait();

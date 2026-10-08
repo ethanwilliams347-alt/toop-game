@@ -15,7 +15,9 @@
 #include "physics/arrow.h"
 #include "physics/enemy.h"
 #include "test_util.h"
+#include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace {
@@ -855,6 +857,137 @@ int main() {
         settle(g, e, 120);
         check("an arm shot off mid-stride does not grow back as the body walks on",
               count_pixels(e, is_left_arm) == left_arm && !e.has_pixel(fx, fy));
+    }
+
+    // --- snapped poses ---------------------------------------------------
+    //
+    // The other animation style: the same pose, its slow clocks held at key
+    // points. It has to keep every promise the continuous one makes above, and
+    // it has to actually be a handful of held frames, which is the whole point.
+
+    // Which pixel is in every cell of the pose's bounds, hashed. In posed frame
+    // space, so the body walking along does not change it and only the pose does.
+    auto pose_signature = [](const Enemy& e) {
+        uint64_t h = 1469598103934665603ull;
+        auto mix = [&h](int v) { h = (h ^ static_cast<uint32_t>(v)) * 1099511628211ull; };
+        const rig::Box b = e.pose_bounds();
+        mix(b.x0);
+        mix(b.y0);
+        mix(b.x1);
+        mix(b.y1);
+        for (int py = b.y0; py < b.y1; ++py)
+            for (int px = b.x0; px < b.x1; ++px) mix(e.posed_pixel(px, py));
+        return h;
+    };
+    {
+        // The command flips it, for bodies already there and bodies spawned after,
+        // and a reset puts it back -- a recording starts from a reset.
+        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+        Run& run = *run_owner;
+        for (int y = FLOOR_Y; y < WORLD_H; ++y)
+            for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
+        run.spawn_enemy(60, FLOOR_Y - G.height);
+        check("a fresh run turns its enemies continuously",
+              !run.snapped_poses() && !run.enemies[0].snapped_poses());
+        Input in;
+        in.command = Command{Command::Kind::TogglePoseSnap, 0};
+        run.step(in);
+        run.spawn_enemy(160, FLOOR_Y - G.height);
+        check("the toggle snaps the run, the body already in it, and one spawned after",
+              run.snapped_poses() && run.enemies[0].snapped_poses() &&
+                  run.enemies[1].snapped_poses());
+        run.step(in);
+        check("and toggles back", !run.snapped_poses() && !run.enemies[0].snapped_poses());
+        run.step(in);
+        run.reset(Grid::DEFAULT_SEED);
+        check("a reset puts a snapped run back to continuous", !run.snapped_poses());
+    }
+    {
+        // A ghoul wandering: snapped, it shows a few dozen poses at most -- walk
+        // keys times breath keys -- where turning continuously it shows hundreds.
+        size_t distinct[2] = {0, 0};
+        for (int mode = 0; mode < 2; ++mode) {
+            Grid g = make_world();
+            Enemy e;
+            e.spawn(100, FLOOR_Y - G.height - 4);
+            e.set_snapped_poses(mode == 1);
+            std::set<uint64_t> seen;
+            for (int i = 0; i < 600; ++i) {
+                g.update();
+                e.update(g, -10000, -10000, false);
+                seen.insert(pose_signature(e));
+            }
+            distinct[mode] = seen.size();
+        }
+        const std::string counts =
+            "continuous=" + std::to_string(distinct[0]) + " snapped=" + std::to_string(distinct[1]);
+        check("a snapped ghoul's wander is a few dozen held poses", distinct[1] <= 40, counts);
+        check("a small share of the continuous style's", distinct[1] * 4 < distinct[0], counts);
+    }
+    {
+        // Snapped, every pose a wander, a chase, a swipe and a slam reach is still
+        // sound, the ghoul's feet still swing, and the troll's club still goes up
+        // over its head and lands out in front.
+        const auto toggle = [](Run& run) {
+            Input in;
+            in.command = Command{Command::Kind::TogglePoseSnap, 0};
+            run.step(in);
+        };
+        bool sound = true;
+        std::string why;
+        int ahead = 0, behind = 0;
+        {
+            const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+            Run& run = *run_owner;
+            for (int y = FLOOR_Y; y < WORLD_H; ++y)
+                for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
+            run.player = Player(240, FLOOR_Y - Player::HEIGHT);
+            run.spawn_enemy(60, FLOOR_Y - G.height);
+            toggle(run);
+            const int foot_x = 9, foot_y = G.frame_h() - 1;
+            for (int i = 0; i < 400 && sound; ++i) {
+                run.step(Input{});
+                const Enemy& e = run.enemies[0];
+                if (!e.is_alive()) break;
+                sound = pose_is_sound(e, why);
+                const int fwd = e.facing_left() ? rest_x(e, foot_x) - world_x(e, foot_x, foot_y)
+                                                : world_x(e, foot_x, foot_y) - rest_x(e, foot_x);
+                if (fwd > 0) ++ahead;
+                if (fwd < 0) ++behind;
+            }
+        }
+        check("snapped, every ghoul pose draws what is hit, within its pad", sound, why);
+        check("snapped, a walking ghoul's foot still swings ahead and behind",
+              ahead > 10 && behind > 10,
+              "ahead=" + std::to_string(ahead) + " behind=" + std::to_string(behind));
+
+        bool troll_sound = true, overhead = false, forward_at_impact = false;
+        {
+            const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
+            Run& run = *run_owner;
+            for (int y = FLOOR_Y; y < WORLD_H; ++y)
+                for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
+            run.player = Player(100 + T.width + 4, FLOOR_Y - Player::HEIGHT);
+            run.spawn_enemy(100, FLOOR_Y - T.height, T);
+            toggle(run);
+            const int club_x = TA.w - 3, club_y = TA.h - 2;
+            for (int i = 0; i < 200 && troll_sound; ++i) {
+                run.step(Input{});
+                const Enemy& e = run.enemies[0];
+                troll_sound = pose_is_sound(e, why);
+                if (e.windup_left() > 0 && world_y(e, club_x, club_y) < rest_y(e, 4))
+                    overhead = true;
+                if (e.attack_recovery() == 0) {
+                    const int cx = world_x(e, club_x, club_y);
+                    const int front = e.facing_left() ? e.cell_x() : e.cell_x() + T.width;
+                    forward_at_impact =
+                        e.facing_left() ? cx < front - T.reach / 2 : cx > front + T.reach / 2;
+                }
+            }
+        }
+        check("snapped, every troll pose draws what is hit, within its pad", troll_sound, why);
+        check("snapped, the troll still raises its club over its head", overhead);
+        check("and still lands it out in front", forward_at_impact);
     }
 
     return report();

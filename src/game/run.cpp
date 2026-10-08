@@ -21,6 +21,7 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
     quiver = Quiver();
     enemies.fill(Enemy{});
     kill_count = 0;
+    snap_poses = false;
     events_.clear();
     run_outcome = Outcome::Playing;
     // objective_set, goal_x and goal_y are deliberately not cleared -- see the field
@@ -33,6 +34,7 @@ bool Run::spawn_enemy(int x, int y, const Species& kind) {
         // Asked of the slot as the new species: the test is the box, and the box
         // is the species'.
         e.spawn(x, y, kind);
+        e.set_snapped_poses(snap_poses);
         if (e.overlaps_solid(grid, x, y)) {
             e = Enemy{};
             return false;
@@ -82,6 +84,9 @@ bool Run::step(const Input& input) {
     if (input.command.kind == Command::Kind::SpawnEnemy) {
         if (const Species* kind = species::at(input.command.arg))
             spawn_enemy(input.cursor_x - kind->width / 2, input.cursor_y - kind->height, *kind);
+    } else if (input.command.kind == Command::Kind::TogglePoseSnap) {
+        snap_poses = !snap_poses;
+        for (Enemy& e : enemies) e.set_snapped_poses(snap_poses);
     }
 
     if (input.brush_active) {

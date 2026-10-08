@@ -818,6 +818,15 @@ int main(int argc, char* argv[]) {
                 // A troll at the cursor, standing on it -- point at the ground.
                 if (e.key.keysym.sym == SDLK_t && !repeat)
                     pending_command = Command::spawn(species::TROLL);
+                // Enemies' animation style: continuous turn or held key poses, for
+                // comparing the two. A command for the spawn keys' reason -- the
+                // pose is where arrows hit -- and a function key for F9's.
+                if (e.key.keysym.sym == SDLK_F6 && !repeat) {
+                    pending_command = Command{Command::Kind::TogglePoseSnap, 0};
+                    record_notice =
+                        run.snapped_poses() ? "ENEMY POSES  SMOOTH" : "ENEMY POSES  SNAPPED";
+                    record_notice_timer = 2.0;
+                }
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();

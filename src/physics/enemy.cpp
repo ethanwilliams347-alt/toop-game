@@ -32,6 +32,36 @@ fx::v stroke_end(const rig::Rig& r) {
     return end;
 }
 
+// --- snapped poses -----------------------------------------------------------
+//
+// The alternative to the continuous turn, behind Enemy::set_snapped_poses. A limb
+// turned a degree or two re-rounds its edge one cell at a time, starting at one
+// end, so a slow turn reads on screen as a ripple running down the limb rather
+// than as the limb moving. Holding the slow clocks at a few key points instead
+// makes the pose a handful of frames that are each held still and then replaced
+// whole -- a pixel-art walk cycle -- with the same pixels and the same mask.
+//
+// Only the slow motions are held. The strike is six or eight steps and moves
+// many cells a step, which never crawls; snapping it would only take frames out
+// of the blow.
+
+// Key frames per stride: legs together, apart, together, apart the other way,
+// and one between each.
+constexpr int WALK_KEYS = 8;
+// Per breath: in, level, out, level.
+constexpr int BREATH_KEYS = 4;
+// For each eased transition: the club's raise and the recovery from a blow.
+constexpr int EASE_KEYS = 4;
+// For the flinch easing back.
+constexpr int FLINCH_KEYS = 3;
+
+// k in fx [0, ONE] rounded to the nearest of `keys` equal steps, so 0 and ONE
+// are both kept exactly and a transition still starts and ends where it did.
+fx::v hold_fraction(fx::v k, int keys) {
+    const int n = (k * keys + fx::ONE / 2) / fx::ONE;
+    return fx::from_ratio(n, keys);
+}
+
 }  // namespace
 
 void Enemy::spawn(int x, int y, const Species& k) {
@@ -420,10 +450,22 @@ void Enemy::compute_pose() {
     const body_art::Art& art = *kind->art;
     constexpr fx::v TURN = 4 * fx::HALF_PI;
 
+    // Snapped, the clocks the pose reads are held at their key points; the clocks
+    // themselves run on untouched, so the switch changes where pixels are and
+    // nothing about where the body is or what it does.
+    fx::v walk = gait;
+    int breathing = breath;
+    if (snap) {
+        const fx::v slice = fx::from_int(r.stride) / WALK_KEYS;
+        walk -= walk % slice;
+        const int beat = std::max(1, r.breathe_steps / BREATH_KEYS);
+        breathing -= breathing % beat;
+    }
+
     // --- the walk --- one sine drives both legs, opposite ways, and the arms
     // against their own side's leg.
     const fx::v stride_sin =
-        fx::sincos(static_cast<fx::v>(int64_t{gait} * TURN / fx::from_int(r.stride))).s;
+        fx::sincos(static_cast<fx::v>(int64_t{walk} * TURN / fx::from_int(r.stride))).s;
     fx::v front_leg = -fx::mul(r.leg_swing, stride_sin);
     fx::v rear_leg = fx::mul(r.leg_swing, stride_sin);
     fx::v front_arm = fx::mul(r.arm_swing, stride_sin);
@@ -437,7 +479,7 @@ void Enemy::compute_pose() {
     // --- the breath --- always running, so a body standing still is not a
     // picture of one.
     const fx::v breath_sin =
-        fx::sincos(static_cast<fx::v>(int64_t{breath} * TURN / r.breathe_steps)).s;
+        fx::sincos(static_cast<fx::v>(int64_t{breathing} * TURN / r.breathe_steps)).s;
     const fx::v sway = fx::mul(r.breathe, breath_sin);
     lean += sway / 2;
     front_arm += sway;
@@ -468,7 +510,8 @@ void Enemy::compute_pose() {
         const int t = kind->windup_steps - windup;
         const int raising = kind->windup_steps - r.strike_steps;
         if (t < raising) {
-            const fx::v k = ease(t, raising);
+            fx::v k = ease(t, raising);
+            if (snap) k = hold_fraction(k, EASE_KEYS);
             front_arm = lerp(front_arm, r.raise, k);
             rear_arm = lerp(rear_arm, -r.raise / 6, k);
             lean = lerp(lean, r.windup_lean, k);
@@ -490,7 +533,8 @@ void Enemy::compute_pose() {
             // recovery -- the window to punish it in, shown -- then both come
             // back to where the walk would have them.
             const int hold = kind->attack == Attack::Slam ? interval / 2 : r.strike_steps;
-            const fx::v k = ease(since - hold, interval - hold);
+            fx::v k = ease(since - hold, interval - hold);
+            if (snap) k = hold_fraction(k, EASE_KEYS);
             if (kind->attack == Attack::Slam) rear_arm = lerp(-r.raise / 6, rear_arm, k);
             front_arm = lerp(r.strike, front_arm, k);
             lean = lerp(r.strike_lean, lean, k);
@@ -499,7 +543,9 @@ void Enemy::compute_pose() {
 
     // --- the flinch --- rocked back, arms left behind going forward.
     if (flinch > 0) {
-        const fx::v rock = r.flinch * flinch / r.flinch_steps;
+        const fx::v rock =
+            snap ? fx::mul(r.flinch, hold_fraction(fraction(flinch, r.flinch_steps), FLINCH_KEYS))
+                 : r.flinch * flinch / r.flinch_steps;
         lean += rock;
         front_arm += rock;
         rear_arm += rock;

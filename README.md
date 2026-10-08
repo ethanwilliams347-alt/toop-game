@@ -303,6 +303,12 @@ to allow inspecting the world, freezing steps, and observing cell states at runt
   slab is carried by the support queue rather than by the chunk rects, so the
   counter can read zero the whole way down.
 
+- **`F6`**: Switch enemies between the two animation styles: limbs turning a
+  little every step (the default), or held key poses that change a few times a
+  stride, like a pixel-art walk cycle. A line under the HUD says which. It is
+  recorded like the spawn keys, because the pose is where an arrow hits, and a
+  reset or scene change puts it back to the default.
+
 - **`F7`**: Cycle to the next scene in `assets/scenes.txt`, rebuilding the world
   in place. The shipped list holds `empty`, `bg1`, `bg1_ext`, `bg_gemini`, and `bg_forest`. The
   scene's name appears under the HUD and on stdout. It is a cycle rather than a
