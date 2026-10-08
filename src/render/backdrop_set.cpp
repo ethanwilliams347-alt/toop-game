@@ -195,10 +195,13 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
                 } else if (key == "drift" && has_value) {
                     if (!parse_float(value, l.drift))
                         return fail("drift='" + value + "' is not a number");
+                } else if (key == "width" && has_value) {
+                    if (!parse_int(value, l.width) || l.width <= 0)
+                        return fail("width='" + value + "' is not a positive number of cells");
                 } else {
                     return fail("'" + tok +
                                 "' is not a layer field (factor=, foot=, plane, "
-                                "bands=, opaque, foreground, on_plane, ripple=, drift=)");
+                                "bands=, opaque, foreground, on_plane, ripple=, drift=, width=)");
                 }
             }
 

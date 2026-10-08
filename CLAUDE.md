@@ -46,6 +46,9 @@ Leave these as they are; each has a rationale comment at the definition.
 - `is_grounded` compares `piece_tag`, not material, so cracks survive movement.
 - `MAX_SUPPORT_CELLS` assumes "supported" when it gives up — a missed collapse is
   invisible, a wrong one is rubble.
+- Far backdrop layers in a long scene are narrower tiles than the set (`width=`
+  in backdrop.txt). Widening them to the world's width only adds bytes; the
+  width needed is `345 + f * (W - 345)`, and `backdrop_set_test` enforces it.
 - Cross-file invariants are `static_assert`s (`player.h`, `element.h`,
   `reaction.h`). If a retuned constant trips one, its message explains the
   constraint — address it rather than loosening the assert.
