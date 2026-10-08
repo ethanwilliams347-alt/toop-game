@@ -10,6 +10,7 @@
 // Runs from the source tree (WORKING_DIRECTORY), because it reads
 // assets/scenes.txt and the art. Links no SDL: what a person has to judge --
 // whether the lake reads as wide -- is preview_backdrop's job.
+#include "game/display.h"
 #include "render/backdrop_set.h"
 #include "scene/bmp.h"
 #include "scene/scene_list.h"
@@ -110,6 +111,8 @@ void test_parser() {
         {"a factor with a unit on it", "size 10 10\nlayer a.bmp factor=0.3x\n", 2},
         {"an unknown flag", "size 10 10\nlayer a.bmp factor=1 shiny\n", 2},
         {"a stray field after a record", "size 10 10 4\n", 1},
+        {"a width of no cells", "size 10 10\nlayer a.bmp factor=0 width=0\n", 2},
+        {"a width with a unit on it", "size 10 10\nlayer a.bmp factor=0 width=5px\n", 2},
     };
     for (const Bad& b : bad) {
         const backdrop_set::Set s = parse(b.text, &err);
@@ -117,6 +120,14 @@ void test_parser() {
         check((std::string("parse: ") + b.what + " rejects the set at its line").c_str(),
               s.layers.empty() && err.find(where) != std::string::npos, err);
     }
+
+    const backdrop_set::Set tiled =
+        parse("size 40 10\nlayer sky.bmp factor=0 width=8 opaque\nlayer hill.bmp factor=1\n", &err);
+    check("parse: width= makes a layer a narrower tile, and the rest keep the set's width",
+          err.empty() && tiled.layers.size() == 2 &&
+              backdrop_set::width_of(tiled, tiled.layers[0]) == 8 &&
+              backdrop_set::width_of(tiled, tiled.layers[1]) == 40,
+          err);
 
     parse("size 10 10\n", &err);
     check("parse: a set with no layers is refused", !err.empty(), err);
@@ -151,6 +162,34 @@ std::vector<Shipped> shipped_sets() {
         if (def.custom_width > 0)
             check(("shipped: scene '" + def.name + "' is its backdrop's native size").c_str(),
                   def.custom_width == s.set.native_w && def.custom_height == s.set.native_h);
+        // A layer narrower than its set must still never show itself twice. Over a
+        // walk from one end of the world to the other, a layer at factor f shows
+        // V + f * (W - V) of its columns through a window V cells wide, and that
+        // grows with V, so the widest window the game offers is the one to hold it
+        // to. Drifting layers are exempt: drift laps any tile eventually, and
+        // clouds are made to be seen lapping. So is a layer faster than the world
+        // (a foreground above 1.00), which shows more columns than the world has
+        // and so repeats at any width; its art has to be sparse enough not to
+        // be caught doing it.
+        if (s.set.anchor == backdrop_set::Anchor::Standing && def.scale > 0) {
+            int widest = 0;
+            for (const DisplayMode& m : DISPLAY_MODES)
+                widest = std::max(widest, m.padded_w(def.scale));
+            const int world_w = def.custom_width > 0 ? def.custom_width : s.set.native_w;
+            for (const backdrop_set::Layer& l : s.set.layers) {
+                if (l.width <= 0 || l.plane || l.drift != 0.0f || !l.bands.empty()) continue;
+                const float f = backdrop_set::factor_of(s.set, l);
+                if (f > 1.0f) continue;
+                const float shown = static_cast<float>(widest) +
+                                    f * static_cast<float>(std::max(0, world_w - widest));
+                check(("shipped: " + def.backdrop + ": " + l.file +
+                       " is wide enough never to repeat on screen")
+                          .c_str(),
+                      static_cast<float>(l.width) >= shown,
+                      "width " + std::to_string(l.width) + ", shows " +
+                          std::to_string(static_cast<int>(shown)));
+            }
+        }
         out.push_back(s);
     }
     check("shipped: at least one scene names a backdrop", !out.empty());
@@ -203,10 +242,12 @@ void test_every_set(const Shipped& sh) {
         if (!ok) continue;
         // One art pixel is one world cell, so a layer of a different size is not a
         // scaling question -- it no longer lines up with the others.
-        check((ltag + "is the set's native size").c_str(),
-              img.width == set.native_w && img.height == set.native_h,
+        // A narrower tile is stated (width=), never discovered from the BMP.
+        const int want_w = backdrop_set::width_of(set, l);
+        check((ltag + "is the set's height and its stated width").c_str(),
+              img.width == want_w && img.height == set.native_h,
               std::to_string(img.width) + "x" + std::to_string(img.height));
-        if (img.width != set.native_w || img.height != set.native_h) continue;
+        if (img.width != want_w || img.height != set.native_h) continue;
 
         const auto px = [&](int x, int y) {
             return img.pixels[static_cast<size_t>(y) * static_cast<size_t>(img.width) +

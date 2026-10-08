@@ -280,6 +280,11 @@ Record adjustments to tuning parameters and their rationale here.
   `ripple_amplitude` 0.6, cloud `drift` -0.6, reeds 1.30. 0.75 because at 0.5 the
   valley drops out of a ceiling-height window and at 1.0 the plane smears at 3.6x;
   see the header of `assets/bg_tarn/backdrop.txt`. Existing bg1-family sets are unchanged.
+- **2026-10-08, `bg_tarn_wide`.** A second rig set, 2752 cells wide, with no
+  new values: it takes bg_tarn's rig (horizon 200, contact 264, strength 0.75),
+  ripple 0.6, cloud drift -0.6 and foreground 1.30 so the two read as the same
+  lake under the same camera. The rows above stay bg_tarn's; retuning one set
+  does not retune the other, since each is its own backdrop.txt.
 - **Troll added** (first-pass values). The slam's reach went 16 -> 20 and its
   crush radius 4 -> 5 after the preview showed a 4-radius crater sitting under
   the club's own head where nobody could see it. Wading was added after a troll

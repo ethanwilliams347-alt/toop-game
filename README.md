@@ -310,7 +310,7 @@ to allow inspecting the world, freezing steps, and observing cell states at runt
   reset or scene change puts it back to the default.
 
 - **`F7`**: Cycle to the next scene in `assets/scenes.txt`, rebuilding the world
-  in place. The shipped list holds `empty`, `bg1`, `bg1_ext`, `bg_gemini`, `bg_forest`, and `bg_tarn`. The
+  in place. The shipped list holds `empty`, `bg1`, `bg1_ext`, `bg_gemini`, `bg_forest`, `bg_tarn`, and `bg_tarn_wide`. The
   scene's name appears under the HUD and on stdout. It is a cycle rather than a
   key per scene because the list is authored and a fixed set of bindings
   pretending to be a variable-length list is the same mistake as a format field

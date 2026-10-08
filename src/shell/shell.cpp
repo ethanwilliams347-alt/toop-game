@@ -180,7 +180,7 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
         }
         frame::ParallaxLayer l;
         l.texture = tex;
-        l.w = set.native_w * scale;
+        l.w = backdrop_set::width_of(set, sp) * scale;
         l.h = set.native_h * scale;
         l.tex_h = set.native_h;
         l.parallax_x = backdrop_set::factor_of(set, sp);
