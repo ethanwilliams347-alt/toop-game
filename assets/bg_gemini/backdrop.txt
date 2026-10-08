@@ -1,0 +1,17 @@
+# bg_gemini: a generated 688x288 scene on bg1's model (see assets/bg1/backdrop.txt):
+# corner anchor, locked vertical, bg1's ladder, and a banded ground whose cuts
+# at 164 and 200 fall on flat paint.
+
+size    688 288
+anchor  corner
+
+# file                             how it moves                              flags
+layer   bg_gemini_09_sky.bmp           factor=0.04                               opaque
+layer   bg_gemini_08_ground.bmp        bands=0:164:0.30,164:200:0.70,200:288:1.00
+layer   bg_gemini_07_mountains.bmp     factor=0.12
+layer   bg_gemini_06_hills_far.bmp     factor=0.20
+layer   bg_gemini_05_hills_midfar.bmp  factor=0.30
+layer   bg_gemini_04_hills_mid.bmp     factor=0.42
+layer   bg_gemini_03_hills_midnear.bmp factor=0.55
+layer   bg_gemini_02_hills_near.bmp    factor=0.70
+layer   bg_gemini_01_fg_rocks.bmp      factor=1.00                               foreground

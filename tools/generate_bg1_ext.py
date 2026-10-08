@@ -64,7 +64,7 @@ drawing idiom -- a 1px rim on every mass's top edge, a 1px line along its foot,
 interior contour lines tracing the ridges behind it -- is reproduced without
 being described. And because a segment keeps its own rows, every hill's foot
 lands where the source put it plus the vertical shift. That matters beyond
-looks: bg1_backdrop.h bands the ground plane at the factors of whatever stands
+looks: assets/bg1/backdrop.txt bands the ground plane at the factors of whatever stands
 on each band, and nothing in this file is free to move those contacts.
 
 --- the mountains, which are the one layer not re-laid-out at all -------------
@@ -97,7 +97,7 @@ treatment: each boundary between two strata is re-generated as a random walk
 whose step distribution is the empirical one from the source's own boundary,
 clamped to the rows that boundary actually occupied.
 
-The clamp is not cosmetic. bg1_backdrop.h's band boundaries are placed inside
+The clamp is not cosmetic. The backdrop.txt band boundaries are placed inside
 runs of rows that are uniform in colour, because a band boundary is a
 discontinuity in scroll offset and is invisible only on flat paint. Clamping each
 generated contour to the range its source occupied keeps those runs flat at the
@@ -105,14 +105,22 @@ shifted rows, which is what lets the extended band table cut where it does.
 check_flat_cuts below asserts it on the generated pixels rather than trusting the
 argument, and boot_test asserts it again on the shipped BMP.
 """
+
+import collections
 import os
 import sys
-import collections
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from pixel_art import (ALPHA_THRESHOLD, COLOR_KEY, LEGEND_EMPTY, LEGEND_WALL,
-                       assert_legend_matches_header, read_png, write_bmp)
+from pixel_art import (
+    ALPHA_THRESHOLD,
+    COLOR_KEY,
+    LEGEND_EMPTY,
+    LEGEND_WALL,
+    assert_legend_matches_header,
+    read_png,
+    write_bmp,
+)
 
 SRC_DIR = os.path.join("art_src", "Background_1")
 DST_DIR = os.path.join("assets", "bg1_ext")
@@ -123,18 +131,18 @@ SRC_W, SRC_H = 344, 144
 NATIVE_W, NATIVE_H = 688, 288
 
 # The bottom-anchored offset -- see the vertical rule at the top of this file.
-SHIFT = NATIVE_H - SRC_H            # 144
+SHIFT = NATIVE_H - SRC_H  # 144
 
 # Measured off the ground plane's first opaque row. Not a constant to choose,
 # which is why `main` asserts it against the art rather than using it.
 SRC_HORIZON = 63
-HORIZON = SRC_HORIZON + SHIFT       # 207
+HORIZON = SRC_HORIZON + SHIFT  # 207
 
 # The floor row is measured off the reference frame -- the argument is at
 # convert_background_layers.FLOOR_ROW and is not repeated. It is bottom-anchored
 # like everything else the player touches.
 SRC_FLOOR_ROW = 132
-FLOOR_ROW = SRC_FLOOR_ROW + SHIFT   # 276
+FLOOR_ROW = SRC_FLOOR_ROW + SHIFT  # 276
 
 # How much the mountain range grows -- on both axes, which is the whole point.
 # It is the frame's own factor, and scaling a silhouette by it is the only way
@@ -164,19 +172,19 @@ SEED = 0x62673165
 # paths it takes: "islands" is a keyed silhouette with gaps in it, "ridge" is a
 # keyed silhouette that spans the frame, "bands" is strata.
 LAYERS = [
-    ("01_foreground_rocks.png",  "bg1_ext_01_fg_rocks.bmp",      "islands"),
-    ("02_hills_near.png",        "bg1_ext_02_hills_near.bmp",    "islands"),
-    ("03_hills_midnear.png",     "bg1_ext_03_hills_midnear.bmp", "islands"),
-    ("04_hills_mid.png",         "bg1_ext_04_hills_mid.bmp",     "islands"),
-    ("05_hills_midfar.png",      "bg1_ext_05_hills_midfar.bmp",  "islands"),
-    ("06_hills_far.png",         "bg1_ext_06_hills_far.bmp",     "islands"),
-    ("07_distant_mountains.png", "bg1_ext_07_mountains.bmp",     "ridge"),
-    ("08_ground_plane.png",      "bg1_ext_08_ground.bmp",        "bands"),
-    ("09_sky.png",               "bg1_ext_09_sky.bmp",           "bands"),
+    ("01_foreground_rocks.png", "bg1_ext_01_fg_rocks.bmp", "islands"),
+    ("02_hills_near.png", "bg1_ext_02_hills_near.bmp", "islands"),
+    ("03_hills_midnear.png", "bg1_ext_03_hills_midnear.bmp", "islands"),
+    ("04_hills_mid.png", "bg1_ext_04_hills_mid.bmp", "islands"),
+    ("05_hills_midfar.png", "bg1_ext_05_hills_midfar.bmp", "islands"),
+    ("06_hills_far.png", "bg1_ext_06_hills_far.bmp", "islands"),
+    ("07_distant_mountains.png", "bg1_ext_07_mountains.bmp", "ridge"),
+    ("08_ground_plane.png", "bg1_ext_08_ground.bmp", "bands"),
+    ("09_sky.png", "bg1_ext_09_sky.bmp", "bands"),
 ]
 
 # Back to front -- the numeric-descending filename order, the same order
-# convert_background_layers.DRAW_ORDER and bg1::EXT_LAYERS state.
+# convert_background_layers.DRAW_ORDER and assets/bg1_ext/backdrop.txt state.
 DRAW_ORDER = [name for name, _, _ in reversed(LAYERS)]
 
 MATERIAL_PATH = os.path.join("assets", "bg1_ext_material.bmp")
@@ -189,6 +197,7 @@ MIN_GAP = 3
 
 
 # --- the one source of randomness --------------------------------------------
+
 
 class Rng:
     """A 32-bit xorshift, so the layout is a pure function of `SEED`.
@@ -231,6 +240,7 @@ class Rng:
 
 # --- reading bg1 -------------------------------------------------------------
 
+
 def read_layer(name):
     """Returns (opaque[y][x], colour[y][x]) for one Background_1 PNG.
 
@@ -242,8 +252,10 @@ def read_layer(name):
     width, height, pixels, alpha = read_png(path)
     if (width, height) != (SRC_W, SRC_H):
         raise SystemExit(f"error: {name} is {width}x{height}, expected {SRC_W}x{SRC_H}")
-    opaque = [[alpha is None or alpha[y * SRC_W + x] >= ALPHA_THRESHOLD
-               for x in range(SRC_W)] for y in range(SRC_H)]
+    opaque = [
+        [alpha is None or alpha[y * SRC_W + x] >= ALPHA_THRESHOLD for x in range(SRC_W)]
+        for y in range(SRC_H)
+    ]
     colour = [[pixels[y * SRC_W + x] for x in range(SRC_W)] for y in range(SRC_H)]
     return opaque, colour
 
@@ -268,6 +280,7 @@ def palette_of(opaque, colour):
 # bottom edge in this column, and the rows of every accent-coloured pixel in it.
 # Splicing at column granularity is what carries the source's 1px line idiom
 # across without this file ever having to describe it.
+
 
 def columns_of(opaque, colour, accent):
     """Per-column records, `None` where the column is empty."""
@@ -377,12 +390,18 @@ def resample(cols, width):
         top_a, bot_a, acc_a = cols[a]
         top_b, bot_b, acc_b = cols[b]
         if len(acc_a) == len(acc_b):
-            accents = tuple(int(round(ya + (yb - ya) * f)) for ya, yb in zip(acc_a, acc_b))
+            accents = tuple(
+                int(round(ya + (yb - ya) * f)) for ya, yb in zip(acc_a, acc_b, strict=True)
+            )
         else:
             accents = acc_a if f < 0.5 else acc_b
-        out.append((int(round(top_a + (top_b - top_a) * f)),
-                    int(round(bot_a + (bot_b - bot_a) * f)),
-                    accents))
+        out.append(
+            (
+                int(round(top_a + (top_b - top_a) * f)),
+                int(round(bot_a + (bot_b - bot_a) * f)),
+                accents,
+            )
+        )
     return out
 
 
@@ -404,9 +423,13 @@ def jitter_ridge(cols, rng, amplitude, hold_percent):
             offset += 1 if rng.chance(50) else -1
             offset = max(-amplitude, min(amplitude, offset))
         moved = min(bot, top + offset)
-        out.append((moved, bot,
-                    tuple(y if y >= bot - 2 else min(bot, max(moved, y + offset))
-                          for y in accents)))
+        out.append(
+            (
+                moved,
+                bot,
+                tuple(y if y >= bot - 2 else min(bot, max(moved, y + offset)) for y in accents),
+            )
+        )
     return out
 
 
@@ -492,6 +515,7 @@ def scale_about(cols, base_row, factor_percent):
     Only the ridge layer uses this. The accent rows scale with the silhouette so
     the interior contour lines stay on the ridges they were tracing.
     """
+
     def lift(y):
         return base_row - ((base_row - y) * factor_percent) // 100
 
@@ -520,8 +544,10 @@ def paint_masses(cols, base, accent, dy):
             continue
         top, bot = col[0] + dy, col[1] + dy
         if top < 0 or bot >= NATIVE_H:
-            raise SystemExit(f"error: column {x} runs to rows {top}..{bot}, "
-                             f"outside a {NATIVE_W}x{NATIVE_H} layer")
+            raise SystemExit(
+                f"error: column {x} runs to rows {top}..{bot}, "
+                f"outside a {NATIVE_W}x{NATIVE_H} layer"
+            )
         for y in range(top, bot + 1):
             grid[y][x] = base
         for y in col[2]:
@@ -533,6 +559,7 @@ def paint_masses(cols, base, accent, dy):
 
 
 # --- the band layers ---------------------------------------------------------
+
 
 def strata_of(opaque, colour):
     """The layer's colours in vertical order, with the row its paint starts on.
@@ -557,7 +584,7 @@ def boundaries_of(opaque, colour, first, strata):
         rows = []
         for x in range(SRC_W):
             y = first
-            while y < SRC_H and (not opaque[y][x] or colour[y][x] in strata[:i + 1]):
+            while y < SRC_H and (not opaque[y][x] or colour[y][x] in strata[: i + 1]):
                 y += 1
             rows.append(y)
         out.append((rows, min(rows), max(rows)))
@@ -616,6 +643,7 @@ def paint_bands(strata, first_row, edges, dy, keyed):
 
 # --- output ------------------------------------------------------------------
 
+
 def flatten(grid, keyed):
     """Grid of colours-or-None to the flat list `write_bmp` takes.
 
@@ -641,7 +669,7 @@ def flatten(grid, keyed):
 
 
 def check_flat_cuts(grid, cuts):
-    """The property `bg1_backdrop.h` places its band boundaries for, checked on
+    """The property the `bands=` in backdrop.txt places its band boundaries for, checked on
     the pixels this run just produced.
 
     A band boundary is a step in scroll offset, so it can only be invisible
@@ -656,7 +684,8 @@ def check_flat_cuts(grid, cuts):
             raise SystemExit(
                 f"error: the ground band cut at row {cut} does not fall on flat "
                 f"paint (row {cut - 1}: {len(above)} colours, row {cut}: "
-                f"{len(below)} colours) - the shore contour would step and slide")
+                f"{len(below)} colours) - the shore contour would step and slide"
+            )
 
 
 def build_scene_maps(composite):
@@ -680,8 +709,10 @@ def build_scene_maps(composite):
             albedo.append(composite[y][x])
     write_bmp(MATERIAL_PATH, NATIVE_W, NATIVE_H, material)
     write_bmp(ALBEDO_PATH, NATIVE_W, NATIVE_H, albedo)
-    print(f"scene maps -> {MATERIAL_PATH}, {ALBEDO_PATH}  "
-          f"({NATIVE_W}x{NATIVE_H}, floor at row {FLOOR_ROW}, {solid} solid cells)")
+    print(
+        f"scene maps -> {MATERIAL_PATH}, {ALBEDO_PATH}  "
+        f"({NATIVE_W}x{NATIVE_H}, floor at row {FLOOR_ROW}, {solid} solid cells)"
+    )
 
 
 def build_layer(src_name, kind, rng):
@@ -693,13 +724,17 @@ def build_layer(src_name, kind, rng):
         first, strata = strata_of(opaque, colour)
         keyed = first > 0  # only the sky reaches row 0
         dy = SHIFT if keyed else 0  # the ground is bottom-anchored
-        edges = [walk_like(rows, lo, hi, rng)
-                 for rows, lo, hi in boundaries_of(opaque, colour, first, strata)]
+        edges = [
+            walk_like(rows, lo, hi, rng)
+            for rows, lo, hi in boundaries_of(opaque, colour, first, strata)
+        ]
         grid = paint_bands(strata, first, edges, dy, keyed)
         if keyed:
             if first != SRC_HORIZON:
-                raise SystemExit(f"error: the ground plane starts at row {first}, "
-                                 f"not the measured horizon {SRC_HORIZON}")
+                raise SystemExit(
+                    f"error: the ground plane starts at row {first}, "
+                    f"not the measured horizon {SRC_HORIZON}"
+                )
             check_flat_cuts(grid, [82 + SHIFT, 100 + SHIFT])
         note = f"{len(strata)} strata, horizon at row {first + dy}"
         return grid, keyed, note
@@ -713,8 +748,8 @@ def build_layer(src_name, kind, rng):
         cols = reconstruct_clipped(cols, slope_span=10)
         base_row = max(c[1] for c in cols if c is not None)
         placed = jitter_ridge(
-            scale_about(resample(cols, NATIVE_W), base_row, RIDGE_SCALE),
-            rng, RIDGE_JITTER, 9)
+            scale_about(resample(cols, NATIVE_W), base_row, RIDGE_SCALE), rng, RIDGE_JITTER, 9
+        )
         summit = min(c[0] for c in placed if c is not None) + SHIFT
         note = f"one range at {RIDGE_SCALE}% on both axes, summit at row {summit}"
     else:
@@ -723,8 +758,10 @@ def build_layer(src_name, kind, rng):
 
     grid = paint_masses(placed, base, accent, SHIFT)
     covered = sum(1 for c in placed if c is not None)
-    note += (f", {100 * covered // NATIVE_W}% of columns covered against bg1's "
-             f"{100 * source_cols // SRC_W}%")
+    note += (
+        f", {100 * covered // NATIVE_W}% of columns covered against bg1's "
+        f"{100 * source_cols // SRC_W}%"
+    )
     return grid, True, note
 
 
@@ -742,8 +779,10 @@ def main():
         path = os.path.join(DST_DIR, dst_name)
         write_bmp(path, NATIVE_W, NATIVE_H, flatten(grid, keyed))
         grids[src_name] = grid
-        print(f"{src_name} -> {path}  ({NATIVE_W}x{NATIVE_H}, "
-              f"{'keyed' if keyed else 'opaque'}; {note})")
+        print(
+            f"{src_name} -> {path}  ({NATIVE_W}x{NATIVE_H}, "
+            f"{'keyed' if keyed else 'opaque'}; {note})"
+        )
 
     composite = [[(0, 0, 0)] * NATIVE_W for _ in range(NATIVE_H)]
     for name in DRAW_ORDER:

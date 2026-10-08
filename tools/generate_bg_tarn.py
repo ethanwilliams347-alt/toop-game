@@ -19,7 +19,7 @@ binds this file is:
      `r` scrolls at (r - HORIZON) / (CONTACT - HORIZON), and anything standing on
      row r has to scroll at the same rate or its feet slide. So nothing here
      chooses a factor. It chooses where a thing stands, and the factor falls out.
-     render/rig_backdrop.h carries the foot rows; rig_test reads each BMP and
+     assets/bg_tarn/backdrop.txt carries the foot rows; backdrop_set_test reads each BMP and
      checks that its lowest painted row is exactly that number.
 
   2. The ground plane is not banded. It is drawn one row at a time, each row at
@@ -46,13 +46,21 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
-from pixel_art import (LEGEND_EMPTY, LEGEND_WALL, COLOR_KEY,  # noqa: E402
-                       assert_legend_matches_header, bayer_threshold, color_of,
-                       dither_mix, write_bmp, write_png)
+from pixel_art import (
+    COLOR_KEY,  # noqa: E402
+    LEGEND_EMPTY,
+    LEGEND_WALL,
+    assert_legend_matches_header,
+    color_of,
+    dither_mix,
+    write_bmp,
+    write_png,
+)
 
 DST_DIR = os.path.join(REPO_ROOT, 'assets', 'bg_tarn')
-BUILD_DST_DIRS = [os.path.join(REPO_ROOT, 'build', cfg, 'assets', 'bg_tarn')
-                  for cfg in ('Release', 'Debug', '')]
+BUILD_DST_DIRS = [
+    os.path.join(REPO_ROOT, 'build', cfg, 'assets', 'bg_tarn') for cfg in ('Release', 'Debug', '')
+]
 
 W = 688
 H = 288
@@ -60,8 +68,8 @@ KEY = COLOR_KEY
 
 # --- the rig ---------------------------------------------------------------
 #
-# These two rows are the camera. render/rig_backdrop.h states the same two
-# numbers; rig_test checks the plane BMP is transparent above HORIZON and opaque
+# These two rows are the camera. assets/bg_tarn/backdrop.txt states the same two
+# numbers; backdrop_set_test checks the plane BMP is transparent above HORIZON and opaque
 # from it down, which is the half of that agreement the art can be held to.
 #
 # HORIZON is where the plane vanishes (factor 0). CONTACT is where it meets the
@@ -78,15 +86,15 @@ def factor_at(row):
 
 # Where each standing layer's feet are. A factor is printed next to each so the
 # depth ladder is readable here, but it is derived, never typed.
-MOUNTAIN_FOOT = 202   # 0.031 - the far range, almost on the horizon
-RIDGE_FOOT = 204      # 0.063
-MESA_FOOT = 207       # 0.109
-DUNE_FOOT = 210       # 0.156 - the far shore of the lake
-PINE_FAR_FOOT = 240   # 0.625 - the near shore
+MOUNTAIN_FOOT = 202  # 0.031 - the far range, almost on the horizon
+RIDGE_FOOT = 204  # 0.063
+MESA_FOOT = 207  # 0.109
+DUNE_FOOT = 210  # 0.156 - the far shore of the lake
+PINE_FAR_FOOT = 240  # 0.625 - the near shore
 PINE_NEAR_FOOT = 252  # 0.813 - the meadow in front of it
 
-LAKE_TOP = 211        # far shoreline, +-1 row of wobble
-LAKE_BOTTOM = 236     # near shoreline, +-2 rows of wobble
+LAKE_TOP = 211  # far shoreline, +-1 row of wobble
+LAKE_BOTTOM = 236  # near shoreline, +-2 rows of wobble
 
 SUN_X = 362
 SUN_Y = 176
@@ -98,6 +106,7 @@ SUN_R = 8
 # Everything horizontal is built from these two, which is the whole of how the
 # layers tile: a sine with an integer number of cycles across W, and a value-noise
 # lattice whose last cell interpolates back into its first.
+
 
 def wsin(x, cycles, phase=0.0):
     return math.sin(2.0 * math.pi * (cycles * x / W) + phase)
@@ -163,7 +172,7 @@ def sky_colour(x, y):
     yy = y + 3.0 * wsin(x, 3, 0.4 * y / 40.0) + 1.5 * wsin(x, 7, 1.3)
     if yy <= SKY_STOPS[0][0]:
         return color_of(SKY_STOPS[0][1])
-    for (r0, c0), (r1, c1) in zip(SKY_STOPS, SKY_STOPS[1:]):
+    for (r0, c0), (r1, c1) in zip(SKY_STOPS, SKY_STOPS[1:], strict=False):
         if yy < r1:
             # Flat for the first part of the interval, dithered for the last 12
             # rows: banding, not a ramp.
@@ -209,9 +218,16 @@ def gen_sky():
 # the peaks; the rest are higher up for the flight. A cloud above row 164 is only
 # ever on screen when the player is in the air.
 CLOUDS = [  # (centre x, row, half length, thickness)
-    (40, 176, 110, 3), (250, 170, 70, 2), (380, 184, 120, 3), (560, 174, 90, 3),
-    (140, 186, 80, 2), (470, 168, 60, 2), (640, 150, 60, 2), (300, 132, 90, 2),
-    (520, 118, 100, 3), (60, 104, 70, 2),
+    (40, 176, 110, 3),
+    (250, 170, 70, 2),
+    (380, 184, 120, 3),
+    (560, 174, 90, 3),
+    (140, 186, 80, 2),
+    (470, 168, 60, 2),
+    (640, 150, 60, 2),
+    (300, 132, 90, 2),
+    (520, 118, 100, 3),
+    (60, 104, 70, 2),
 ]
 
 
@@ -363,8 +379,15 @@ def gen_glint():
 # the crest near the sun. A saddle sits under the sun so it sets into the range
 # rather than behind a peak.
 PEAKS = [  # (x, height above foot, slope)
-    (20, 28, 0.95), (95, 21, 0.8), (170, 32, 1.05), (240, 18, 0.7), (305, 27, 0.9),
-    (428, 19, 0.65), (496, 22, 0.75), (545, 31, 1.0), (618, 24, 0.85),
+    (20, 28, 0.95),
+    (95, 21, 0.8),
+    (170, 32, 1.05),
+    (240, 18, 0.7),
+    (305, 27, 0.9),
+    (428, 19, 0.65),
+    (496, 22, 0.75),
+    (545, 31, 1.0),
+    (618, 24, 0.85),
 ]
 
 # The summits top out at row 170, six rows under where a standing 1080p camera's
@@ -385,8 +408,20 @@ def mountain_crest(x):
     return MOUNTAIN_FOOT - int(round(h))
 
 
-def paint_massif(img, crest, foot, body, shade, rim, rim_reach, snow=None,
-                 snow_shade=None, snow_line=None, ridge_lines=(), form=None):
+def paint_massif(
+    img,
+    crest,
+    foot,
+    body,
+    shade,
+    rim,
+    rim_reach,
+    snow=None,
+    snow_shade=None,
+    snow_line=None,
+    ridge_lines=(),
+    form=None,
+):
     form = form or crest
     for x in range(W):
         top = crest(x)
@@ -406,7 +441,7 @@ def paint_massif(img, crest, foot, body, shade, rim, rim_reach, snow=None,
             img[top][x] = rim
     # Ridge lines: a one-cell darker line from each peak down its shaded side,
     # the way bg1 draws its rock faces.
-    for px, ph, sl in ridge_lines:
+    for px, _ph, _sl in ridge_lines:
         direction = -1 if px > SUN_X else 1
         y = crest(px) + 1
         x = px
@@ -422,11 +457,19 @@ def paint_massif(img, crest, foot, body, shade, rim, rim_reach, snow=None,
 def gen_mountains():
     img = blank()
     return paint_massif(
-        img, mountain_crest, MOUNTAIN_FOOT,
-        color_of('tarn_peak'), color_of('tarn_peak_shade'), color_of('tarn_peak_rim'),
-        150, color_of('tarn_snow'), color_of('tarn_snow_shade'),
-        lambda x: 184 + int(3 * wnoise(x, 86, 9)), ridge_lines=PEAKS,
-        form=mountain_form)
+        img,
+        mountain_crest,
+        MOUNTAIN_FOOT,
+        color_of('tarn_peak'),
+        color_of('tarn_peak_shade'),
+        color_of('tarn_peak_rim'),
+        150,
+        color_of('tarn_snow'),
+        color_of('tarn_snow_shade'),
+        lambda x: 184 + int(3 * wnoise(x, 86, 9)),
+        ridge_lines=PEAKS,
+        form=mountain_form,
+    )
 
 
 # --- 06 ridge (grey-green foothills) -----------------------------------------
@@ -464,7 +507,11 @@ def gen_ridge():
 
 # --- 05 mesas (red banded rock) ----------------------------------------------
 MESAS = [  # (left, right, height)
-    (40, 96, 13), (180, 214, 9), (272, 306, 14), (520, 590, 11), (626, 660, 8),
+    (40, 96, 13),
+    (180, 214, 9),
+    (272, 306, 14),
+    (520, 590, 11),
+    (626, 660, 8),
 ]
 
 
@@ -474,29 +521,28 @@ def gen_mesas():
     band = color_of('tarn_mesa_band')
     shade = color_of('tarn_mesa_shade')
     lit = color_of('tarn_mesa_lit')
-    for n, (l, r, ht) in enumerate(MESAS):
+    for n, (left, r, ht) in enumerate(MESAS):
         top = MESA_FOOT - ht
-        for x in range(l - 6, r + 7):
+        for x in range(left - 6, r + 7):
             # Steep talus either side of a flat cap.
-            if x < l:
-                t = top + (l - x) * 2
+            if x < left:
+                t = top + (left - x) * 2
             elif x > r:
                 t = top + (x - r) * 2
             else:
                 t = top + int(round(0.8 * wnoise(x, 172, 50 + n)))
             for y in range(t, MESA_FOOT + 1):
                 c = band if (y - top) % 4 == 2 else body
-                if x > r - 3 if x < SUN_X else x < l + 3:
+                if x > r - 3 if x < SUN_X else x < left + 3:
                     c = shade  # the face away from the sun
                 img[y][x % W] = c
-            if l <= x <= r:
+            if left <= x <= r:
                 img[t][x % W] = lit
     return img
 
 
 # --- 04 dunes (sand hills on the far shore) ----------------------------------
-DUNES = [(10, 48, 7), (120, 70, 10), (230, 40, 6), (330, 60, 9), (520, 50, 8),
-         (600, 64, 11)]
+DUNES = [(10, 48, 7), (120, 70, 10), (230, 40, 6), (330, 60, 9), (520, 50, 8), (600, 64, 11)]
 
 
 def gen_dunes():
@@ -555,32 +601,70 @@ def paint_pine(img, base_x, foot, height, body, shade, rim, trunk):
 
 
 PINES_FAR = [  # (x, height)
-    (14, 14), (22, 11), (31, 16), (118, 12), (126, 17), (133, 13), (141, 10),
-    (205, 15), (214, 12), (282, 10), (290, 13), (520, 16), (529, 12), (537, 18),
-    (546, 13), (610, 11), (618, 15), (660, 13), (668, 17), (676, 12),
+    (14, 14),
+    (22, 11),
+    (31, 16),
+    (118, 12),
+    (126, 17),
+    (133, 13),
+    (141, 10),
+    (205, 15),
+    (214, 12),
+    (282, 10),
+    (290, 13),
+    (520, 16),
+    (529, 12),
+    (537, 18),
+    (546, 13),
+    (610, 11),
+    (618, 15),
+    (660, 13),
+    (668, 17),
+    (676, 12),
 ]
 
 PINES_NEAR = [
-    (60, 30), (74, 40), (88, 26), (236, 34), (250, 24), (268, 42), (575, 38),
-    (590, 28), (650, 44),
+    (60, 30),
+    (74, 40),
+    (88, 26),
+    (236, 34),
+    (250, 24),
+    (268, 42),
+    (575, 38),
+    (590, 28),
+    (650, 44),
 ]
 
 
 def gen_pines_far():
     img = blank()
     for x, h in PINES_FAR:
-        paint_pine(img, x, PINE_FAR_FOOT, h, color_of('tarn_pine_far'),
-                   color_of('tarn_pine_far'), color_of('tarn_pine_far_rim'),
-                   color_of('tarn_pine_far'))
+        paint_pine(
+            img,
+            x,
+            PINE_FAR_FOOT,
+            h,
+            color_of('tarn_pine_far'),
+            color_of('tarn_pine_far'),
+            color_of('tarn_pine_far_rim'),
+            color_of('tarn_pine_far'),
+        )
     return img
 
 
 def gen_pines_near():
     img = blank()
     for x, h in PINES_NEAR:
-        paint_pine(img, x, PINE_NEAR_FOOT, h, color_of('tarn_pine'),
-                   color_of('tarn_pine_shade'), color_of('tarn_pine_rim'),
-                   color_of('tarn_trunk'))
+        paint_pine(
+            img,
+            x,
+            PINE_NEAR_FOOT,
+            h,
+            color_of('tarn_pine'),
+            color_of('tarn_pine_shade'),
+            color_of('tarn_pine_rim'),
+            color_of('tarn_trunk'),
+        )
     return img
 
 
@@ -588,8 +672,18 @@ def gen_pines_near():
 #
 # Sparse on purpose: this layer covers the player, and at 1.30 it crosses the
 # window fast, so a little of it reads as depth and a lot of it reads as clutter.
-REEDS = [(30, 30), (36, 22), (44, 34), (300, 26), (306, 38), (313, 20),
-         (470, 28), (478, 36), (640, 24), (647, 32)]
+REEDS = [
+    (30, 30),
+    (36, 22),
+    (44, 34),
+    (300, 26),
+    (306, 38),
+    (313, 20),
+    (470, 28),
+    (478, 36),
+    (640, 24),
+    (647, 32),
+]
 FG_BASE = H - 1
 
 
@@ -612,7 +706,9 @@ def gen_foreground():
             y = FG_BASE - k
             for dx in (-1, 0, 1, 2):
                 lit_side = (dx == 2) == (x0 < SUN_X)
-                img[y][(tip_x + dx) % W] = rim if lit_side and dx in (-1, 2) else color_of('tarn_trunk')
+                img[y][(tip_x + dx) % W] = (
+                    rim if lit_side and dx in (-1, 2) else color_of('tarn_trunk')
+                )
     return img
 
 
@@ -639,7 +735,7 @@ LAYERS = [
 # Water cells, so it can be drained, boiled or dug into) and a sand bank to dig.
 SCENE_SAND = 0xEEDD82
 SCENE_WATER = 0x4444FF
-POND = (96, 152, 7)        # left, right, depth below the floor
+POND = (96, 152, 7)  # left, right, depth below the floor
 SAND_BANK = (520, 596, 5)  # left, right, height above the floor
 
 
@@ -659,8 +755,9 @@ def scene_cell(x, y):
     if sl <= x <= sr and y < CONTACT:
         u = (x - sl) / float(sr - sl) * 2.0 - 1.0
         if y >= CONTACT - int(round(sh * (1.0 - u * u))):
-            return rgb(SCENE_SAND), dither_mix(x, y, color_of('sand_lit'),
-                                                 color_of('sand_mid'), 0.4)
+            return rgb(SCENE_SAND), dither_mix(
+                x, y, color_of('sand_lit'), color_of('sand_mid'), 0.4
+            )
     if y < CONTACT:
         return None
     if pl <= x <= pr:
@@ -671,11 +768,11 @@ def scene_cell(x, y):
     if depth == 0:
         alb = color_of('tarn_meadow_lit')
     elif depth < 4:
-        alb = dither_mix(x, y, color_of('tarn_meadow_near'), color_of('dirt_mid'),
-                         depth / 4.0)
+        alb = dither_mix(x, y, color_of('tarn_meadow_near'), color_of('dirt_mid'), depth / 4.0)
     else:
-        alb = dither_mix(x, y, color_of('dirt_mid'), color_of('dirt_fill'),
-                         min(1.0, (depth - 4) / 10.0))
+        alb = dither_mix(
+            x, y, color_of('dirt_mid'), color_of('dirt_fill'), min(1.0, (depth - 4) / 10.0)
+        )
     return LEGEND_WALL, alb
 
 
@@ -709,15 +806,17 @@ def main():
     for tag, fn in LAYERS:
         img = fn()
         flat = [img[y][x] for y in range(H) for x in range(W)]
-        path = os.path.join(DST_DIR, 'bg_tarn_%s.bmp' % tag)
+        path = os.path.join(DST_DIR, f'bg_tarn_{tag}.bmp')
         write_bmp(path, W, H, flat)
         stage(path)
         for i, c in enumerate(flat):
             if c != KEY:
                 composite[i] = c
         feet = max((y for y in range(H) for x in range(W) if img[y][x] != KEY), default=-1)
-        print('wrote %-28s lowest painted row %3d (factor %.3f)'
-              % (os.path.basename(path), feet, factor_at(feet)))
+        print(
+            f'wrote {os.path.basename(path):<28} lowest painted row {feet:3d} '
+            f'(factor {factor_at(feet):.3f})'
+        )
     alb = write_scene(composite)
     write_png(os.path.join(DST_DIR, 'composite_preview.png'), W, H, alb)
     print('wrote bg_tarn_material.bmp, bg_tarn_albedo.bmp, composite_preview.png')

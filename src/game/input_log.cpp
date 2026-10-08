@@ -11,11 +11,11 @@ namespace {
 // file is unrecognised.
 constexpr char MAGIC[8] = {'S', 'L', 'O', 'P', 'R', 'E', 'C', '\0'};
 
-// One record is eleven bytes, written field by field in little-endian rather
+// One record is thirteen bytes, written field by field in little-endian rather
 // than by dumping the struct. Input has padding and its layout is a compiler's
 // choice; a log written by one build and read by another has to agree about
 // bytes, not about a struct.
-constexpr size_t RECORD_BYTES = 11;
+constexpr size_t RECORD_BYTES = 13;
 
 void put8(std::vector<uint8_t>& b, uint8_t v) { b.push_back(v); }
 void put32(std::vector<uint8_t>& b, uint32_t v) {
@@ -43,7 +43,11 @@ bool fail(std::string* error, const std::string& msg) {
     return false;
 }
 
-constexpr size_t HEADER_BYTES = 8 + 4 + 4 + 4 + 8 + 4 + 8 + 8 + 4 + 4 + 4;  // + step count
+// Fixed part only; the scene name's bytes follow its length field.
+constexpr size_t HEADER_BYTES = 8 + 4 + 4 + 4 + 8 + 4 + 4 + 8 + 8 + 4 + 4 + 4;  // + step count
+// What follows the name: scene_cells, both fingerprints, the end position and
+// the step count.
+constexpr size_t AFTER_NAME_BYTES = 4 + 8 + 8 + 4 + 4 + 4;
 
 } // namespace
 
@@ -69,7 +73,38 @@ uint64_t fingerprint(const Grid& grid) {
     return h;
 }
 
+uint64_t fingerprint(const Run& run) {
+    uint64_t h = fingerprint(run.grid);
+    auto mix = [&h](uint64_t v) {
+        for (int i = 0; i < 8; ++i) {
+            h ^= (v >> (8 * i)) & 0xFF;
+            h *= 1099511628211ull;
+        }
+    };
+    auto mix_int = [&mix](int v) { mix(static_cast<uint64_t>(static_cast<int64_t>(v))); };
+    mix_int(run.player.cell_x());
+    mix_int(run.player.cell_y());
+    mix_int(run.player.health());
+    mix_int(run.has_objective() ? 1 : 0);
+    mix_int(run.objective_x());
+    mix_int(run.objective_y());
+    for (const Enemy& e : run.enemies) {
+        if (!e.is_alive()) {
+            mix_int(-1);
+            continue;
+        }
+        mix_int(species::index_of(e.species()));
+        mix_int(e.cell_x());
+        mix_int(e.cell_y());
+        mix_int(e.pixel_count());
+    }
+    return h;
+}
+
 bool write(const char* path, const Log& log, std::string* error) {
+    if (log.header.scene.size() > MAX_SCENE_NAME)
+        return fail(error, std::string(path) + ": scene name '" + log.header.scene +
+                               "' is longer than a log can hold");
     std::vector<uint8_t> buf;
     buf.reserve(HEADER_BYTES + log.steps.size() * RECORD_BYTES);
 
@@ -78,6 +113,8 @@ bool write(const char* path, const Log& log, std::string* error) {
     put32(buf, static_cast<uint32_t>(log.header.grid_w));
     put32(buf, static_cast<uint32_t>(log.header.grid_h));
     put64(buf, log.header.seed);
+    put32(buf, static_cast<uint32_t>(log.header.scene.size()));
+    for (char c : log.header.scene) buf.push_back(static_cast<uint8_t>(c));
     put32(buf, static_cast<uint32_t>(log.header.scene_cells));
     put64(buf, log.header.start_fingerprint);
     put64(buf, log.header.end_fingerprint);
@@ -86,12 +123,12 @@ bool write(const char* path, const Log& log, std::string* error) {
     put32(buf, static_cast<uint32_t>(log.steps.size()));
 
     for (const Input& in : log.steps) {
-        const uint8_t buttons = static_cast<uint8_t>((in.left ? 1 : 0) | (in.right ? 2 : 0) |
-                                                    (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
-                                                    (in.brush_active ? 16 : 0) |
-                                                    (in.shoot ? 32 : 0) |
-                                                    (in.spawn_enemy ? 64 : 0));
+        const uint8_t buttons = static_cast<uint8_t>(
+            (in.left ? 1 : 0) | (in.right ? 2 : 0) | (in.jump ? 4 : 0) | (in.dig ? 8 : 0) |
+            (in.brush_active ? 16 : 0) | (in.shoot ? 32 : 0));
         put8(buf, buttons);
+        put8(buf, static_cast<uint8_t>(in.command.kind));
+        put8(buf, in.command.arg);
         put8(buf, static_cast<uint8_t>(in.brush_type));
         put8(buf, static_cast<uint8_t>(in.brush_size));
         put32(buf, static_cast<uint32_t>(in.cursor_x));
@@ -137,6 +174,13 @@ bool read(const char* path, Log& log, std::string* error) {
     h.grid_w = static_cast<int32_t>(get32(buf, off));
     h.grid_h = static_cast<int32_t>(get32(buf, off));
     h.seed = get64(buf, off);
+    {
+        const uint32_t name_len = get32(buf, off);
+        if (name_len > MAX_SCENE_NAME || buf.size() - off < name_len + AFTER_NAME_BYTES)
+            return fail(error, std::string(path) + ": header names a scene of impossible length");
+        h.scene.assign(reinterpret_cast<const char*>(buf.data() + off), name_len);
+        off += name_len;
+    }
     h.scene_cells = static_cast<int32_t>(get32(buf, off));
     h.start_fingerprint = get64(buf, off);
     h.end_fingerprint = get64(buf, off);
@@ -161,7 +205,20 @@ bool read(const char* path, Log& log, std::string* error) {
         in.dig = (buttons & 8) != 0;
         in.brush_active = (buttons & 16) != 0;
         in.shoot = (buttons & 32) != 0;
-        in.spawn_enemy = (buttons & 64) != 0;
+        if (buttons & ~63u)
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " sets a button bit no input uses");
+        const uint8_t kind = buf[off++];
+        in.command.arg = buf[off++];
+        if (kind >= static_cast<uint8_t>(Command::Kind::Count))
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " names command " + std::to_string(kind) +
+                                   ", which is not a command");
+        in.command.kind = static_cast<Command::Kind>(kind);
+        if (in.command.kind == Command::Kind::SpawnEnemy && !species::at(in.command.arg))
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " spawns species " + std::to_string(in.command.arg) +
+                                   ", which is not a species");
 
         const uint8_t type = buf[off++];
         // A brush type outside the table would index MATERIALS out of range on the

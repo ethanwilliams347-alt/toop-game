@@ -250,6 +250,7 @@ int main() {
     // it was ever rendered on.
     {
         std::vector<Input> sequence;
+        sequence.reserve(200);
         for (int i = 0; i < 40; ++i) sequence.push_back(NOTHING);  // let the player land
         for (int i = 0; i < 50; ++i) sequence.push_back(held_right());
         {
@@ -272,6 +273,14 @@ int main() {
             dig.cursor_x = 60;
             dig.cursor_y = 20;
             sequence.push_back(dig);
+        }
+        {
+            // A command, so the log's command slot is in the round trip below.
+            Input spawn;
+            spawn.command = Command::spawn(species::GHOUL);
+            spawn.cursor_x = 20;
+            spawn.cursor_y = 45;
+            sequence.push_back(spawn);
         }
 
         Run a(90, 50, 4040);
@@ -311,6 +320,7 @@ int main() {
             out.header.grid_w = 90;
             out.header.grid_h = 50;
             out.header.seed = 4040;
+            out.header.scene = "bg_tarn";
             out.header.scene_cells = 0;
             out.header.start_fingerprint = 12345;
             out.header.end_fingerprint = input_log::fingerprint(a.grid);
@@ -326,12 +336,12 @@ int main() {
             check("...and reads back", input_log::read(path, in, &error), error);
             check("...with every header field intact",
                   in.header.grid_w == out.header.grid_w && in.header.grid_h == out.header.grid_h &&
-                  in.header.seed == out.header.seed &&
-                  in.header.scene_cells == out.header.scene_cells &&
-                  in.header.start_fingerprint == out.header.start_fingerprint &&
-                  in.header.end_fingerprint == out.header.end_fingerprint &&
-                  in.header.end_player_x == out.header.end_player_x &&
-                  in.header.end_player_y == out.header.end_player_y);
+                      in.header.seed == out.header.seed && in.header.scene == out.header.scene &&
+                      in.header.scene_cells == out.header.scene_cells &&
+                      in.header.start_fingerprint == out.header.start_fingerprint &&
+                      in.header.end_fingerprint == out.header.end_fingerprint &&
+                      in.header.end_player_x == out.header.end_player_x &&
+                      in.header.end_player_y == out.header.end_player_y);
             check("...and the same number of steps", in.steps.size() == sequence.size(),
                   std::to_string(in.steps.size()) + " vs " + std::to_string(sequence.size()));
 
@@ -342,7 +352,9 @@ int main() {
                 inputs_identical = x.left == y.left && x.right == y.right && x.jump == y.jump &&
                                    x.dig == y.dig && x.cursor_x == y.cursor_x &&
                                    x.cursor_y == y.cursor_y && x.brush_active == y.brush_active &&
-                                   x.brush_type == y.brush_type && x.brush_size == y.brush_size;
+                                   x.brush_type == y.brush_type && x.brush_size == y.brush_size &&
+                                   x.shoot == y.shoot && x.command.kind == y.command.kind &&
+                                   x.command.arg == y.command.arg;
             }
             check("...and every field of every Input", inputs_identical);
 

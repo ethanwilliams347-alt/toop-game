@@ -8,6 +8,7 @@
 // what is pinned here is that the constant reaches the screen at all.
 
 #include "game/camera.h"
+#include "render/depth_rig.h"
 #include <string>
 #include "test_util.h"
 
@@ -167,42 +168,13 @@ int main() {
               std::to_string(low.view_fy()));
     }
 
-    // The identity render/frame.cpp's fixed-scene branch rests on, in numbers. The
-    // golden fixture cannot show it -- its synthetic layers are deliberately not
-    // pan-sized -- so this stands in for a no-op run of that change: for a layer
-    // sized the way tools/generate_backdrop.py sizes one, the normalized pan and the
-    // factor form are the same number at every camera position.
-    {
-        constexpr float FACTOR = 0.15f;
-        const int window_w = VIEWPORT_W * Camera::DEFAULT_SCALE;
-        const int pan_px = (WORLD_W - VIEWPORT_W) * Camera::DEFAULT_SCALE;
-        const int layer_w = window_w + static_cast<int>(static_cast<float>(pan_px) * FACTOR);
-        const float max_cam_x = static_cast<float>(WORLD_W - VIEWPORT_W);
-        const float span_x = static_cast<float>(layer_w - window_w);
-
-        bool agree = true;
-        float worst = 0.0f;
-        for (int centre = 0; centre <= WORLD_W; centre += 37) {
-            Camera c;
-            c.follow(static_cast<float>(centre), cy, VIEWPORT_W, VIEWPORT_H, WORLD_W, WORLD_H);
-            const float normalized = -(c.view_fx() / max_cam_x) * span_x;
-            const float factored = c.parallax_origin_x(FACTOR);
-            // A pixel of slack, and it is the rounding in layer_w above rather than in
-            // either formula: the generator writes a whole-pixel image.
-            const float d = std::fabs(normalized - factored);
-            if (d > worst) worst = d;
-            if (d > 1.0f) agree = false;
-        }
-        check("the normalized pan and the parallax factor agree on a pan-sized layer",
-              agree, "worst disagreement " + std::to_string(worst) + " px");
-    }
-
     // --- a world-sized authored layer never runs out ---------------------
     //
     // The one inequality the authored backdrop rests on, and the reason its art is
     // exactly world-sized rather than merely large. For a bounded world of W cells
-    // shown through a viewport of V, a layer W cells wide drawn at
-    // parallax_origin_*(f) covers the whole viewport at every reachable camera
+    // shown through a viewport of V, a layer W cells wide drawn at the corner
+    // anchor, depth_rig::origin(cam, 0, f) -- what frame.cpp draws a
+    // corner-anchored set at -- covers the whole viewport at every reachable camera
     // position exactly when f <= 1 -- so nothing has to tile, and nothing gaps.
     //
     // Checked at every camera position rather than at the extremes alone: the
@@ -226,7 +198,7 @@ int main() {
                 Camera c;
                 c.set_scale(SCALE);
                 c.follow(static_cast<float>(centre), 0.0f, V, V, W, W);
-                const float left  = c.parallax_origin_x(f);
+                const float left = depth_rig::origin(c.view_fx(), 0.0f, f, SCALE);
                 const float right = left + static_cast<float>(W * SCALE);
                 if (left > 0.001f || right < static_cast<float>(V * SCALE) - 0.001f) {
                     covered = false;
@@ -245,7 +217,8 @@ int main() {
 
     // The other half of the same fact, stated as the thing that would go wrong:
     // above 1.0 it does gap, which is why the foreground is capped at 1.00 rather
-    // than given the art README's wider range. A test that only proved the safe case
+    // than given the art README's wider range -- for a corner-anchored set, whose
+    // art does not tile. A standing-anchored set wraps and has no cap. A test that only proved the safe case
     // would leave "so raise it a bit" looking free.
     {
         constexpr int SCALE = 10;
@@ -254,7 +227,8 @@ int main() {
         Camera c;
         c.set_scale(SCALE);
         c.follow(static_cast<float>(W), 0.0f, V, V, W, W);  // hard against the right edge
-        const float right = c.parallax_origin_x(1.20f) + static_cast<float>(W * SCALE);
+        const float right =
+            depth_rig::origin(c.view_fx(), 0.0f, 1.20f, SCALE) + static_cast<float>(W * SCALE);
         check("and a factor above 1 gaps there, which is why 1.00 is the cap",
               right < static_cast<float>(V * SCALE),
               "right edge " + std::to_string(right) + " vs window " + std::to_string(V * SCALE));

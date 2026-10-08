@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include "render/backdrop_layers.h"
 #include "render/backdrop_wrap.h"
 #include "render/player_sprite.h"
-#include "physics/enemy.h"
 
 namespace frame {
 namespace {
@@ -34,7 +32,8 @@ void apply_grade(SDL_Texture* tex, const Grade& g) {
 // missing or unreadable BMP leaves the framebuffer holding whatever was
 // in it, which on a double-buffered renderer is two-frames-ago garbage.
 // Clearing to the darkest sky tone makes the failure mode "the backdrop
-// is flat" instead of "the window is full of noise".
+// is flat" instead of "the window is full of noise". It is also the whole
+// background of a scene that names no backdrop -- the `empty` sandbox.
 void draw_clear(SDL_Renderer* renderer, const Params&, const Grade& g) {
     // Palette colour for darkest sky tone, matching tools/pixel_art.py.
     SDL_SetRenderDrawColor(renderer, graded(0x38, g.r), graded(0x2C, g.g),
@@ -42,212 +41,50 @@ void draw_clear(SDL_Renderer* renderer, const Params&, const Grade& g) {
     SDL_RenderClear(renderer);
 }
 
-// The backdrop layers. Static textures, each shifted by the camera's continuous
-// view position scaled by the camera scale and the layer's own parallax factor
-// (Camera::parallax_origin_x/y). Full-texture draws with a negative destination
-// offset rather than a cropped source rect: the art is static, so there is
-// nothing to re-upload per frame, only where it is drawn needs to move.
+// A backdrop layer. render/backdrop_set.h has the model and depth_rig.h the
+// argument; what is here is the placing.
 //
-// Two layouts, and they agree wherever the shipped art is concerned:
+// One function for every layer of every set. Every layer is placed about the
+// backdrop's anchor, -(anchor + f * (cam - anchor)), on both axes, and wraps
+// horizontally through backdrop_wrap::wrap_axis. With the anchor at the world's
+// corner that is -(cam * f), the placement the bg1 family was painted for; and
+// a world-sized layer at f <= 1 then covers the window from its first copy at
+// every camera position, so a set whose art does not tile never shows a second
+// one. (For a world W cells wide and a viewport of V, the layer's right edge at
+// the rightmost camera is W - (W - V) * f >= V exactly when f <= 1.
+// backdrop_set_test holds every corner-anchored set to it.)
 //
-//   tools/generate_backdrop.py sizes a pan-sized layer as
-//   window + pan_range * factor, where pan_range = (world_w - padded_w) * scale.
-//   So w - window_w is pan_range * factor, and the fixed branch's u_x * span_x
-//   expands to view_fx * scale * factor -- which is Camera::parallax_origin_x
-//   exactly. The normalized form is the same pan, stated as a fraction of the
-//   world instead of as a factor on the camera.
+// A plain layer is one draw per wrapped copy. Three kinds are drawn in pieces:
 //
-// They stop agreeing where the factor form is wrong: a layer that is not sized
-// to the pan range. The factor form keeps sliding and runs off the end of the
-// image, leaving the clear colour at the pan limit; the normalized form maps
-// whatever width the image has across the whole pan, so both edges stay flush
-// whatever the art happens to be. That is what makes a large authored fixed
-// scene possible without re-deriving a factor per image.
+//   - A banded layer, one draw per band, each band at its own factor. Its rows
+//     are not moved vertically relative to one another, so the bands are one
+//     image vertically and are cut apart only in how fast they scroll sideways.
+//   - The plane (line_scroll), one texture row at a time, because every row is
+//     its own depth: each at depth_rig::plane_factor of its row, on both axes.
+//   - Rippled rows, one at a time, because every row is its own phase. Paint
+//     lying on the plane (on_plane -- the sun's reflection) takes the plane's
+//     rows vertically and its own factor horizontally: the reflection of
+//     something at infinity stays under it, but it must stay on the water it was
+//     painted on as the plane stretches under a rising camera.
 //
-// The infinite branch cannot be stated as a fraction at all, because there is no
-// maximum camera position to divide by. It keeps the factor form and tiles the
-// result through backdrop_wrap::wrap_axis.
-//
-// `authored` and `infinite` are separate questions and must not be conflated:
-//
-//   - Does this layer read its parallax factors? An authored stack is nothing
-//     but factors -- images of one identical size whose only difference is the
-//     rate each moves at -- so it always does. A generated layer is sized to its
-//     pan range instead, which is what the normalized branch exists for.
-//   - Does this layer tile? That is a property of the world, not the layer: an
-//     unbounded world has no right-hand edge to run out at, and a bounded one
-//     does.
-//
-// Declaring an authored scene infinite to reach the factor branch brings the
-// tiling with it, which is a seam per layer sliding at a different speed.
-//
-// An authored layer in a bounded world needs no tiling and leaves no gap, and
-// that is arithmetic rather than luck. For a world of W cells, a viewport of V,
-// and a layer W cells wide at factor f, the right edge at the rightmost camera
-// position is -(W - V) * scale * f + W * scale, which covers the window exactly
-// when W - (W - V) * f >= V, i.e. when f <= 1. That is why authored art is
-// world-sized and why its foreground factor is capped at 1.00. test_frame pins
-// the inequality at both camera extremes.
-void draw_backdrop_layer(SDL_Renderer* renderer, const Params& p,
-                         SDL_Texture* tex, int w, int h,
-                         const backdrop_layers::Layer& layer, const Grade& g,
-                         bool authored) {
-    if (!tex) return;
-    apply_grade(tex, g);
-
-    const Camera& camera = *p.camera;
-    const int window_w = p.padded_w * camera.scale();
-    const int window_h = p.padded_h * camera.scale();
-
-    if (authored && !p.is_infinite) {
-        // Bounded and authored: the factors, placed once. No wrap call, because
-        // there is nothing to wrap onto.
-        const SDL_FRect dst{
-            camera.parallax_origin_x(layer.parallax_x),
-            camera.parallax_origin_y(layer.parallax_y),
-            static_cast<float>(w), static_cast<float>(h)
-        };
-        SDL_RenderCopyF(renderer, tex, nullptr, &dst);
-        return;
-    }
-
-    if (p.is_infinite) {
-        const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(
-            camera.parallax_origin_x(layer.parallax_x), w, window_w);
-        const float origin_y = camera.parallax_origin_y(layer.parallax_y);
-        for (int c = 0; c < t.count; ++c) {
-            const SDL_FRect dst{
-                t.first + static_cast<float>(c * w), origin_y,
-                static_cast<float>(w), static_cast<float>(h)
-            };
-            SDL_RenderCopyF(renderer, tex, nullptr, &dst);
-        }
-        return;
-    }
-
-    // max(1, ...) and not max(0, ...): this is a divisor, and a world no bigger than
-    // the viewport has a pan range of zero. Dividing by 1 there gives u = 0 for every
-    // camera position the world can reach, which is the right answer -- a world that
-    // cannot scroll shows the layer's left edge.
-    const float max_cam_x = static_cast<float>(std::max(1, p.world_w - p.padded_w));
-    const float max_cam_y = static_cast<float>(std::max(1, p.world_h - p.padded_h));
-
-    const float u_x = std::clamp(camera.view_fx() / max_cam_x, 0.0f, 1.0f);
-    const float u_y = std::clamp(camera.view_fy() / max_cam_y, 0.0f, 1.0f);
-
-    // A layer no larger than the window has nothing to pan across and is pinned at
-    // the origin, rather than being pulled off screen by a negative span.
-    const float span_x = static_cast<float>(std::max(0, w - window_w));
-    const float span_y = static_cast<float>(std::max(0, h - window_h));
-
-    const SDL_FRect dst{
-        -u_x * span_x, -u_y * span_y,
-        static_cast<float>(w), static_cast<float>(h)
-    };
-    SDL_RenderCopyF(renderer, tex, nullptr, &dst);
-}
-
-// The two authored passes, and the early return in the generated three.
-//
-// A scene has one backdrop system or the other, never a blend: an authored stack
-// is a whole depth ladder painted together, and drawing the generated sky behind
-// it would put two horizons in one frame at two unrelated factors. The switch is
-// layers.empty(), tested in three places rather than hoisted into compose(),
-// because the layer table is what declares what is drawn and a pass that
-// silently skips itself is still a row in it -- which is what keeps the
-// static_asserts below meaningful.
-//
-// draw_ground takes the early return too. The ground BMP is loaded once at
-// startup for the whole process, not per scene, so "an authored set that wants
-// no plane loads no ground BMP" is not a switch that exists; without the return
-// the generated plane draws over the authored stack from the horizon down.
-//
-// What does not early-return is render/surface_plane.cpp's terrain tint, which
-// reads the same geometry to blend near terrain toward the plane. It is a
-// separate pass over the cell texture rather than a layer here, and an authored
-// scene with no terrain gives it nothing to tint -- so it is inert rather than
-// wrong today, and becomes wrong the day an authored backdrop sits behind a
-// scene that has terrain.
-//
-// An authored layer that is a surface is drawn as horizontal bands, each at its
-// own factor. See frame::Band.
-//
-// The vertical is 1:1 and the whole layer's parallax_y is used for every band,
-// so the bands are one image vertically and are cut apart only in how fast they
-// scroll sideways. Nothing here shrinks or stretches a source row: the authored
-// stack's vertical factor is locked so the composition is the painting at every
-// camera height, and a band that scaled its rows would undo that.
-//
-// Destination edges are computed per boundary, not per band, for the same reason
-// backdrop_wrap::plane_src_row exists: band i's bottom edge and band i+1's top
-// edge have to be one number evaluated once, or the rounding leaves a one-pixel
-// line of whatever was behind the layer between two bands meant to touch.
-void draw_authored_bands(SDL_Renderer* renderer, const Params& p,
-                         const ParallaxLayer& l) {
-    if (l.tex_h <= 0) return;
-
-    int tex_w = 0;
-    SDL_QueryTexture(l.texture, nullptr, nullptr, &tex_w, nullptr);
-    if (tex_w <= 0) return;
-
-    const Camera& camera = *p.camera;
-    const float origin_y = camera.parallax_origin_y(l.parallax_y);
-    const float rows_to_px = static_cast<float>(l.h) / static_cast<float>(l.tex_h);
-
-    // Boundary `r` of the layer, in screen pixels, rounded once. Called for both
-    // edges of every band, so band i's bottom and band i+1's top are the same
-    // expression on the same argument and cannot disagree.
-    const auto edge = [&](int row) {
-        return std::floor(origin_y + static_cast<float>(row) * rows_to_px + 0.5f);
-    };
-
-    for (const Band& b : l.bands) {
-        if (b.row1 <= b.row0) continue;
-        const float top = edge(b.row0);
-        const SDL_Rect src{0, b.row0, tex_w, b.row1 - b.row0};
-        const SDL_FRect dst{camera.parallax_origin_x(b.parallax_x), top,
-                            static_cast<float>(l.w), edge(b.row1) - top};
-        SDL_RenderCopyF(renderer, l.texture, &src, &dst);
-    }
-}
-
-// A layer of a perspective-rig set. render/depth_rig.h has the argument; what is
-// here is the placing.
-//
-// Three things differ from draw_backdrop_layer's authored branch, all of them
-// from the rig:
-//
-//   - Placed about the anchor, -(anchor + f * (cam - anchor)), on both axes, so
-//     the painting is exact where a standing player's camera sits rather than at
-//     the world's top-left corner.
-//   - Vertical parallax, at depth_rig::vertical_factor of the horizontal factor.
-//   - Every layer wraps horizontally through backdrop_wrap::wrap_axis, which is
-//     what lifts the 1.00 cap: a factor above 1 on a world-sized layer runs out of
-//     image at the world's edge, and a wrapping one has no edge.
-//
-// A plain layer is one draw per wrapped copy. The plane (line_scroll) and any
-// rippled rows are drawn one texture row at a time: the plane because every row
-// is its own depth, the ripple because every row is its own phase. Paint lying on
-// the plane (on_plane -- the sun's reflection) takes the plane's rows vertically
-// and its own factor horizontally: the reflection of something at infinity stays
-// under it, but it must stay on the water it was painted on, and as the plane
-// stretches under a rising camera only the plane's own row placement does that. Each row's
-// top and bottom are placed by the same edge function, so a row's bottom and the
-// next row's top are one number rounded once -- the reason draw_authored_bands
-// rounds per boundary, at a finer grain.
+// Destination edges are computed per boundary, not per piece: piece i's bottom
+// and piece i+1's top are one expression on one argument, rounded once, or the
+// rounding leaves a one-pixel line of whatever was behind the layer between two
+// pieces meant to touch.
 //
 // At 1080p about 75 plane rows and 27 rippled glint rows are on screen, two
 // copies each at most, so the per-row path is a couple of hundred single-row
 // copies a frame. SDL batches them into one draw per texture; it is small next
 // to the light field, which is where the frame's measured cost is.
-void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l) {
+void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l) {
     if (!l.texture || l.tex_h <= 0) return;
     int tex_w = 0;
     SDL_QueryTexture(l.texture, nullptr, nullptr, &tex_w, nullptr);
     if (tex_w <= 0) return;
+    apply_grade(l.texture, l.grade);
 
     const Camera& camera = *p.camera;
-    const Backdrop& b = p.backdrop;
+    const Backdrop& b = *p.backdrop;  // non-null: only called from the two passes below
     const int scale = camera.scale();
     const int window_w = p.padded_w * scale;
     const int window_h = p.padded_h * scale;
@@ -272,9 +109,22 @@ void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer
         }
     };
 
-    const float flat_y = depth_rig::origin(cam_y, b.rig_anchor_y, l.parallax_y, scale);
-    const float flat_x =
-        depth_rig::origin(cam_x, b.rig_anchor_x, l.parallax_x, scale) + drift_px;
+    const float flat_y = depth_rig::origin(cam_y, b.anchor_y, l.parallax_y, scale);
+    const float flat_x = depth_rig::origin(cam_x, b.anchor_x, l.parallax_x, scale) + drift_px;
+    const auto flat_edge = [&](int row) {
+        return std::floor(flat_y + static_cast<float>(row * row_px) + 0.5f);
+    };
+
+    if (!l.bands.empty()) {
+        for (const Band& band : l.bands) {
+            if (band.row1 <= band.row0) continue;
+            const float top = flat_edge(band.row0);
+            const SDL_Rect src{0, band.row0, tex_w, band.row1 - band.row0};
+            draw_span(depth_rig::origin(cam_x, b.anchor_x, band.parallax_x, scale) + drift_px, &src,
+                      top, flat_edge(band.row1) - top);
+        }
+        return;
+    }
 
     const bool rippled = l.ripple_row1 > l.ripple_row0;
     const bool plane_rows = l.line_scroll || l.on_plane;
@@ -284,15 +134,15 @@ void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer
     }
 
     // Rows drawn one at a time. For a rippled object layer that is only the ripple
-    // range -- rig_test holds its paint inside it -- and for the plane it is every
-    // row from the horizon down.
+    // range -- backdrop_set_test holds its paint inside it -- and for the plane it
+    // is every row from the horizon down.
     const int row0 = l.line_scroll ? std::max(0, b.rig.horizon_row) : l.ripple_row0;
     const int row1 = l.line_scroll ? l.tex_h : std::min(l.ripple_row1, l.tex_h);
     const auto edge = [&](int row) {
-        const float y = plane_rows
-                            ? depth_rig::plane_edge_y(b.rig, row, cam_y, b.rig_anchor_y, row_px)
-                            : flat_y + static_cast<float>(row * row_px);
-        return std::floor(y + 0.5f);
+        return plane_rows
+                   ? std::floor(depth_rig::plane_edge_y(b.rig, row, cam_y, b.anchor_y, row_px) +
+                                0.5f)
+                   : flat_edge(row);
     };
 
     float top = edge(row0);
@@ -301,11 +151,11 @@ void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer
         if (bottom > top && bottom > 0.0f && top < static_cast<float>(window_h)) {
             // The row's horizontal factor is taken at its centre: one depth standing
             // in for the row's whole range, and the middle is least wrong at both
-            // edges -- plane_strip's reasoning.
+            // edges.
             float x = flat_x;
             if (l.line_scroll) {
                 const float f = depth_rig::plane_factor(b.rig, static_cast<float>(row) + 0.5f);
-                x = depth_rig::origin(cam_x, b.rig_anchor_x, f, scale) + drift_px;
+                x = depth_rig::origin(cam_x, b.anchor_x, f, scale) + drift_px;
             }
             if (row >= l.ripple_row0 && row < l.ripple_row1)
                 x += depth_rig::ripple_cells(row, p.time_s, b.ripple_amplitude) *
@@ -317,193 +167,18 @@ void draw_rig_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer
     }
 }
 
-void draw_custom_background_layers(SDL_Renderer* renderer, const Params& p, const Grade&) {
-    for (const ParallaxLayer& l : p.backdrop.layers) {
-        if (l.is_foreground || !l.texture) continue;
-        if (p.backdrop.rig_on) { apply_grade(l.texture, l.grade); draw_rig_layer(renderer, p, l); continue; }
-        if (!l.bands.empty()) { apply_grade(l.texture, l.grade); draw_authored_bands(renderer, p, l); continue; }
-        // A per-layer spec built here rather than stored: backdrop_layers::Layer
-        // is the generated table's row type and carries a generated size, which
-        // an authored layer has none of. Passing its own w/h through as the size
-        // keeps one draw path for both systems.
-        const backdrop_layers::Layer spec{l.parallax_x, l.parallax_y, l.w, l.h};
-        draw_backdrop_layer(renderer, p, l.texture, l.w, l.h, spec, l.grade, true);
-    }
+// The backdrop, in two passes either side of the world. Each layer brings its
+// own Grade, which is why these rows of the table carry PLAIN and ignore theirs.
+void draw_backdrop(SDL_Renderer* renderer, const Params& p, const Grade&) {
+    if (!p.backdrop) return;
+    for (const ParallaxLayer& l : p.backdrop->layers)
+        if (!l.is_foreground) draw_layer(renderer, p, l);
 }
 
-void draw_custom_foreground_layers(SDL_Renderer* renderer, const Params& p, const Grade&) {
-    for (const ParallaxLayer& l : p.backdrop.layers) {
-        if (!l.is_foreground || !l.texture) continue;
-        if (p.backdrop.rig_on) { apply_grade(l.texture, l.grade); draw_rig_layer(renderer, p, l); continue; }
-        if (!l.bands.empty()) { apply_grade(l.texture, l.grade); draw_authored_bands(renderer, p, l); continue; }
-        const backdrop_layers::Layer spec{l.parallax_x, l.parallax_y, l.w, l.h};
-        draw_backdrop_layer(renderer, p, l.texture, l.w, l.h, spec, l.grade, true);
-    }
-}
-
-void draw_sky(SDL_Renderer* renderer, const Params& p, const Grade& g) {
-    if (!p.backdrop.layers.empty()) return;  // the authored stack owns the sky
-    draw_backdrop_layer(renderer, p, p.backdrop.sky,
-                        p.backdrop.sky_w, p.backdrop.sky_h, backdrop_layers::SKY, g, false);
-}
-
-void draw_mountains(SDL_Renderer* renderer, const Params& p, const Grade& g) {
-    if (!p.backdrop.layers.empty()) return;  // the authored stack owns the skyline
-    draw_backdrop_layer(renderer, p, p.backdrop.mountains,
-                        p.backdrop.mountain_w, p.backdrop.mountain_h,
-                        backdrop_layers::MOUNTAINS, g, false);
-}
-
-// A mid-ground band between the mountains and the world was built here and
-// removed: our world is much taller than the camera sees, so simulated terrain
-// already occupies that band where a hand-painted stack cannot.
-//
-// What replaced it is not what came out. The deleted band was a silhouette at
-// one factor; the ground plane below is a surface at a range of factors, drawn
-// behind the world, and the near silhouette in front of it stays the simulated
-// terrain -- deliberately, because a painted band in front of the world would
-// occlude the one verb the game has.
-
-// --- the ground plane ----------------------------------------------------
-//
-// A receding plane has no single depth. Drawn flat at one parallax factor it
-// reads as a wall standing behind the world; drawn as N strips between two
-// factors it reads as ground going away. The arithmetic -- which strip is at
-// which depth, what it samples, and where the wrapping copies go -- is in
-// render/backdrop_wrap.h and tested headless in tests/test_backdrop.cpp; this
-// function does nothing but turn its answers into SDL_RenderCopy calls.
-//
-// Two constants live here rather than in the generated header, because they are
-// composition and not parallax: where the band sits in the frame and how finely
-// it is cut. Both are TUNING.md rows.
-//
-// STRIPS is a real cost knob: the plane issues STRIPS * (copies per strip) draw
-// calls every frame, against one for every other backdrop layer. It is chosen as
-// the point where the factor stepping between adjacent strips stops being
-// visible as banding, and is not measured against a frame budget, because
-// grid_bench times the simulation and cannot see a draw call at all.
-constexpr int GROUND_STRIPS = 24;
-
-// Where the plane's far edge sits is a row of the mountains BMP rather than a
-// fraction of the window.
-//
-// A fraction of the window is the right shape of constant and the wrong space to
-// state it in. The window is switchable at runtime, so a horizon in window
-// pixels would sit at three different heights -- but the plane's far edge is not
-// a fact about the window at all. It is where the ground meets the mountains,
-// which is a fact about the mountains. Stated there it is resolution-independent
-// for free and cannot contradict the art, because it is the art:
-// backdrop_layers::MOUNTAINS_SKYLINE_MAX_ROW is generated from the same seeded
-// walk that draws the silhouette. A horizon derived from the terrain skyline
-// instead contradicts the mountains at every camera position, and the plane is
-// opaque and drawn after them, so it covers the band completely.
-//
-// The deepest row of the skyline, not the highest, so the whole jagged edge
-// stands clear above the plane and only the solid body below it is covered.
-//
-// mountain_h is the loaded texture's height rather than the generated one, so
-// the horizon follows the art that is actually on screen. Against an absolute
-// row index, a fixture with a shorter synthetic mountain texture drops the plane
-// off the bottom of the window entirely.
-//
-// Defined below, outside the anonymous namespace: the surface_plane pass
-// needs the same number and frame.h declares it.
-
-void draw_ground(SDL_Renderer* renderer, const Params& p, const Grade& g) {
-    if (!p.backdrop.layers.empty()) return;  // the authored stack owns the plane
-    SDL_Texture* tex = p.backdrop.ground;
-    if (!tex || p.backdrop.ground_w <= 0 || p.backdrop.ground_h <= 0) return;
-    apply_grade(tex, g);
-
-    const Camera& camera = *p.camera;
-    const int window_w = p.padded_w * camera.scale();
-    const int window_h = p.padded_h * camera.scale();
-
-    // The horizon moves with the camera at the mountains' vertical factor and
-    // not the plane's own. A receding plane's far edge is the most distant
-    // thing in the frame -- at infinity by construction -- so its parallax
-    // factor has to be the smallest in the scene, not the plane's near-edge
-    // one, or it climbs past the mountains within a few hundred cells of
-    // descent.
-    //
-    // The band runs from wherever that lands to a near edge the plane
-    // decides, and not to the bottom of the window: a parallaxed far edge
-    // against a near edge nailed to a window constant is a layer whose
-    // nearer end is less parallaxed than its further end, which reads as the
-    // tile squishing as the camera climbs. The argument is at
-    // PLANE_TEXEL_SCALE in render/backdrop_wrap.h.
-    const backdrop_wrap::Plane plane = backdrop_wrap::plane_geometry(
-        ground_horizon_y(camera, p.backdrop.mountain_h),
-        p.backdrop.ground_h,
-        backdrop_layers::GROUND.parallax_x,
-        backdrop_layers::GROUND_NEAR_X);
-
-    for (int i = 0; i < GROUND_STRIPS; ++i) {
-        const backdrop_wrap::Strip s = backdrop_wrap::plane_strip(plane, i, GROUND_STRIPS);
-        if (s.dst_h <= 0.0f || s.src_h <= 0.0f) continue;
-        // Strips above the window happen whenever the camera is low enough to
-        // push the horizon off the top, which is most of the world's height.
-        // Skipping them saves their tiling, for rows nobody can see.
-        if (s.dst_y + s.dst_h <= 0.0f || s.dst_y >= static_cast<float>(window_h)) continue;
-
-        const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(
-            camera.parallax_origin_x(s.factor), p.backdrop.ground_w, window_w);
-
-        // The source rect is integer, so it rounds; the destination stays float,
-        // the way every other layer's does. Rounding the destination would make
-        // the plane jerk in whole pixels while the world under it scrolls
-        // smoothly.
-        //
-        // The two rows come from plane_src_row, one boundary at a time, and not
-        // from rounding this strip's start and height independently: two
-        // neighbouring strips rounded in isolation do not meet, so the texture
-        // repeats a row at some boundaries and skips one at others.
-        //
-        // A strip whose two boundaries round to the same row is one whose depth
-        // range has collapsed below a single texel, which happens at the horizon
-        // end where the compression is steepest. It gets one row rather than
-        // being skipped: a skipped strip is a transparent gap in the destination
-        // band.
-        const int row0 = backdrop_wrap::plane_src_row(plane, i, GROUND_STRIPS);
-        const int row1 = backdrop_wrap::plane_src_row(plane, i + 1, GROUND_STRIPS);
-        SDL_Rect src{0, row0, p.backdrop.ground_w, row1 - row0 > 0 ? row1 - row0 : 1};
-        if (src.y + src.h > p.backdrop.ground_h) src.h = p.backdrop.ground_h - src.y;
-        if (src.h <= 0) continue;
-
-        for (int c = 0; c < t.count; ++c) {
-            const SDL_FRect dst{
-                t.first + static_cast<float>(c) * p.backdrop.ground_w,
-                s.dst_y, static_cast<float>(p.backdrop.ground_w), s.dst_h
-            };
-            SDL_RenderCopyF(renderer, tex, &src, &dst);
-        }
-    }
-
-    // Below the plane's near edge, when there is a below. The plane is a fixed
-    // depth of art, so a camera low enough -- or a window tall enough -- can
-    // leave rows underneath it that the tile has nothing to say about.
-    //
-    // Filled with the tile's nearest row rather than left to the clear colour.
-    // What is below the near end of a receding plane is ground nearer still, and
-    // the nearest thing the art knows about is its last row, so this is the
-    // plane's own near tone continued rather than a new colour or a new band.
-    // The world's terrain usually covers this region, which is not a guarantee
-    // at every camera position.
-    if (plane.bottom_y < static_cast<float>(window_h)) {
-        const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(
-            camera.parallax_origin_x(backdrop_layers::GROUND_NEAR_X),
-            p.backdrop.ground_w, window_w);
-        const SDL_Rect src{0, p.backdrop.ground_h - 1, p.backdrop.ground_w, 1};
-        const float top = plane.bottom_y > 0.0f ? plane.bottom_y : 0.0f;
-        for (int c = 0; c < t.count; ++c) {
-            const SDL_FRect dst{
-                t.first + static_cast<float>(c) * p.backdrop.ground_w,
-                top, static_cast<float>(p.backdrop.ground_w),
-                static_cast<float>(window_h) - top
-            };
-            SDL_RenderCopyF(renderer, tex, &src, &dst);
-        }
-    }
+void draw_foreground(SDL_Renderer* renderer, const Params& p, const Grade&) {
+    if (!p.backdrop) return;
+    for (const ParallaxLayer& l : p.backdrop->layers)
+        if (l.is_foreground) draw_layer(renderer, p, l);
 }
 
 // Props. Drawn before the cell texture on purpose -- see the Prop
@@ -638,20 +313,18 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // Drawn exactly like the player -- a frame anchored bottom-centre on the box,
 // flipped for facing -- except that the frame comes out of an atlas the caller
 // rebuilds from each body's surviving pixels rather than out of a fixed sheet.
-// The flip is the same SDL_FLIP_HORIZONTAL over the same rect that Enemy's
-// world_x_of assumes, which is what keeps a pixel drawn over a cell and the
-// pixel an arrow finds in that cell the same pixel.
+// The flip is SDL_FLIP_HORIZONTAL over the pose's rectangle, which the caller
+// anchors to match Enemy::pixel_at's flip, so a pixel drawn over a cell and the
+// pixel an arrow finds in that cell stay the same pixel.
 void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
     if (!p.enemies || p.enemies->empty() || !p.enemy_atlas) return;
     const Camera& camera = *p.camera;
     apply_grade(p.enemy_atlas, g);
     for (const EnemySprite& e : *p.enemies) {
-        const SDL_FRect body{
-            camera.world_to_screen_x(e.x - Enemy::OFFSET_X),
-            camera.world_to_screen_y(e.y - Enemy::OFFSET_Y),
-            static_cast<float>(camera.scale_length(Enemy::FRAME_W)),
-            static_cast<float>(camera.scale_length(Enemy::FRAME_H))
-        };
+        const SDL_FRect body{camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
+                             camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
+                             static_cast<float>(camera.scale_length(e.src.w)),
+                             static_cast<float>(camera.scale_length(e.src.h))};
         SDL_RenderCopyExF(renderer, p.enemy_atlas, &e.src, &body, 0.0, nullptr,
                           e.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
     }
@@ -763,49 +436,28 @@ void draw_light(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // between two comments in a long function.
 constexpr Grade PLAIN{};  // 255,255,255 - drawn as authored
 
-// The mountains are multiplied down, and it is the one graded row.
+// Every row is PLAIN. The per-layer multiply is live where it belongs, on
+// each backdrop layer's own Grade (frame::ParallaxLayer), and the shipped sets
+// leave it at identity because their art carries its own aerial perspective.
+// The backdrop rows carry PLAIN for that reason and not by oversight: a grade
+// here would multiply on top of the one the art was authored against and
+// neither number would say so.
 //
-// Measured in luminance, the sky and the ungraded mountains sit within a couple
-// of levels out of 255 of each other, with the more distant band the brighter of
-// the pair -- so the two most distant bands in the frame do not separate at all.
-// Graded down, the mountains read as a silhouette against the sky, which is
-// where the reference gets its depth from.
-//
-// Darker with nearness, not lighter, because the sky is the only light in the
-// frame. Daylight aerial perspective washes distant things toward the sky, and
-// that instinct is the wrong one here: at night the sky is the bright thing and
-// everything in front of it is a cut-out.
-//
-// A number here and not darker mountain art. Regenerating the BMP darker
-// produces the same pixels this frame, and stops doing so the moment
-// world_grade is non-identity -- baked art cannot respond to a night grade,
-// where a per-layer multiply composes with it. It is also tens of megabytes of
-// asset regenerated for what is a composition decision.
-//
-// TUNING.md carries this row. The other layers are PLAIN on purpose: the sky is
-// the reference the rest is judged against, and the world's own spread is
-// already the widest in the frame, so grading it would compress the one band
-// that does not need help.
-//
-// The two custom_* rows carry PLAIN and that is not an oversight. An authored
-// layer brings its own Grade with it -- the value is per layer, not per row,
-// because several of them share one row -- so a grade here would multiply on top
-// of the one the art was authored against and neither number would say so.
+// (There was one graded row: the generated mountains, at 0.60, to separate them
+// from a sky of nearly the same luminance. It went with the generated backdrop;
+// see render/backdrop_set.h.)
 constexpr Layer TABLE[] = {
-    {"clear",             Lighting::Lit,   PLAIN,           draw_clear},
-    {"sky",               Lighting::Lit,   PLAIN,           draw_sky},
-    {"mountains",         Lighting::Lit,   {153, 153, 153}, draw_mountains},
-    {"custom_background", Lighting::Lit,   PLAIN,           draw_custom_background_layers},
-    {"ground",            Lighting::Lit,   {135, 135, 135}, draw_ground},
-    {"props",             Lighting::Lit,   PLAIN,           draw_props},
-    {"cells",             Lighting::Lit,   PLAIN,           draw_cells},
-    {"objective",         Lighting::Lit,   PLAIN,           draw_objective},
-    {"enemies",           Lighting::Lit,   PLAIN,           draw_enemies},
-    {"player",            Lighting::Lit,   PLAIN,           draw_player},
-    {"arrows",            Lighting::Lit,   PLAIN,           draw_arrows},
-    {"custom_foreground", Lighting::Lit,   PLAIN,           draw_custom_foreground_layers},
-    {"grade",             Lighting::Grade, PLAIN,           draw_grade},
-    {"light",             Lighting::Light, PLAIN,           draw_light},
+    {"clear", Lighting::Lit, PLAIN, draw_clear},
+    {"backdrop", Lighting::Lit, PLAIN, draw_backdrop},
+    {"props", Lighting::Lit, PLAIN, draw_props},
+    {"cells", Lighting::Lit, PLAIN, draw_cells},
+    {"objective", Lighting::Lit, PLAIN, draw_objective},
+    {"enemies", Lighting::Lit, PLAIN, draw_enemies},
+    {"player", Lighting::Lit, PLAIN, draw_player},
+    {"arrows", Lighting::Lit, PLAIN, draw_arrows},
+    {"foreground", Lighting::Lit, PLAIN, draw_foreground},
+    {"grade", Lighting::Grade, PLAIN, draw_grade},
+    {"light", Lighting::Light, PLAIN, draw_light},
     // Nothing Unlit yet, and that is not an omission: the UI drawn after the
     // light pass lives elsewhere. The value exists so that the first thing to
     // cross the boundary declares which side it is on instead of inheriting a
@@ -814,8 +466,7 @@ constexpr Layer TABLE[] = {
     // `grade` is a layer with no caller -- nothing sets Params::world_grade, so
     // it returns before its first draw call on every frame the game currently
     // composes. It ships because the per-layer half of the same mechanism is
-    // live on the mountains row, which is what proves the multiply works at
-    // all, and because the pass and its ordering argument are the part that is
+    // live on every backdrop layer, and because the pass and its ordering argument are the part that is
     // expensive to add later. It becomes a defect the day it is still unset and
     // the ordering claim above has stopped being checked by anything.
 };
@@ -893,11 +544,6 @@ static_assert(grade_layer_is_plain(),
               "multiplies twice and neither number says so");
 
 } // namespace
-
-float ground_horizon_y(const Camera& camera, int mountain_h) {
-    return camera.parallax_origin_y(backdrop_layers::MOUNTAINS.parallax_y) +
-           static_cast<float>(mountain_h) * backdrop_layers::MOUNTAINS_SKYLINE_MAX;
-}
 
 const Layer* const LAYERS = TABLE;
 const int LAYER_COUNT = TABLE_COUNT;

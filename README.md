@@ -59,6 +59,15 @@ time**, so editing a file by hand shows nothing until you rebuild (or run
 The location BMPs and the prop list are not sprites and are named in
 `assets/scenes.txt` rather than bound through the sprite manifest.
 
+A backdrop is a folder: its layer BMPs plus a `backdrop.txt` that lists them
+back to front and says how each one moves with the camera (a factor, the row it
+stands on, or bands of a painted surface). A scene picks one with
+`backdrop=<folder>` in `assets/scenes.txt`. The format is documented at the top
+of `src/render/backdrop_set.h`, and `backdrop_set_test` checks every shipped
+set against its art, so a new backdrop is an asset drop rather than a code
+change. What a scene puts in its world (player column, objective, enemies) is
+the same idea: a level file named with `level=<file>`.
+
 For the player character specifically, `tools/player_sheet.py` holds the frame
 grid and the `ANIMATIONS` table that says which slot means what, and emits both
 into `src/render/player_sprite.h`.
@@ -66,7 +75,7 @@ into `src/render/player_sprite.h`.
 ## Running the Tests
 
 The simulation has no SDL dependency, so it is tested headlessly. There are
-eighteen suites, one per concern — `grid_test` for the cellular automata,
+twenty-three suites, one per concern — `grid_test` for the cellular automata,
 `player_test` for the character physics, `tool_test` for digging,
 `collapse_test` for structural support, `run_test` for the three of them driven
 together through one `Run::step()`, `scene_test` for the level loader,
@@ -76,8 +85,10 @@ for the sprite manifest that decides which BMP each key loads, and `debug_test`
 for the debug tooling — the pause, the free camera's clamp and the cell
 inspector's text, none of which would be reachable by any test had they been
 written where the keys are bound. Three more cover the renderer's arithmetic:
-`backdrop_test` for the wrapping-layer maths, `camera_test` for the view's
-framing and its world-edge clamps, and `golden_frame_test`,
+`backdrop_test` for the wrapping-layer maths, `rig_test` for the perspective
+rig's arithmetic, `backdrop_set_test` for the backdrop file format and every
+shipped set held to its BMPs, `camera_test` for the view's framing and its
+world-edge clamps, and `golden_frame_test`,
 which composes a fixed scene through the real renderer and checksums it — **the
 one suite that links SDL**, though it still needs no display. It carries two
 checksums: one for the world the composition draws, and a
@@ -88,7 +99,12 @@ confused for each other. `boot_test` covers
 what the game decides before its first frame — where the objective and each prop
 are planted on the terrain actually under them, and which display mode to open
 at — and it runs the *shipped* scene, so the two lines a launch used to be
-checked by are assertions instead. `shell_test` covers the decisions the shell
+checked by are assertions instead. `level_test` covers the level file and
+`level::start`, the one function the game, the replay bench and the tests all
+build a world with, and starts every shipped scene the way the game does.
+`present_test` covers what the frame shows, worked out from the run -- above
+all that every enemy pixel painted into the atlas lands on a cell an arrow would
+hit. `shell_test` covers the decisions the shell
 takes every frame and every keypress — how much simulated time a frame buys,
 what freezing the world means, where between two steps the picture falls, and
 the settings menu's navigation and selection. CTest runs all of them.
@@ -156,7 +172,7 @@ described is worth reporting.
 | 9 | **Structures** | A wall or wood shape with nothing under it falls as one rigid piece and lands intact. A shape resting on solid ground never twitches or drifts. |
 | 10 | **Depth** | Walk a long way and watch the background. Sky drifts slowest, mountains faster, terrain fastest. No visible seams or repeating vertical lines anywhere in the backdrop. |
 | 11 | **The run** | Take falling damage from a real drop, take burn damage standing in fire, die and see `YOU DIED`, press `R` to restart, then fly east across the water channel to reach the objective. |
-| 12 | **Enemies** | Hold `E` and shoot a ghoul's arm below the shoulder: the forearm drops off as sand in the ghoul's colours and piles up on the ground. A shot between the eyes collapses the whole body into a heap. |
+| 12 | **Enemies** | Hold `E` and shoot a ghoul's arm below the shoulder: the forearm drops off as sand in the ghoul's colours and piles up on the ground. A shot between the eyes collapses the whole body into a heap. Watch one walk: the legs stride, and when it sees you its arms come up. |
 | 13 | **Stability** | A few minutes of doing all of the above at once — digging near falling sand near fire near water — with no crash and no obvious slowdown during ordinary play. |
 
 `ctest` proves the mechanics in isolation; it cannot prove they compose. Run
@@ -192,7 +208,30 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   both legs are cut through, or when less than 40% of them is left. Then the
   whole body collapses into a heap of sand. Fire burns them away from
   wherever the flame touches, feet first.
-- **`N`** (development tool): Spawn an enemy at the cursor.
+- **Trolls.** One stands at the far end of each scene with room for it: a
+  hunched giant nearly three times your height, with a club. It walks slowly,
+  and when you are in front of it within reach it stops, its eyes heat white
+  for most of a second, and the club comes down for 30 damage -- breaking the
+  ground into a crater and a spray of debris. Walk out from under it, then
+  shoot while it stands spent.
+- **Trolls come apart locally too.** An arrow takes a five-cell bite out of a
+  troll, not a limb: its arms are too thick to sever in one shot, so you chip
+  through a shoulder with two or three, and then the whole arm (and the club,
+  if it is that arm) drops as a heap of sand. It needs one arrow in each eye,
+  not one between them. With both arms gone it has nothing to slam with. It
+  wades through sand, so the pile of its own arm does not trap it.
+- **They are animated, and the animation is the body.** Legs stride in step
+  with the ground they cover, arms swing, the body breathes, leans into a
+  chase and rocks back when hit. A ghoul that has seen you reaches for you and
+  slashes from over its head; a troll swings its club back over its shoulder
+  as its eyes heat, then over the top and down into the crater. The limbs
+  turn on their joints rather than swapping to a drawn frame, so an arrow hits
+  the arm where it is drawn mid-swing, and a hole shot in a shin stays in the
+  shin as the leg moves.
+- **`N`** (development tool): Spawn a ghoul standing on the cursor -- point at
+  the ground.
+- **`T`** (development tool): Spawn a troll standing on the cursor -- point at
+  the ground.
 - The HUD shows `FOES:` (alive) and `KILLS:`.
 
 **World (development tools)**

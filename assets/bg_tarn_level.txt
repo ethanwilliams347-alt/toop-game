@@ -1,0 +1,16 @@
+# What the bg_tarn level puts in its world (format: src/scene/level_list.h).
+#
+# Columns only. Each thing stands on whatever terrain is under its column when
+# the level starts, so digging or reshaping the map never leaves one floating.
+#
+# The run goes left to right along the lake shore: the player starts at the west
+# end, two ghouls wander the flat shore in between, and the troll stands on the
+# rise in front of the objective at the east end. The fight is getting past it --
+# under the club during its recovery, over it on the wing, or by bringing the
+# rise down from under it.
+
+player     80
+enemy      ghoul  260
+enemy      ghoul  400
+enemy      troll  560
+objective  636

@@ -28,6 +28,17 @@ if(MSVC)
     add_compile_options(/W4 /permissive-)
 endif()
 
+# The enemy art is checked at compile time -- every pixel connected to the
+# heart, every row the right width (src/physics/body_art.h) -- and the troll's
+# 52x70 frame makes that the largest constant expression in the build. MSVC
+# stops evaluating a constant expression after 100,000 steps by default, well
+# short of a flood fill over 3,640 pixels, and reports the static_assert as "not
+# a constant expression" rather than as the art being wrong. GCC and Clang's
+# defaults are far higher. Set after SDL so it applies to this project only.
+if(MSVC)
+    add_compile_options(/constexpr:steps10000000)
+endif()
+
 # AddressSanitizer, off by default: `just asan` builds it in build-asan/.
 # It catches the out-of-bounds reads and use-after-free that a falling-sand grid
 # indexed by hand is most likely to have, at roughly 2x run time, which is why it
@@ -47,7 +58,7 @@ if(SLOP_ASAN)
     endif()
 endif()
 
-# The five source sets below are kept apart on purpose. Each one draws a
+# The source sets below are kept apart on purpose. Each one draws a
 # boundary the code is not allowed to cross, and the separation is what makes a
 # crossing a build error rather than a habit: the day something under
 # src/physics/ reaches for the renderer, the mistake has to be written into this
@@ -63,6 +74,7 @@ set(ENGINE_SOURCES
     src/physics/enemy.cpp
     src/physics/arrow.cpp
     src/game/run.cpp
+    src/game/level.cpp
     src/game/input_log.cpp
     src/scene/scene.cpp
 )
@@ -74,7 +86,7 @@ set(ENGINE_SOURCES
 set(RENDER_SOURCES
     src/render/light.cpp
     src/render/player_anim.cpp
-    src/render/surface_plane.cpp
+    src/render/backdrop_set.cpp
 )
 
 # Authored files turned into records: the prop list, the sprite manifest, the
@@ -92,6 +104,8 @@ set(SCENE_PROP_SOURCES
     src/scene/sprites.cpp
     src/scene/bmp.cpp
     src/scene/scene_list.cpp
+    src/scene/level_list.cpp
+    src/scene/level_files.cpp
 )
 
 # Frame composition and the screen-space layer. A fifth variable rather than a
@@ -115,7 +129,24 @@ set(FRAME_SOURCES
     src/ui/hotbar.cpp
 )
 
-add_executable(SlopPhysics src/main.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES} ${FRAME_SOURCES})
+# The presenter: what the frame shows, worked out from a const Run -- the enemy
+# atlas's pixels, the sprite lists, the HUD's words. Its own variable because it
+# is the one place allowed to read both sides: the simulation (which nothing in
+# src/render/ may) and the frame's record types (which nothing in src/physics/ or
+# src/game/ may). It makes no SDL call, so present_test needs no window.
+set(PRESENT_SOURCES
+    src/present/present.cpp
+)
+
+# The SDL shell: render targets, display modes, textures from asset files, the
+# cell upload. Only the game executable links it -- everything here calls SDL,
+# and every decision it used to make inline now lives behind a suite.
+set(SHELL_SOURCES
+    src/shell/shell.cpp
+)
+
+add_executable(SlopPhysics src/main.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES}
+               ${FRAME_SOURCES} ${PRESENT_SOURCES} ${SHELL_SOURCES})
 
 target_include_directories(SlopPhysics PRIVATE src)
 
@@ -183,8 +214,8 @@ if(BUILD_TESTING)
     add_test(NAME run_test COMMAND run_test)
 
     # The debug tooling. Links only ENGINE_SOURCES because src/game/debug_view.h
-    # is a header -- it deliberately does not become a sixth source variable, so
-    # the guard the five above enforce is untouched.
+    # is a header -- it deliberately does not become another source variable, so
+    # the guard the sets above enforce is untouched.
     add_executable(debug_test tests/test_debug.cpp ${ENGINE_SOURCES})
     target_include_directories(debug_test PRIVATE src tests)
     add_test(NAME debug_test COMMAND debug_test)
@@ -235,25 +266,20 @@ if(BUILD_TESTING)
     target_include_directories(backdrop_test PRIVATE src tests)
     add_test(NAME backdrop_test COMMAND backdrop_test)
 
-    # The near-ground pass. Links one source file rather than RENDER_SOURCES,
-    # because the pass shares nothing with the light field or the sprite sheet.
-    #
-    # It exists because golden_frame_test structurally cannot see what it tests:
-    # the pass runs between the grid's pixel buffer and SDL_UpdateTexture, and
-    # the golden frame is composed from a texture that is already uploaded.
-    add_executable(surface_plane_test tests/test_surface_plane.cpp
-                   src/render/surface_plane.cpp)
-    target_include_directories(surface_plane_test PRIVATE src tests)
-    add_test(NAME surface_plane_test COMMAND surface_plane_test)
-
-    # The perspective rig: the pinhole arithmetic in render/depth_rig.h, and every
-    # rig set in render/rig_backdrop.h checked against its BMPs -- feet, plane,
-    # ripple ranges, seamless wrap. Header-only and SDL-free like backdrop_test;
-    # SCENE_PROP_SOURCES only for scene/bmp.cpp, and WORKING_DIRECTORY so the
-    # assets resolve.
-    add_executable(rig_test tests/test_depth_rig.cpp ${SCENE_PROP_SOURCES})
+    # The perspective rig: the pinhole arithmetic in render/depth_rig.h.
+    # Header-only and SDL-free like backdrop_test, so it links nothing.
+    add_executable(rig_test tests/test_depth_rig.cpp)
     target_include_directories(rig_test PRIVATE src tests)
-    add_test(NAME rig_test COMMAND rig_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME rig_test COMMAND rig_test)
+
+    # Backdrop sets: the backdrop.txt parser, and every set a shipped scene names
+    # checked against its BMPs -- sizes, order, feet, the plane, bands cut on flat
+    # paint, the wrap seam. The parser and the BMP reader only, no SDL; from the
+    # source tree so assets/ resolves.
+    add_executable(backdrop_set_test tests/test_backdrop_set.cpp src/render/backdrop_set.cpp
+                   ${SCENE_PROP_SOURCES})
+    target_include_directories(backdrop_set_test PRIVATE src tests)
+    add_test(NAME backdrop_set_test COMMAND backdrop_set_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The camera's view arithmetic: the framing, the world-edge clamps, and the
     # anchor the clamps have to survive. Links no sources -- camera.h is an
@@ -277,6 +303,15 @@ if(BUILD_TESTING)
     target_link_libraries(golden_frame_test PRIVATE SDL2-static)
     add_test(NAME golden_frame_test COMMAND golden_frame_test)
 
+    # The presenter, headless: the enemy atlas painted from a stepped Run and
+    # checked cell by cell against what an arrow would hit there, the arrow
+    # sprites, and the HUD's words. Links SDL2-static only for frame.h's record
+    # types and include path; it opens nothing.
+    add_executable(present_test tests/test_present.cpp ${ENGINE_SOURCES} ${PRESENT_SOURCES})
+    target_include_directories(present_test PRIVATE src tests)
+    target_link_libraries(present_test PRIVATE SDL2-static)
+    add_test(NAME present_test COMMAND present_test)
+
     # The startup decisions: the terrain scans that plant the objective and the
     # props, and which display mode to open at. Every check in it used to run
     # inside main(), print a line to stdout, and be verifiable only by a person
@@ -287,14 +322,16 @@ if(BUILD_TESTING)
     # SCENE_PROP_SOURCES is here, and WORKING_DIRECTORY with it, because half
     # the suite runs the shipped fixture: the scene BMPs, the prop list and the
     # prop sprites.
-    #
-    # It also carries the authored backdrop's band table check, which is neither
-    # a boot decision nor the fixture: it needs SCENE_PROP_SOURCES to read a BMP
-    # and WORKING_DIRECTORY to find it, and this is the only suite that already
-    # has both.
     add_executable(boot_test tests/test_boot.cpp ${ENGINE_SOURCES} ${SCENE_PROP_SOURCES})
     target_include_directories(boot_test PRIVATE src tests)
     add_test(NAME boot_test COMMAND boot_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    # Starting a level: the level-file parser, the scene list's named fields and
+    # level::start, plus every shipped scene started as the game starts it. From
+    # the source tree for that last part, like boot_test.
+    add_executable(level_test tests/test_level.cpp ${ENGINE_SOURCES} ${SCENE_PROP_SOURCES})
+    target_include_directories(level_test PRIVATE src tests)
+    add_test(NAME level_test COMMAND level_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The shell's decisions: the frame pacer's freeze rule, its step count and
     # interpolation alpha, and the settings menu's navigation and selection. All
@@ -324,8 +361,8 @@ if(BUILD_TESTING)
     add_executable(preview_light tests/preview_light.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES})
     target_include_directories(preview_light PRIVATE src tests)
 
-    # The same idea for a perspective-rig backdrop (render/rig_backdrop.h): stills
-    # and a flight through the scene, composed by the real frame::compose. Links
+    # The same idea for a backdrop set (assets/<dir>/backdrop.txt): stills and a
+    # flight through the scene, composed by the real frame::compose. Links
     # SDL for the software renderer, as golden_frame_test does; asserts nothing.
     add_executable(preview_backdrop tests/preview_backdrop.cpp
                    ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES} ${FRAME_SOURCES})
@@ -357,23 +394,6 @@ if(BUILD_TESTING)
     # test over it would pin a prototype rather than check the product.
     add_executable(velocity_probe tests/velocity_probe.cpp ${ENGINE_SOURCES})
     target_include_directories(velocity_probe PRIVATE src tests)
-
-    # Where the receding ground plane's band lands on screen, and how much of it
-    # the fixture's own terrain covers up. Not an add_test() for the same reason
-    # the four above are not: it reports an input to a composition decision.
-    #
-    # The one probe that reaches into src/render/, and it does so only through
-    # the two headers that are arithmetic -- backdrop_layers.h and
-    # backdrop_wrap.h, both header-only and SDL-free by design. RENDER_SOURCES
-    # is deliberately not linked: the moment this needs a .cpp from the renderer
-    # it has stopped being a headless instrument, and that should be a link
-    # error rather than a habit. surface_plane.cpp is the exception, because the
-    # probe reports the band ladder before and after the near-ground pass and
-    # reimplementing the blend here would be a second copy of the thing being
-    # measured.
-    add_executable(plane_probe tests/plane_probe.cpp ${ENGINE_SOURCES}
-                   src/render/surface_plane.cpp)
-    target_include_directories(plane_probe PRIVATE src tests)
 endif()
 
 # MSVC's ASan runtime is a DLL that lives next to cl.exe and is only on PATH

@@ -21,16 +21,22 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
     quiver = Quiver();
     enemies.fill(Enemy{});
     kill_count = 0;
+    events_.clear();
     run_outcome = Outcome::Playing;
     // objective_set, goal_x and goal_y are deliberately not cleared -- see the field
     // comment in run.h.
 }
 
-bool Run::spawn_enemy(int x, int y) {
+bool Run::spawn_enemy(int x, int y, const Species& kind) {
     for (Enemy& e : enemies) {
         if (e.is_alive()) continue;
-        if (e.overlaps_solid(grid, x, y)) return false;
-        e.spawn(x, y);
+        // Asked of the slot as the new species: the test is the box, and the box
+        // is the species'.
+        e.spawn(x, y, kind);
+        if (e.overlaps_solid(grid, x, y)) {
+            e = Enemy{};
+            return false;
+        }
         return true;
     }
     return false;
@@ -71,8 +77,11 @@ bool Run::step(const Input& input) {
     // movable and a climb walks straight through it.
     // The spawn first of all, before the brush and the grid, for the brush's own
     // reason: what is put into the world on a step should not also move on it.
-    if (input.spawn_enemy) {
-        spawn_enemy(input.cursor_x - Enemy::WIDTH / 2, input.cursor_y - Enemy::HEIGHT / 2);
+    events_.clear();
+
+    if (input.command.kind == Command::Kind::SpawnEnemy) {
+        if (const Species* kind = species::at(input.command.arg))
+            spawn_enemy(input.cursor_x - kind->width / 2, input.cursor_y - kind->height, *kind);
     }
 
     if (input.brush_active) {
@@ -98,13 +107,20 @@ bool Run::step(const Input& input) {
     player_input.aim_x = input.cursor_x;
     player_input.aim_y = input.cursor_y;
     player_input.dig = input.dig;
+    const int health_before = player.health();
     player.update(grid, player_input);
+    // Whatever the world did to the body this step -- a burn, a hard landing.
+    // Enemies hurt it below, and say so themselves.
+    if (player.health() < health_before)
+        events_.push(Event{Event::Kind::PlayerHurt, player.center_x(), player.center_y(),
+                           health_before - player.health(), -1});
 
     // Last, so the dig is aimed from where the body actually ended up this step.
     // Called every step whether or not the button is held, because that is what
     // advances the tool's cooldown.
     const bool dug = dig_tool.update(grid, input.dig, player.center_x(), player.center_y(),
                                      input.cursor_x, input.cursor_y);
+    if (dug) events_.push(Event{Event::Kind::Dug, input.cursor_x, input.cursor_y, 0, 0});
 
     // The bow, then the arrows, then the bodies. Arrows before enemies so a shot is
     // tested against the enemy where it stood at the start of the step, which is
@@ -116,14 +132,42 @@ bool Run::step(const Input& input) {
     std::array<bool, MAX_ENEMIES> was_alive{};
     for (int i = 0; i < MAX_ENEMIES; ++i) was_alive[i] = enemies[i].is_alive();
 
-    quiver.update_bow(input.shoot, player.center_x(), player.center_y() - Player::HEIGHT / 5,
-                      input.cursor_x, input.cursor_y);
+    const int bow_x = player.center_x(), bow_y = player.center_y() - Player::HEIGHT / 5;
+    if (quiver.update_bow(input.shoot, bow_x, bow_y, input.cursor_x, input.cursor_y))
+        events_.push(Event{Event::Kind::ArrowLoosed, bow_x, bow_y, 0, 0});
     quiver.update_arrows(grid, enemies.data(), MAX_ENEMIES);
+    for (int i = 0; i < quiver.impact_count(); ++i) {
+        const ArrowImpact& hit = quiver.impact(i);
+        if (hit.enemy >= 0)
+            events_.push(Event{Event::Kind::ArrowHit, hit.x, hit.y, hit.enemy, hit.pixels});
+        else
+            events_.push(Event{Event::Kind::ArrowStuck, hit.x, hit.y, 0, 0});
+    }
 
-    for (Enemy& e : enemies) {
+    for (int i = 0; i < MAX_ENEMIES; ++i) {
+        Enemy& e = enemies[static_cast<size_t>(i)];
         if (!e.is_alive()) continue;
-        if (e.update(grid, player.cell_x(), player.cell_y(), player.is_alive())) {
-            player.take_hit(Enemy::SWIPE_DAMAGE);
+        const int windup_before = e.windup_left();
+        const bool landed = e.update(grid, player.cell_x(), player.cell_y(), player.is_alive());
+
+        // The slam's two moments, read off the wind-up counter rather than asked
+        // of the enemy: it starting (the telegraph) and it running out with the
+        // club down (the blow, which lands whether or not anyone was under it).
+        if (e.is_alive() && e.species().attack == Attack::Slam) {
+            int ix = 0, iy = 0;
+            e.impact_point(ix, iy);
+            if (windup_before == 0 && e.windup_left() > 0)
+                events_.push(Event{Event::Kind::SlamWindup, ix, iy, i, 0});
+            else if (windup_before > 0 && e.windup_left() == 0 && e.attack_recovery() == 0)
+                events_.push(Event{Event::Kind::Slam, ix, iy, i, 0});
+        }
+
+        if (landed) {
+            const int before = player.health();
+            player.take_hit(e.species().damage);
+            if (player.health() < before)
+                events_.push(Event{Event::Kind::PlayerHurt, player.center_x(), player.center_y(),
+                                   before - player.health(), species::index_of(e.species())});
         }
     }
 
@@ -131,7 +175,11 @@ bool Run::step(const Input& input) {
     // or the last of the legs burning away while it walks through a fire. A slot
     // alive before them and dead after them is one kill, whichever did it.
     for (int i = 0; i < MAX_ENEMIES; ++i) {
-        if (was_alive[i] && !enemies[i].is_alive()) ++kill_count;
+        const Enemy& e = enemies[static_cast<size_t>(i)];
+        if (!was_alive[static_cast<size_t>(i)] || e.is_alive()) continue;
+        ++kill_count;
+        events_.push(Event{Event::Kind::EnemyKilled, e.center_x(), e.center_y(), i,
+                           species::index_of(e.species())});
     }
 
     // --- has the run ended? ---
@@ -148,6 +196,8 @@ bool Run::step(const Input& input) {
     if (run_outcome == Outcome::Playing) {
         if (!player.is_alive()) {
             run_outcome = Outcome::Lost;
+            events_.push(
+                Event{Event::Kind::PlayerDied, player.center_x(), player.center_y(), 0, 0});
         } else if (objective_set) {
             // Distance from the objective to the nearest point of the body's box,
             // clamped per axis -- the standard box/point distance, in integers,
@@ -158,6 +208,7 @@ bool Run::step(const Input& input) {
             const int dy = (goal_y < by0) ? by0 - goal_y : (goal_y > by1 ? goal_y - by1 : 0);
             if (dx * dx + dy * dy <= OBJECTIVE_REACH * OBJECTIVE_REACH) {
                 run_outcome = Outcome::Won;
+                events_.push(Event{Event::Kind::ObjectiveReached, goal_x, goal_y, 0, 0});
             }
         }
     }
