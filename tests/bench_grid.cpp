@@ -28,8 +28,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -267,12 +274,10 @@ int peak_fractured_cells(Grid& g, Bench& b) {
 // the ones on record. It is threaded through here rather than set by the caller
 // on a grid it does not own, because `run` is what constructs the grid, and the
 // radius has to be in place before `build` puts sand on top of water.
-void run(const char* name, const WorldSize& size,
-         void (*build)(Grid&, Bench&), int settle_steps,
-         void (*on_step)(Grid&, Bench&) = nullptr,
-         int (*witness)(Grid&, Bench&) = nullptr, const char* witness_label = nullptr,
-         int vent_radius = Grid::DEFAULT_VENT_RADIUS,
-         bool seek_level = true, bool room_above = true) {
+double run(const char* name, const WorldSize& size, void (*build)(Grid&, Bench&), int settle_steps,
+           void (*on_step)(Grid&, Bench&) = nullptr, int (*witness)(Grid&, Bench&) = nullptr,
+           const char* witness_label = nullptr, int vent_radius = Grid::DEFAULT_VENT_RADIUS,
+           bool seek_level = true, bool room_above = true) {
     Bench b{size.w, size.h};
     Grid g(b.w, b.h);
     g.set_vent_radius(vent_radius);
@@ -326,6 +331,7 @@ void run(const char* name, const WorldSize& size,
         std::printf("  %-10s %s: %d%s\n", "", witness_label, n,
                     n == 0 ? "   <-- FEATURE NEVER FIRED; the row above is not about it" : "");
     }
+    return per_step;
 }
 
 // The light field, which every other scenario in this file is blind to.
@@ -358,8 +364,8 @@ constexpr int LIGHT_VIEW_W = WIDEST.padded_w(Camera::DEFAULT_SCALE);
 constexpr int LIGHT_VIEW_H = WIDEST.padded_h(Camera::DEFAULT_SCALE);
 constexpr int LIGHT_FRAMES = 300;
 
-void run_light(const char* name, const WorldSize& size,
-               void (*build)(Grid&, Bench&), void (*on_step)(Grid&, Bench&)) {
+double run_light(const char* name, const WorldSize& size, void (*build)(Grid&, Bench&),
+                 void (*on_step)(Grid&, Bench&)) {
     Bench b{size.w, size.h};
     Grid g(b.w, b.h);
     build(g, b);
@@ -411,6 +417,7 @@ void run_light(const char* name, const WorldSize& size,
     std::printf("  %-10s %9.4f ms/frame  %6.1f%% of a 60 Hz frame   %3d/%d frames lit\n",
                 name, per_frame, 100.0 * per_frame / FRAME_BUDGET_MS,
                 lit_frames, LIGHT_FRAMES);
+    return per_frame;
 }
 
 // What a recorded session actually contained.
@@ -962,9 +969,150 @@ void run_all(const WorldSize& size) {
         peak_fractured_cells, "peak fractured cells (untimed, after the clock)");
 }
 
+// Keeps the clock on the fast cores of a hybrid CPU (Windows only; a no-op
+// elsewhere, and on a CPU whose cores are all one class).
+//
+// On a P-core/E-core part the scheduler is free to move this thread to an
+// E-core, and does whenever something else wants the P-cores or the console
+// is in the background. On a 13600K `churning` at 1920x1080 is 46.7 ms/step on
+// a P-core and 87.6 on an E-core, so a run that spends part of its window on
+// one lands anywhere between: measured with eight busy threads alongside, the
+// default placement read 56.2 ms against 48.5 with this. That -- not the code
+// -- is what moved churning from 46.6 to 56.6 across a whitespace-only commit.
+//
+// Two things, both narrow on purpose:
+//  - Power throttling (EcoQoS) off for the process, so Windows does not decide
+//    a console benchmark is background work. The light rows' worker threads
+//    inherit this, and nothing else.
+//  - The main thread, which runs every Grid::update and calls light.update,
+//    is restricted to the fastest efficiency class. Only this thread: pinning
+//    the whole process would also crowd light's eight workers onto the six
+//    P-cores' hyperthreads, and light/fire reads 8.1 ms there against 4.6 in
+//    the game, which would make the row a number about the bench.
+//
+// Printed, because a timing whose conditions are not on the page is the problem
+// this exists to fix.
+void place_on_fast_cores() {
+#ifdef _WIN32
+    PROCESS_POWER_THROTTLING_STATE st{};
+    st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    st.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    st.StateMask = 0;
+    const bool qos =
+        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &st, sizeof st) != 0;
+
+    ULONG len = 0;
+    GetSystemCpuSetInformation(nullptr, 0, &len, GetCurrentProcess(), 0);
+    std::vector<unsigned char> buf(len);
+    auto* info = reinterpret_cast<SYSTEM_CPU_SET_INFORMATION*>(buf.data());
+    if (len == 0 || !GetSystemCpuSetInformation(info, len, &len, GetCurrentProcess(), 0)) {
+        std::printf("placement: cpu sets unavailable, scheduler's choice\n");
+        return;
+    }
+    // Size is per entry, not sizeof: later Windows versions append fields.
+    BYTE fastest = 0;
+    BYTE slowest = 255;
+    for (ULONG off = 0; off < len;) {
+        const auto* e = reinterpret_cast<const SYSTEM_CPU_SET_INFORMATION*>(buf.data() + off);
+        fastest = std::max(fastest, e->CpuSet.EfficiencyClass);
+        slowest = std::min(slowest, e->CpuSet.EfficiencyClass);
+        off += e->Size;
+    }
+    if (fastest == slowest) {
+        std::printf("placement: one core class, scheduler's choice%s\n",
+                    qos ? ", power throttling off" : "");
+        return;
+    }
+    std::vector<ULONG> ids;
+    for (ULONG off = 0; off < len;) {
+        const auto* e = reinterpret_cast<const SYSTEM_CPU_SET_INFORMATION*>(buf.data() + off);
+        if (e->CpuSet.EfficiencyClass == fastest) ids.push_back(e->CpuSet.Id);
+        off += e->Size;
+    }
+    const bool pinned = SetThreadSelectedCpuSets(GetCurrentThread(), ids.data(),
+                                                 static_cast<ULONG>(ids.size())) != 0;
+    std::printf("placement: main thread %s %zu fastest-class cpus%s\n",
+                pinned ? "on" : "NOT on (call failed)", ids.size(),
+                qos ? ", power throttling off" : ", power throttling NOT off");
+#endif
+}
+
+// `grid_bench --focus [reps]`: only the rows CLAUDE.md says matter for an A/B --
+// churning and cascading at the played size, and both light rows -- each run
+// `reps` times, then summarised.
+//
+// The rows are interleaved, one of each per rep, rather than run back to back,
+// so that anything that drifts over a sitting -- clocks, heat, what else the
+// machine is doing -- lands on every row equally instead of on whichever ran
+// last. The median is the number to compare; min and max are printed so the
+// spread is visible beside it, because a median quoted without its spread is
+// how a 20% swing got read as a speedup.
+//
+// A separate mode rather than a change to the default run: the full output is
+// quoted in documents, and nothing it prints may move. Each rep is ~40 s, so
+// the default five is a few minutes.
+constexpr int FOCUS_ROWS = 4;
+constexpr int FOCUS_MAX_REPS = 64;
+
+double median_of(double* v, int n) {
+    std::sort(v, v + n);
+    return n % 2 ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+}
+
+void run_focus(int reps) {
+    const WorldSize& played = SIZES[SIZE_COUNT - 1];
+    static const char* const names[FOCUS_ROWS] = {"churning", "cascading", "light/fire",
+                                                  "light/dark"};
+    static double t[FOCUS_ROWS][FOCUS_MAX_REPS];
+
+    std::printf("\nFocus: %dx%d, %d reps, rows interleaved\n\n", played.w, played.h, reps);
+    for (int r = 0; r < reps; ++r) {
+        std::printf("rep %d\n", r + 1);
+        t[0][r] = run("churning", played, build_churning, 0);
+        t[1][r] = run("cascading", played, build_settled, 120, cascade);
+        t[2][r] = run_light("light/fire", played, build_burning, feed_fire);
+        t[3][r] = run_light("light/dark", played, build_settled, nullptr);
+    }
+
+    std::printf("\n  %-10s %9s %9s %9s %8s\n", "row", "median", "min", "max", "spread");
+    for (int i = 0; i < FOCUS_ROWS; ++i) {
+        const double lo = *std::min_element(t[i], t[i] + reps);
+        const double hi = *std::max_element(t[i], t[i] + reps);
+        const double med = median_of(t[i], reps);
+        // Spread as (max - min) / median, so +-10% noise reads as about 20%.
+        std::printf("  %-10s %9.4f %9.4f %9.4f %7.1f%%\n", names[i], med, lo, hi,
+                    100.0 * (hi - lo) / med);
+    }
+    std::printf("\n");
+}
+
 } // namespace
 
+// Generated by CMakeLists.txt, SLOP_BENCH_PAD bytes long; see there.
+extern "C" void slop_bench_pad();
+
 int main(int argc, char** argv) {
+    // Called so the linker keeps it; it is empty unless SLOP_BENCH_PAD is set.
+    slop_bench_pad();
+    place_on_fast_cores();
+
+    if (argc > 1 && std::string(argv[1]) == "--focus") {
+        // strtol so a typo is caught: anything but a whole number is an error,
+        // not a silent zero clamped up to one rep.
+        long reps = 5;
+        if (argc > 2) {
+            char* end = nullptr;
+            reps = std::strtol(argv[2], &end, 10);
+            if (end == argv[2] || *end != '\0' || reps < 1 || reps > FOCUS_MAX_REPS) {
+                std::fprintf(stderr, "grid_bench --focus [reps]: reps must be 1..%d\n",
+                             FOCUS_MAX_REPS);
+                return 1;
+            }
+        }
+        run_focus(static_cast<int>(reps));
+        return 0;
+    }
+
     for (int i = 0; i < SIZE_COUNT; ++i) run_all(SIZES[i]);
 
     // Rendering, not simulation -- a different instrument and a different unit (per

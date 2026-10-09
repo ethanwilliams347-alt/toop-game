@@ -350,7 +350,36 @@ if(BUILD_TESTING)
     # a slow machine should not fail the build. Links SCENE_PROP_SOURCES because
     # the replayed row rebuilds the fixture scene through the same loader the
     # game uses.
-    add_executable(grid_bench tests/bench_grid.cpp ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES})
+    #
+    # SLOP_BENCH_PAD shifts every function linked after it by that many bytes,
+    # and changes nothing else. It exists because MSVC's code layout is a source
+    # of timing difference on its own: six builds of the same grid code, differing
+    # only in this pad, put light/dark anywhere in a 13% band and cascading in a
+    # 7% one, each build steady to ~1% run to run. An A/B whose difference is
+    # inside that band can be a layout accident, and the way to tell is to rebuild
+    # both sides at a second pad (16 and 32 moved things most) and see whether the
+    # difference survives. 0, the default, is an empty function.
+    #
+    # The pad is a function of nops in its own generated source, listed first so
+    # the linker places it ahead of the engine code. configure_file rather than
+    # file(WRITE) so the source is only touched -- and grid_bench only relinked --
+    # when the value changes.
+    set(SLOP_BENCH_PAD 0 CACHE STRING "Bytes of padding linked ahead of grid_bench's code")
+    set(SLOP_PAD_BODY "")
+    if(SLOP_BENCH_PAD GREATER 0)
+        foreach(_i RANGE 1 ${SLOP_BENCH_PAD})
+            string(APPEND SLOP_PAD_BODY " SLOP_NOP;")
+        endforeach()
+    endif()
+    file(WRITE ${CMAKE_BINARY_DIR}/bench_pad.cpp.in
+        "#if defined(_MSC_VER)\n#include <intrin.h>\n#define SLOP_NOP __nop()\n"
+        "#define SLOP_NOINLINE __declspec(noinline)\n#else\n"
+        "#define SLOP_NOP __asm__ volatile(\"nop\")\n"
+        "#define SLOP_NOINLINE __attribute__((noinline))\n#endif\n"
+        "extern \"C\" SLOP_NOINLINE void slop_bench_pad() {${SLOP_PAD_BODY} }\n")
+    configure_file(${CMAKE_BINARY_DIR}/bench_pad.cpp.in ${CMAKE_BINARY_DIR}/bench_pad.cpp COPYONLY)
+    add_executable(grid_bench ${CMAKE_BINARY_DIR}/bench_pad.cpp tests/bench_grid.cpp
+                   ${ENGINE_SOURCES} ${RENDER_SOURCES} ${SCENE_PROP_SOURCES})
     target_include_directories(grid_bench PRIVATE src tests)
 
     # Headless frame preview. Not an add_test() either, and for a stronger
