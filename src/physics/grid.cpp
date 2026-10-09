@@ -34,6 +34,21 @@ namespace {
         }
         return flow;
     }
+
+    // Which materials appear as the target of any row in REACTIONS. try_react's two
+    // loops only ever act on rows whose target is the cell's own type, so for a
+    // material no row names they are a full walk of the table that can do nothing
+    // -- and Sand, the commonest moving material, is one. Built from the table at
+    // compile time so a new row is picked up without anyone remembering this.
+    struct ReactionTargets {
+        bool is_target[static_cast<int>(ElementType::Count)] = {};
+    };
+    constexpr ReactionTargets make_reaction_targets() {
+        ReactionTargets t{};
+        for (const Reaction& r : REACTIONS) t.is_target[static_cast<int>(r.target)] = true;
+        return t;
+    }
+    constexpr ReactionTargets REACTION_TARGETS = make_reaction_targets();
 }
 
 Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height), world_seed(seed) {
@@ -139,12 +154,44 @@ void Grid::reset(uint64_t seed) {
 // neighbourhood, and because the neighbourhood is resolved per cell it crosses
 // chunk borders correctly -- otherwise the same bug reappears as seams along
 // the invisible chunk lines.
+//
+// The 3x3 is applied a chunk at a time rather than a cell at a time, and the
+// two are the same thing: a chunk's rect is a bounding box, so including nine
+// cells one by one leaves it covering exactly the part of the 3x3 that falls
+// inside that chunk -- which is what including that part as one box does. The
+// set of cells woken is identical; only the cost changes. That cost was the
+// largest single item in the step: every swap marks both of its ends, so a
+// moving grain paid eighteen bounds checks, chunk divisions and rect updates,
+// and in `cascading` this function alone was over 60% of Grid::update.
+//
+// Almost every 3x3 lies inside one chunk -- only cells on a chunk's outer ring
+// straddle a border -- so that case gets a path of its own, and the general
+// loop below it handles the up-to-four chunks a corner cell can touch.
 void Grid::mark_dirty(int x, int y) {
-    for (int ny = y - 1; ny <= y + 1; ++ny) {
-        for (int nx = x - 1; nx <= x + 1; ++nx) {
-            if (!is_within_bounds(nx, ny)) continue;
-            const int ci = (ny / CHUNK_SIZE) * chunks_x + (nx / CHUNK_SIZE);
-            chunk_next[ci].include(nx, ny);
+    // Clip to the world first, so everything below works on cells that exist.
+    // Non-negative from here on, which is also what makes the divisions by
+    // CHUNK_SIZE plain floors.
+    const int x0 = x - 1 > 0 ? x - 1 : 0;
+    const int y0 = y - 1 > 0 ? y - 1 : 0;
+    const int x1 = x + 1 < width - 1 ? x + 1 : width - 1;
+    const int y1 = y + 1 < height - 1 ? y + 1 : height - 1;
+    if (x0 > x1 || y0 > y1) return;  // the whole 3x3 is outside the world
+
+    const int cx0 = x0 / CHUNK_SIZE, cx1 = x1 / CHUNK_SIZE;
+    const int cy0 = y0 / CHUNK_SIZE, cy1 = y1 / CHUNK_SIZE;
+
+    if (cx0 == cx1 && cy0 == cy1) {
+        chunk_next[cy0 * chunks_x + cx0].include_box(x0, y0, x1, y1);
+        return;
+    }
+
+    for (int cy = cy0; cy <= cy1; ++cy) {
+        const int by0 = std::max(y0, cy * CHUNK_SIZE);
+        const int by1 = std::min(y1, cy * CHUNK_SIZE + CHUNK_SIZE - 1);
+        for (int cx = cx0; cx <= cx1; ++cx) {
+            const int bx0 = std::max(x0, cx * CHUNK_SIZE);
+            const int bx1 = std::min(x1, cx * CHUNK_SIZE + CHUNK_SIZE - 1);
+            chunk_next[cy * chunks_x + cx].include_box(bx0, by0, bx1, by1);
         }
     }
 }
@@ -1066,12 +1113,46 @@ bool Grid::vent_fluid(int fx, int fy) {
     const int idx = get_index(fx, fy);
     const ElementType fluid = cells[idx].type;
 
+    // The box, clipped to the world once rather than tested a cell at a time. This
+    // scan was the largest cost in `churning` -- a grain sinking through bulk water
+    // looks at every cell of the box and almost never finds one free -- so the loops
+    // below walk rows directly instead of paying a bounds check and an index
+    // multiply per cell.
+    const int r = vent_radius;
+    const int x_lo = fx - r > 0 ? fx - r : 0;
+    const int x_hi = fx + r < width - 1 ? fx + r : width - 1;
+    const int y_lo = fy - r > 0 ? fy - r : 0;
+    const int y_hi = fy + r < height - 1 ? fy + r : height - 1;
+
+    // Every destination is an Empty cell inside the box, so a box with none in it
+    // has no answer whatever order it is read in. Checked first, in plain memory
+    // order, because that is the common case and it lets the direction hash below
+    // be skipped along with the ordered scan. The result is unchanged: the ordered
+    // scan visits exactly these cells, only in a different order.
+    bool any_empty = false;
+    for (int ny = y_lo; ny <= y_hi && !any_empty; ++ny) {
+        const Element* row = &cells[static_cast<size_t>(ny) * width];
+        for (int nx = x_lo; nx <= x_hi; ++nx) {
+            if (row[nx].type == ElementType::Empty) {
+                any_empty = true;
+                break;
+            }
+        }
+    }
+    if (!any_empty) return false;
+
     // The destination must be this fluid's own free surface -- an Empty cell with
     // more of the same fluid directly beneath it -- and not merely any Empty within
     // reach. Any-Empty reproduces the defect this was written to fix: the nearest
     // empty cell to a grain entering the water is very often the air just above the
     // sand pile, so the water is deposited back on top of the pile.
     const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::FluidDirection) ? -1 : 1;
+
+    // The same clip expressed as offsets, in the mirrored frame: nx = fx + ox * dir,
+    // and ox still runs low to high, so ties break in exactly the order they did
+    // when every cell of the full box was visited and the out-of-world ones skipped.
+    const int ox_lo = dir > 0 ? x_lo - fx : fx - x_hi;
+    const int ox_hi = dir > 0 ? x_hi - fx : fx - x_lo;
 
     // Two kinds of destination. Sending the fluid to its own surface fixes the
     // pour, and then the defect returns once the sand pile has grown into a cone
@@ -1087,18 +1168,21 @@ bool Grid::vent_fluid(int fx, int fy) {
     int drain_x = -1, drain_y = -1, drain_score = 0;
 
     int best_x = -1, best_y = -1, best_score = 0;
-    for (int oy = -vent_radius; oy <= vent_radius; ++oy) {
-        for (int ox = -vent_radius; ox <= vent_radius; ++ox) {
+    for (int ny = y_lo; ny <= y_hi; ++ny) {
+        const int oy = ny - fy;
+        const Element* row = &cells[static_cast<size_t>(ny) * width];
+        // The bottom row of the world stands on the border, which reads as Wall --
+        // the same answer get_element gives for the cell past the edge.
+        const Element* below = ny + 1 < height ? row + width : nullptr;
+        for (int ox = ox_lo; ox <= ox_hi; ++ox) {
             // `dir` mirrors the scan rather than steering it, so the choice between
             // two equally good cells either side of a grain is not always the left
             // one. Same trick and same stream as the fluid direction pick: a fixed
             // order here would comb every pour in one direction.
             const int nx = fx + ox * dir;
-            const int ny = fy + oy;
-            if (!is_within_bounds(nx, ny)) continue;
-            if (cells[get_index(nx, ny)].type != ElementType::Empty) continue;
+            if (row[nx].type != ElementType::Empty) continue;
 
-            const ElementType under = get_element(nx, ny + 1).type;
+            const ElementType under = below ? below[nx].type : ElementType::Wall;
             const int score = std::abs(ox) + std::abs(oy);
 
             if (under == fluid) {
@@ -1246,6 +1330,9 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
 bool Grid::try_react(int x, int y) {
     const int idx = get_index(x, y);
     Element& cell = cells[idx];
+
+    // Exactly what both loops below would conclude, without walking them.
+    if (!REACTION_TARGETS.is_target[static_cast<int>(cell.type)]) return false;
 
     // This spot's own ignition point. Both loops below go through it, and that is
     // load-bearing rather than tidy: the first decides whether a cell is allowed to

@@ -40,7 +40,9 @@ Leave these as they are; each has a rationale comment at the definition.
   Splitting it grows every cell.
 - `updated_tag` is a frame tag, not a bool, so there's no per-step reset pass.
 - `mark_dirty` wakes the full 3×3 per cell across chunk borders. Narrowing it
-  brings back floating piles and chunk seams.
+  brings back floating piles and chunk seams. It applies the 3×3 as one box per
+  chunk it touches rather than nine cell includes — the same cells, and the
+  cheap form matters: the per-cell version was 63% of `cascading`.
 - `fx::trunc` truncates toward zero and isn't `>>`; flooring drifts left-moving
   bodies.
 - `is_grounded` compares `piece_tag`, not material, so cracks survive movement.
