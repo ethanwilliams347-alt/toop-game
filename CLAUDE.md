@@ -8,10 +8,12 @@ fetched and built statically by `FetchContent`; don't vendor or system-install i
 These hold across the whole tree. Each exists for a reason given alongside it; if a
 task seems to require breaking one, stop and say so rather than working around it.
 
-- **`src/physics/` has no SDL** — no header, type, or include. The test targets
-  don't link `SDL2-static`, so they don't get its include dirs; that is what keeps
-  physics headless-testable. Moving a file into `ENGINE_SOURCES` to fix a build
-  means the boundary has been crossed.
+- **`src/physics/` has no SDL** — no header, type, or include. `slop_engine` (the
+  OBJECT library built from `ENGINE_SOURCES`) links nothing, so it never gets
+  SDL's include dirs; that is what keeps physics headless-testable, and
+  `sdl_boundary_test` fails if that ever changes. Linking SDL into `slop_engine`,
+  or moving a file into `ENGINE_SOURCES` to fix a build, means the boundary has
+  been crossed.
 - **`src/physics/` has no float.** Replay determinism needs every simulation number
   to be reproducible across compilers and `/fp` modes. Use `fx` (signed 16.16,
   `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
