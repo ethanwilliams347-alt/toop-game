@@ -274,6 +274,11 @@ def step_ruff(files, untracked, base, check):
         return
 
     say(f'\n== {name} ==')
+    # Lint first, the order ruff's own docs give: a --fix can rewrite a line
+    # (an import sort, say), and formatting afterwards is what leaves that line
+    # formatted in the same pass rather than failing the next --check.
+    lint = run([exe, 'check', *([] if check else ['--fix']), *files])
+
     # The formatter gets the same changed-lines rule clang-format does, for the
     # same reason: tools/ predates ruff.toml, and a one-line docstring fix
     # once came back as a 101-line reformat of tools/load_sprite.py. ruff takes
@@ -289,11 +294,16 @@ def step_ruff(files, untracked, base, check):
             fmt_ok &= run([exe, 'format', *check_arg, path]).returncode == 0
             continue
         for first, last in reversed(ranges):
-            # The end of a --range is a cursor position, so line `last + 1`,
-            # column 1, is what includes all of line `last`.
-            proc = run([exe, 'format', *check_arg, f'--range={first}-{last + 1}', path])
+            # The end of a --range is a cursor position, and it has to sit on
+            # line `last` itself, one past its last character. Column 1 of the
+            # next line looks equivalent and is not: it touches the statement
+            # that starts there, and ruff then reformats the whole of it -- an
+            # import changed inside a `try:` pulled in the `except` handler.
+            with open(os.path.join(REPO_ROOT, path), encoding='utf-8') as f:
+                lines = f.read().splitlines()
+            end_col = len(lines[last - 1]) + 1 if last <= len(lines) else 1
+            proc = run([exe, 'format', *check_arg, f'--range={first}:1-{last}:{end_col}', path])
             fmt_ok &= proc.returncode == 0
-    lint = run([exe, 'check', *([] if check else ['--fix']), *files])
     ok = fmt_ok and lint.returncode == 0
     results.append((name, ok, f'{len(files)} file(s) ' + ('clean' if ok else 'have findings')))
 
