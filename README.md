@@ -20,8 +20,10 @@ automata) built from scratch in C++ and SDL2.
    ```
 4. Compile the executable:
    ```bash
-   cmake --build build --config Release
+   cmake --build build --config Release --parallel
    ```
+   (`--parallel` builds several targets at once; without it the Visual Studio
+   generator builds them one at a time.)
 5. Run the game:
    ```bash
    .\build\Release\SlopPhysics.exe

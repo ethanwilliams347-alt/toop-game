@@ -58,8 +58,8 @@ Leave these as they are; each has a rationale comment at the definition.
 
 ```bash
 cmake -S . -B build                                   # configure (VS generator)
-cmake --build build --config Release                  # build all + stage assets
-cmake --build build --config Release --target grid_bench
+cmake --build build --config Release --parallel       # build all + stage assets
+cmake --build build --config Release --parallel --target grid_bench
 
 ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Release -R grid_test --output-on-failure
@@ -103,7 +103,7 @@ turn them into `add_test()`.
   of 46.7, and that drift, not the code, is the ±20% that used to appear between
   builds. If the line doesn't say `on`, the numbers are not comparable. With it,
   one binary repeats to 1–3% (worse with other work running, so close other
-  heavy programs and don't build in parallel). Code layout also moves timings
+  heavy programs and don't run a build while it runs). Code layout also moves timings
   with no code change: across six MSVC builds that differed only in
   `SLOP_BENCH_PAD`, the spread was churning 2.5%, light/fire 3%, cascading 7%,
   light/dark 13%. A difference smaller than that on its row is unproven until it

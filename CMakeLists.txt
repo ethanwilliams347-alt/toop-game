@@ -188,6 +188,22 @@ add_library(slop_present OBJECT ${PRESENT_SOURCES})
 target_include_directories(slop_present PUBLIC src)
 target_link_libraries(slop_present PUBLIC SDL2-static)
 
+# /MP lets cl compile a library's files side by side, which matters most for
+# slop_engine: every other target waits for it, and its ten files took seven
+# seconds one after another. Only the libraries get it, because every other
+# target here compiles one or two files and /MP has nothing to spread.
+#
+# `cmake --build --parallel` also has MSBuild build several projects at once,
+# and the two multiply. Here the product is bounded by the libraries' 24
+# files, a few seconds of a couple of compiles per hardware thread; /MP over
+# the old per-target source lists would have been 20 projects of 10 to 26
+# files each. /MP implies /FS, so the ASan build's /Zi PDBs are safe.
+if(MSVC)
+    foreach(_lib slop_engine slop_render slop_scene_props slop_frame slop_present)
+        target_compile_options(${_lib} PRIVATE /MP)
+    endforeach()
+endif()
+
 # The SDL shell: render targets, display modes, textures from asset files, the
 # cell upload. Only the game executable links it -- everything here calls SDL,
 # and every decision it used to make inline now lives behind a suite.

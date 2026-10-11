@@ -9,7 +9,7 @@ In order:
   1. clang-format on the C++ lines this branch changed (.clang-format)
   2. clang-tidy on the C++ files this branch changed (.clang-tidy)
   3. ruff format + ruff check --fix on the Python files this branch changed (ruff.toml)
-  4. cmake --build, then ctest -- every suite, golden_frame_test included
+  4. cmake --build --parallel, then ctest -- every suite, golden_frame_test included
 
 Every step runs even if an earlier one failed, so one pass shows everything, and
 the exit code is non-zero if any of them did.
@@ -284,7 +284,9 @@ def step_build_and_test(build_dir, config):
     if not os.path.isfile(os.path.join(REPO_ROOT, build_dir, 'CMakeCache.txt')):
         results.append(('build', False, f'{build_dir}/ is not configured; run cmake -S . -B build'))
         return
-    if run(['cmake', '--build', build_dir, '--config', config]).returncode != 0:
+    # --parallel because the Visual Studio generator otherwise has MSBuild build
+    # one project at a time, which left most of the machine idle.
+    if run(['cmake', '--build', build_dir, '--config', config, '--parallel']).returncode != 0:
         results.append(('build', False, 'build failed'))
         results.append(('ctest', False, 'skipped, build failed'))
         return
