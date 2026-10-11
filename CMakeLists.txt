@@ -47,11 +47,19 @@ endif()
 # Placed after SDL is fetched so only our code is instrumented. MSVC's ASan
 # rejects incremental linking and /RTC, so the asan recipe uses RelWithDebInfo
 # (no /RTC) with incremental linking off, which still has line numbers in reports.
+#
+# /STACK because ASan gives every local its own stack slot, wrapped in red zones,
+# so that it can catch a use after the local's scope has ended. An optimised
+# build lets locals in disjoint scopes share one slot instead. A Run is about
+# 108 KB, and run_test's main() holds fourteen of them in separate blocks: three
+# at once at most in Release, all fourteen side by side under ASan -- over 1.5 MB
+# against Windows' default 1 MB stack, a stack overflow before the first check.
+# 8 MB is the default stack on Linux, which is where ASan's habits come from.
 option(SLOP_ASAN "Build with AddressSanitizer" OFF)
 if(SLOP_ASAN)
     if(MSVC)
         add_compile_options(/fsanitize=address /Zi)
-        add_link_options(/INCREMENTAL:NO /DEBUG)
+        add_link_options(/INCREMENTAL:NO /DEBUG /STACK:8388608)
     else()
         add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
         add_link_options(-fsanitize=address)
