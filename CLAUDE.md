@@ -58,8 +58,8 @@ Leave these as they are; each has a rationale comment at the definition.
 
 ```bash
 cmake -S . -B build                                   # configure (VS generator)
-cmake --build build --config Release --parallel       # build all + stage assets
-cmake --build build --config Release --parallel --target grid_bench
+cmake --build build --config Release                  # build all + stage assets (parallel: Directory.Build.rsp)
+cmake --build build --config Release --target grid_bench
 
 ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Release -R grid_test --output-on-failure

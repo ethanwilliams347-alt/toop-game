@@ -313,8 +313,9 @@ def step_build_and_test(build_dir, config):
     if not os.path.isfile(os.path.join(REPO_ROOT, build_dir, 'CMakeCache.txt')):
         results.append(('build', False, f'{build_dir}/ is not configured; run cmake -S . -B build'))
         return
-    # --parallel because the Visual Studio generator otherwise has MSBuild build
-    # one project at a time, which left most of the machine idle.
+    # --parallel for a build tree from another generator. The Visual Studio one
+    # already gets it from Directory.Build.rsp; without either, MSBuild builds
+    # one project at a time and leaves most of the machine idle.
     if run(['cmake', '--build', build_dir, '--config', config, '--parallel']).returncode != 0:
         results.append(('build', False, 'build failed'))
         results.append(('ctest', False, 'skipped, build failed'))

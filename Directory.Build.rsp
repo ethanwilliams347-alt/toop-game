@@ -1,0 +1,9 @@
+# MSBuild reads this file for every build under this directory, including the
+# solution CMake generates in build/ -- which is what makes a plain
+# `cmake --build build --config Release` build projects in parallel. Without
+# it the Visual Studio generator runs MSBuild one project at a time unless
+# --parallel is passed, and a grid.h edit rebuilt in 34 s instead of 8.
+#
+# -m with no count is one node per hardware thread. It multiplies with the /MP
+# on the OBJECT libraries, bounded by their 24 files (see CMakeLists.txt).
+-m

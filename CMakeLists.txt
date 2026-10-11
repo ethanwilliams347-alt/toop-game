@@ -201,8 +201,9 @@ target_link_libraries(slop_present PUBLIC SDL2-static)
 # seconds one after another. Only the libraries get it, because every other
 # target here compiles one or two files and /MP has nothing to spread.
 #
-# `cmake --build --parallel` also has MSBuild build several projects at once,
-# and the two multiply. Here the product is bounded by the libraries' 24
+# MSBuild also builds several projects at once -- Directory.Build.rsp in the
+# repo root passes it -m, as `cmake --build --parallel` would -- and the two
+# multiply. Here the product is bounded by the libraries' 24
 # files, a few seconds of a couple of compiles per hardware thread; /MP over
 # the old per-target source lists would have been 20 projects of 10 to 26
 # files each. /MP implies /FS, so the ASan build's /Zi PDBs are safe.
@@ -398,8 +399,9 @@ if(BUILD_TESTING)
     target_include_directories(camera_test PRIVATE src tests)
     add_test(NAME camera_test COMMAND camera_test)
 
-    # The golden frame, and the one test target that links SDL: it composes a
-    # real frame with the real draw calls, into a software renderer over an
+    # The golden frame, and the one test target that draws with SDL
+    # (present_test, below, links it only for headers): it composes a real
+    # frame with the real draw calls, into a software renderer over an
     # SDL_Surface. It needs no display and no video subsystem, so it still runs
     # on a build machine -- but every other suite here is headless by
     # construction and this one is not.
