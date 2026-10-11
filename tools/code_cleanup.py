@@ -8,7 +8,8 @@
 In order:
   1. clang-format on the C++ lines this branch changed (.clang-format)
   2. clang-tidy on the C++ files this branch changed (.clang-tidy)
-  3. ruff format + ruff check --fix on the Python files this branch changed (ruff.toml)
+  3. ruff format on the Python lines this branch changed, then ruff check --fix on
+     the Python files it changed (ruff.toml)
   4. cmake --build --parallel, then ctest -- every suite, golden_frame_test included
 
 Every step runs even if an earlier one failed, so one pass shows everything, and
@@ -262,8 +263,8 @@ def step_clang_tidy(files, build_dir, jobs):
     )
 
 
-def step_ruff(files, check):
-    name = 'ruff (changed files)'
+def step_ruff(files, untracked, base, check):
+    name = 'ruff (changed lines, changed files)'
     if not files:
         results.append((name, True, 'no Python changes'))
         return
@@ -273,9 +274,27 @@ def step_ruff(files, check):
         return
 
     say(f'\n== {name} ==')
-    fmt = run([exe, 'format', *(['--check'] if check else []), *files])
+    # The formatter gets the same changed-lines rule clang-format does, for the
+    # same reason: tools/ predates ruff.toml, and a one-line docstring fix
+    # once came back as a 101-line reformat of tools/load_sprite.py. ruff takes
+    # one --range per run, so each changed range is a run of its own, last
+    # first: formatting a range can change how many lines it spans, which moves
+    # every range below it but none above.
+    fmt_ok = True
+    check_arg = ['--check'] if check else []
+    for path in files:
+        # An untracked file is new in its entirety, so all of it is "changed".
+        ranges = None if path in untracked else changed_line_ranges(base, path)
+        if ranges is None:
+            fmt_ok &= run([exe, 'format', *check_arg, path]).returncode == 0
+            continue
+        for first, last in reversed(ranges):
+            # The end of a --range is a cursor position, so line `last + 1`,
+            # column 1, is what includes all of line `last`.
+            proc = run([exe, 'format', *check_arg, f'--range={first}-{last + 1}', path])
+            fmt_ok &= proc.returncode == 0
     lint = run([exe, 'check', *([] if check else ['--fix']), *files])
-    ok = fmt.returncode == 0 and lint.returncode == 0
+    ok = fmt_ok and lint.returncode == 0
     results.append((name, ok, f'{len(files)} file(s) ' + ('clean' if ok else 'have findings')))
 
 
@@ -327,7 +346,7 @@ def main():
     # Format before linting, so tidy reads the code as it will be committed.
     step_clang_format(cpp, untracked, base, args.check)
     step_clang_tidy(cpp, args.build_dir, max(1, args.jobs))
-    step_ruff(py, args.check)
+    step_ruff(py, untracked, base, args.check)
     if not args.no_tests:
         step_build_and_test(args.build_dir, args.config)
 

@@ -137,7 +137,7 @@ def check_against_animation_table(w, h):
     against? Reported as a hard failure rather than a warning, because binding a
     mismatched sheet is a change that looks like it worked."""
     try:
-        from player_sheet import SHEET_W, SHEET_H, SHEET_COLS, SHEET_ROWS, FRAME_W, FRAME_H
+        from player_sheet import FRAME_H, FRAME_W, SHEET_COLS, SHEET_H, SHEET_ROWS, SHEET_W
     except Exception as exc:
         print(f'WARN  could not read the animation table ({exc}); binding without '
               'checking the grid.')
