@@ -301,7 +301,7 @@ private:
     // Measured one radius per run of a single binary, the cost is dead linear in
     // the area of the search box -- about 0.063 ms per extra cell scanned at every
     // radius, with no knee. The value is therefore chosen on quality: the gap
-    // between r=3 and r=4 in water_probe is a transient that drains on brush
+    // between r=3 and r=4 in fluid_probe is a transient that drains on brush
     // release, which is not worth 27% more scan.
     //
     // Runtime rather than constexpr so the sweep can be re-run without a rebuild;

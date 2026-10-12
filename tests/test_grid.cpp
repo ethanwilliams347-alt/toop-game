@@ -1,6 +1,7 @@
 #include "physics/grid.h"
 #include "physics/random.h"
 #include "test_util.h"
+#include "liquid.h"
 #include "world_match.h"
 #include <cstdint>
 #include <cstdlib>
@@ -131,7 +132,8 @@ int main() {
             widest = row > widest ? row : widest;
         }
         check("water spreads horizontally", widest > 5, "widest row=" + std::to_string(widest));
-        check("water is conserved", count_of(g, ElementType::Water) == 20);
+        check("water is conserved",
+              liquid::total(g, ElementType::Water) == 20 * liquid::UNITS_PER_CELL);
     }
 
     // --- a U-tube equalizes ---
@@ -166,7 +168,7 @@ int main() {
         // All the water on the left: the tunnel plus fourteen cells of column.
         for (int x = 10; x <= 20; ++x) g.set_element(x, 38, ElementType::Water);
         for (int y = 24; y <= 37; ++y) g.set_element(10, y, ElementType::Water);
-        const int placed = count_of(g, ElementType::Water);
+        const int64_t placed = liquid::total(g, ElementType::Water);
 
         step(g, 200);
 
@@ -180,9 +182,9 @@ int main() {
 
         check("a U-tube equalizes", left < 40 && right < 40 && std::abs(left - right) <= 1,
               "left surface row=" + std::to_string(left) + " right=" + std::to_string(right));
-        check("a U-tube conserves water", count_of(g, ElementType::Water) == placed,
+        check("a U-tube conserves water", liquid::total(g, ElementType::Water) == placed,
               "placed=" + std::to_string(placed) +
-              " after=" + std::to_string(count_of(g, ElementType::Water)));
+                  " after=" + std::to_string(liquid::total(g, ElementType::Water)));
         // Level is only half of it: a rule that equalises and then keeps trading
         // cells back and forth across the join is level on average and costs full
         // price forever. MIN_PRESSURE_HEAD is what this checks.
@@ -204,7 +206,7 @@ int main() {
         for (int y = 30; y < 40; ++y)
             for (int x = 0; x < 40; ++x) g.set_element(x, y, ElementType::Water);
         step(g, 200);
-        const int before = count_of(g, ElementType::Water);
+        const int64_t before = liquid::total(g, ElementType::Water);
         const int top = [&] {
             for (int y = 0; y < 40; ++y)
                 for (int x = 0; x < 40; ++x)
@@ -219,7 +221,7 @@ int main() {
 
         check("a level pool does not climb", top_after == top,
               "top=" + std::to_string(top) + " after=" + std::to_string(top_after));
-        check("a level pool still conserves water", count_of(g, ElementType::Water) == before);
+        check("a level pool still conserves water", liquid::total(g, ElementType::Water) == before);
         check("a level pool goes back to sleep", g.active_chunk_count() == 0,
               "awake=" + std::to_string(g.active_chunk_count()));
     }
@@ -245,27 +247,26 @@ int main() {
             for (int x = 0; x < 40; ++x) g.set_element(x, y, ElementType::Water);
         // The 17 cells that make this untidy.
         for (int x = 0; x < 17; ++x) g.set_element(x, 29, ElementType::Water);
-        const int before = count_of(g, ElementType::Water);
+        const int64_t before = liquid::total(g, ElementType::Water);
 
         step(g, 1500);
 
         check("a pool with a partial top row conserves water",
-              count_of(g, ElementType::Water) == before,
+              liquid::total(g, ElementType::Water) == before,
               "before=" + std::to_string(before) +
-              " after=" + std::to_string(count_of(g, ElementType::Water)));
+                  " after=" + std::to_string(liquid::total(g, ElementType::Water)));
 
         // Level to within one cell: every column is the same depth give or take the
         // single leftover row. Exactly the tolerance MIN_PRESSURE_HEAD documents --
         // what is new is that the surface is still at that tolerance rather than
         // merely level on average.
-        int min_depth = 41, max_depth = 0;
+        double min_depth = 41.0, max_depth = 0.0;
         for (int x = 0; x < 40; ++x) {
-            int d = 0;
-            for (int y = 0; y < 40; ++y) if (g.get_element(x, y).type == ElementType::Water) d++;
+            const double d = liquid::depth(g, x, ElementType::Water);
             min_depth = d < min_depth ? d : min_depth;
             max_depth = d > max_depth ? d : max_depth;
         }
-        check("a partial top row does not leave a permanent heap", max_depth - min_depth <= 1,
+        check("a partial top row does not leave a permanent heap", max_depth - min_depth <= 1.0,
               "min=" + std::to_string(min_depth) + " max=" + std::to_string(max_depth));
 
         // Asserted after a further run so it is "asleep and staying asleep" rather
@@ -273,10 +274,10 @@ int main() {
         check("a pool with a partial top row goes to sleep", g.active_chunk_count() == 0,
               "awake=" + std::to_string(g.active_chunk_count()));
 
-        const int settled = count_of(g, ElementType::Water);
+        const int64_t settled = liquid::total(g, ElementType::Water);
         step(g, 200);
         check("and nothing moves once it is asleep",
-              g.active_chunk_count() == 0 && count_of(g, ElementType::Water) == settled);
+              g.active_chunk_count() == 0 && liquid::total(g, ElementType::Water) == settled);
     }
 
     // --- sand sinks through water (denser) ---
@@ -287,7 +288,7 @@ int main() {
         for (int x = 8; x < 12; ++x) g.set_element(x, 5, ElementType::Sand);
         step(g, 400);
         const double sand = mean_row(g, ElementType::Sand);
-        const double water = mean_row(g, ElementType::Water);
+        const double water = liquid::mean_row(g, ElementType::Water);
         check("sand sinks below water", sand > water,
               "sand row=" + std::to_string(sand) + " water row=" + std::to_string(water));
     }
@@ -299,8 +300,8 @@ int main() {
             for (int x = 0; x < 20; ++x) g.set_element(x, y, ElementType::Oil);
         for (int x = 0; x < 20; ++x) g.set_element(x, 5, ElementType::Water);
         step(g, 600);
-        const double oil = mean_row(g, ElementType::Oil);
-        const double water = mean_row(g, ElementType::Water);
+        const double oil = liquid::mean_row(g, ElementType::Oil);
+        const double water = liquid::mean_row(g, ElementType::Water);
         check("oil floats above water", oil < water,
               "oil row=" + std::to_string(oil) + " water row=" + std::to_string(water));
     }
@@ -326,8 +327,9 @@ int main() {
         for (int x = 0; x < 30; ++x)
             for (int y = 0; y < 3; ++y) g.set_element(x, y, ElementType::Water);
         step(g, 400);
-        check("no material leaks out of bounds", count_of(g, ElementType::Water) == 90,
-              "count=" + std::to_string(count_of(g, ElementType::Water)));
+        check("no material leaks out of bounds",
+              liquid::total(g, ElementType::Water) == 90 * liquid::UNITS_PER_CELL,
+              "count=" + std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     // --- chunked updates: a resting world sleeps, and wakes when disturbed ---
@@ -391,8 +393,9 @@ int main() {
                 if (g.get_element(x, y).type == ElementType::Water) crossed = true;
 
         check("water spreads past a chunk border", crossed);
-        check("water is conserved across a chunk border", count_of(g, ElementType::Water) == 30,
-              "count=" + std::to_string(count_of(g, ElementType::Water)));
+        check("water is conserved across a chunk border",
+              liquid::total(g, ElementType::Water) == 30 * liquid::UNITS_PER_CELL,
+              "count=" + std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     // --- reactions: fire ignites adjacent wood and oil, by heat ---
@@ -829,9 +832,10 @@ int main() {
         check("steam condenses once it has cooled",
               count_of(g, ElementType::Steam) == 0,  // and matter is conserved across the change
               "steam=" + std::to_string(count_of(g, ElementType::Steam)) +
-              " water=" + std::to_string(count_of(g, ElementType::Water)));
-        check("condensing steam conserves matter", count_of(g, ElementType::Water) == 4,
-              "water=" + std::to_string(count_of(g, ElementType::Water)));
+                  " water=" + std::to_string(liquid::total(g, ElementType::Water)));
+        check("condensing steam conserves matter",
+              liquid::total(g, ElementType::Water) == 4 * liquid::UNITS_PER_CELL,
+              "water=" + std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     // --- steam: the clock is the steam's own, not the temperature's ---
@@ -856,7 +860,7 @@ int main() {
         check("a pocket against a stone ceiling is intact after 30 steps",
               count_of(g, ElementType::Steam) == 4,
               "steam=" + std::to_string(count_of(g, ElementType::Steam)) +
-              " water=" + std::to_string(count_of(g, ElementType::Water)));
+                  " water=" + std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     // --- steam: it collects against the ceiling, then drips ---
@@ -880,14 +884,14 @@ int main() {
                 if (x == 0 || y == 0 || x == 19 || y == 19) g.set_element(x, y, ElementType::Wall);
         for (int y = 2; y < 6; ++y)
             for (int x = 6; x < 14; ++x) g.set_element(x, y, ElementType::Steam);
-        const int placed = 32;
+        const int64_t placed = 32 * liquid::UNITS_PER_CELL;
 
         int dripped = 0;
         int first_water = -1;
         int last_steam = -1;
         for (int i = 0; i < 900; ++i) {
             step(g, 1);
-            if (first_water < 0 && count_of(g, ElementType::Water) > 0) first_water = i;
+            if (first_water < 0 && liquid::total(g, ElementType::Water) > 0) first_water = i;
             if (count_of(g, ElementType::Steam) > 0) last_steam = i;
             for (int x = 1; x < 19; ++x)
                 if (g.get_element(x, 18).type == ElementType::Water) ++dripped;
@@ -910,9 +914,8 @@ int main() {
         check("the pocket condenses away in the end",
               count_of(g, ElementType::Steam) == 0,
               "steam=" + std::to_string(count_of(g, ElementType::Steam)));
-        check("condensation conserves matter",
-              count_of(g, ElementType::Water) == placed,
-              "water=" + std::to_string(count_of(g, ElementType::Water)));
+        check("condensation conserves matter", liquid::total(g, ElementType::Water) == placed,
+              "water=" + std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     // --- heat: steam is not a fire-starter ---
@@ -1260,7 +1263,7 @@ int main() {
         // build_mixed drops a sand slab into a water band, which is exactly the
         // powder-into-fluid contact vent_fluid exists for. The assertion is
         // divergence, not a direction: which world ends up tidier is a quality
-        // question water_probe answers, and this one only has to prove the radius
+        // question fluid_probe answers, and this one only has to prove the radius
         // reaches the physics.
         Grid vented(80, 60, 9090);
         build_mixed(vented);
@@ -1493,7 +1496,7 @@ int main() {
 
     // The last of the water elevator, as a property rather than a rate.
     //
-    // water_probe's residue line is a handful of water cells left standing one row
+    // fluid_probe's residue line is a handful of water cells left standing one row
     // proud of the pool once the pour stops. What it is is vent_fluid's
     // straight-swap fallback: when no surface and no downhill drain is within
     // vent_radius, step_powder still trades the grain with the fluid and the fluid
@@ -1515,9 +1518,9 @@ int main() {
         for (int y = SURFACE_Y; y < FLOOR_Y; ++y)
             for (int x = 10; x < W - 10; ++x) g.set_element(x, y, ElementType::Water);
 
-        const int start_water = count_of(g, ElementType::Water);
+        const int64_t start_water = liquid::total(g, ElementType::Water);
 
-        // A stationary brush well above the water, as in water_probe. The cursor is
+        // A stationary brush well above the water, as in fluid_probe. The cursor is
         // the highest sand in the world, so nothing puts water above the pool
         // except a lift.
         for (int s = 0; s < 500; ++s) {
@@ -1567,9 +1570,9 @@ int main() {
         // alone, water invented does not. If this one ever goes red the assertion
         // above is measuring something else.
         check("pouring sand into water conserves the water",
-              count_of(g, ElementType::Water) == start_water,
+              liquid::total(g, ElementType::Water) == start_water,
               std::to_string(start_water) + " -> " +
-                  std::to_string(count_of(g, ElementType::Water)));
+                  std::to_string(liquid::total(g, ElementType::Water)));
     }
 
     return report();

@@ -8,6 +8,7 @@
 #include "game/run.h"
 #include "game/input_log.h"
 #include "test_util.h"
+#include "liquid.h"
 #include "world_match.h"
 #include <algorithm>
 #include <cstdio>
@@ -147,7 +148,7 @@ int main() {
         for (int y = 30; y < 50; ++y)
             for (int x = 5; x < 55; ++x) run.grid.set_element(x, y, ElementType::Water);
 
-        const int before = count_of(run.grid, ElementType::Water);
+        const int64_t before = liquid::total(run.grid, ElementType::Water);
 
         Input paint;
         paint.brush_active = true;
@@ -162,7 +163,7 @@ int main() {
             run.step(paint);
         }
 
-        const int after = count_of(run.grid, ElementType::Water);
+        const int64_t after = liquid::total(run.grid, ElementType::Water);
         check("dragging a brush through water does not destroy it",
               after == before,
               std::to_string(before) + " cells before, " + std::to_string(after) + " after");
@@ -179,7 +180,7 @@ int main() {
         for (int y = 30; y < 50; ++y)
             for (int x = 5; x < 55; ++x) run.grid.set_element(x, y, ElementType::Water);
 
-        const int before = count_of(run.grid, ElementType::Water);
+        const int64_t before = liquid::total(run.grid, ElementType::Water);
 
         Input paint;
         paint.brush_active = true;
@@ -189,7 +190,7 @@ int main() {
         paint.cursor_y = 40;
         run.step(paint);
 
-        const int after = count_of(run.grid, ElementType::Water);
+        const int64_t after = liquid::total(run.grid, ElementType::Water);
         check("a Wall disc dropped into water lifts the water rather than sealing it in",
               after == before,
               std::to_string(before) + " cells before, " + std::to_string(after) + " after");
