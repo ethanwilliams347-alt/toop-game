@@ -2,7 +2,15 @@
 //
 //     build/Release/preview_backdrop bg_tarn out            four stills
 //     build/Release/preview_backdrop bg_tarn out 120        a 120-frame flight
+//     build/Release/preview_backdrop bg_tarn_wide out pan=240 3440x1440
+//                                                           a walk end to end
 //     python tools/rawpng.py out/still_0.raw still_0.png 1920 1080
+//
+// The window defaults to 1920x1080; a last argument WxH picks another (the
+// sizes in game/display.h are the ones worth looking at). `pan=N` is N frames
+// of a walk at standing height from the world's left edge to its right one,
+// which is the shot a level many screens wide needs: a flight shows depth, a
+// pan shows whether the long art ever repeats or runs out.
 //
 // Not an add_test(), for preview_light's reason: it asserts nothing, and what it
 // produces is for a person to judge. Parallax is a feel -- whether the lake
@@ -36,11 +44,12 @@
 
 namespace {
 
-constexpr int WINDOW_W = 1920;
-constexpr int WINDOW_H = 1080;
+// Set once in main from the optional WxH argument, before anything reads them.
+int WINDOW_W = 1920;
+int WINDOW_H = 1080;
 constexpr int SCALE = 10;
-constexpr int PADDED_W = WINDOW_W / SCALE + 1;
-constexpr int PADDED_H = WINDOW_H / SCALE + 1;
+int PADDED_W = WINDOW_W / SCALE + 1;
+int PADDED_H = WINDOW_H / SCALE + 1;
 constexpr int BODY_H = 26;  // Player::HEIGHT, stated here so this links no physics
 
 SDL_Texture* load(SDL_Renderer* r, const std::string& path, bool key) {
@@ -79,8 +88,20 @@ bool write_raw(SDL_Surface* surface, const std::string& path) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: preview_backdrop <scene> <out_dir> [flight_frames]\n");
+        std::fprintf(stderr,
+                     "usage: preview_backdrop <scene> <out_dir> [flight_frames | pan=N] [WxH]\n");
         return 2;
+    }
+    if (argc > 4) {
+        int w = 0, h = 0;
+        if (std::sscanf(argv[4], "%dx%d", &w, &h) != 2 || w < SCALE || h < SCALE) {
+            std::fprintf(stderr, "window '%s' is not WxH\n", argv[4]);
+            return 2;
+        }
+        WINDOW_W = w;
+        WINDOW_H = h;
+        PADDED_W = WINDOW_W / SCALE + 1;
+        PADDED_H = WINDOW_H / SCALE + 1;
     }
     std::string err;
     const std::vector<scene_list::SceneDef> scenes =
@@ -100,7 +121,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string out = argv[2];
-    const int flight = argc > 3 ? std::atoi(argv[3]) : 0;
+    const bool pan = argc > 3 && std::string(argv[3]).compare(0, 4, "pan=") == 0;
+    const int flight = argc > 3 ? std::atoi(argv[3] + (pan ? 4 : 0)) : 0;
 
     SDL_Surface* surface =
         SDL_CreateRGBSurfaceWithFormat(0, WINDOW_W, WINDOW_H, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -115,7 +137,7 @@ int main(int argc, char** argv) {
         frame::ParallaxLayer l;
         l.texture = load(renderer, set.dir + sp.file, !sp.opaque);
         if (!l.texture) return 1;
-        l.w = set.native_w * SCALE;
+        l.w = backdrop_set::width_of(set, sp) * SCALE;
         l.h = set.native_h * SCALE;
         l.tex_h = set.native_h;
         l.parallax_x = backdrop_set::factor_of(set, sp);
@@ -188,7 +210,18 @@ int main(int argc, char** argv) {
     };
 
     const float max_x = static_cast<float>(world_w - PADDED_W);
-    if (flight <= 0) {
+    if (pan && flight > 0) {
+        // Standing height, left edge to right edge, evenly spaced. One frame per
+        // step of the walk, and the clock running at 30 fps so the clouds and the
+        // water move the way they would.
+        for (int i = 0; i < flight; ++i) {
+            const float u =
+                flight > 1 ? static_cast<float>(i) / static_cast<float>(flight - 1) : 0.0f;
+            char name[32];
+            std::snprintf(name, sizeof(name), "pan_%03d", i);
+            if (!shoot(max_x * u, anchor_y, static_cast<float>(i) / 30.0f, name)) return 1;
+        }
+    } else if (flight <= 0) {
         // Standing at the anchor, standing at both ends of the world, and flying at
         // the ceiling -- the four frames that show what the rig is for.
         if (!shoot(anchor_x, anchor_y, 0.0f, "still_0_standing")) return 1;

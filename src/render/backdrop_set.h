@@ -78,6 +78,24 @@
 //     on_plane          placed vertically by the plane's rows (needs rig, ripple=)
 //     ripple=r0:r1      art rows [r0, r1) shimmer sideways with time
 //     drift=<cells/s>   sideways motion with no camera motion (clouds)
+//     width=<cells>     the layer is a tile this wide rather than the set's width
+//
+// --- why a layer may be narrower than its set ------------------------------------
+//
+// A layer at factor f in a world W cells wide, seen through a window V cells
+// wide, shows V + f * (W - V) columns of its art over the whole walk from one
+// end of the world to the other. Any tile at least that wide never repeats on
+// screen. For a set the size of one screen or two (bg_tarn) that is the set's
+// own width for every layer, which is why it is the default. For a long world
+// it is not: bg_tarn_wide is 2752 cells wide, and its sky (f = 0) needs 344
+// columns while its near shore (f = 0.81) needs nearly all 2752. Painting the
+// sky, the clouds and the far range 2752 wide would be four times the art --
+// and four times the bytes in assets/ -- for columns that are never on screen.
+// So a far layer states a narrower tile, it wraps at that width, and
+// backdrop_set_test checks the BMP is that wide.
+//
+// Every layer still has the set's height. The rows are the rig's rows; a layer
+// of another height would put its feet on some other row.
 namespace backdrop_set {
 
 using Band = backdrop_wrap::Band;
@@ -110,6 +128,7 @@ struct Layer {
     bool on_plane = false;
     int ripple_row0 = 0, ripple_row1 = 0;  // half-open; empty when equal
     float drift = 0.0f;
+    int width = 0;  // cells; 0 is the set's native width (see width_of)
 };
 
 struct Set {
@@ -130,6 +149,9 @@ inline float factor_of(const Set& set, const Layer& l) {
     if (l.foot_row >= 0) return depth_rig::factor_at(set.rig, static_cast<float>(l.foot_row));
     return l.has_factor ? l.factor : 0.0f;
 }
+
+// How wide the layer's art is, in cells: its own `width=` or the set's.
+inline int width_of(const Set& set, const Layer& l) { return l.width > 0 ? l.width : set.native_w; }
 
 // The layer's vertical factor. A banded layer is locked (the parser refuses
 // bands in a set with any vertical parallax; see backdrop_set.cpp), and so is a

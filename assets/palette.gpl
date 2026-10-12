@@ -85,3 +85,104 @@ Columns: 4
  42  29  20  tarn_trunk
   8  22  14  tarn_fg
 106  92  42  tarn_fg_rim
+ 46  56 112  wt_sky_0
+ 70  76 138  wt_sky_1
+110  99 162  wt_sky_2
+167 120 170  wt_sky_3
+220 142 158  wt_sky_4
+244 176 142  wt_sky_5
+250 210 154  wt_sky_6
+255 246 216  wt_sun
+255 229 170  wt_sun_ring
+252 204 150  wt_sun_ring_2
+255 198 158  wt_cloud_lit
+207 138 166  wt_cloud
+156 110 164  wt_cloud_shade
+184 128 174  wt_cloud_far
+156 136 192  wt_peak
+128 114 174  wt_peak_shade
+246 216 216  wt_snow
+200 170 206  wt_snow_shade
+255 220 180  wt_peak_rim
+108 102 160  wt_ridge
+180 142 182  wt_ridge_rim
+ 82  86 142  wt_hill
+208 148 168  wt_hill_rim
+ 58  65 118  wt_shore_far
+230 162 146  wt_shore_far_rim
+ 74  74 126  wt_cliff
+ 54  56 104  wt_cliff_shade
+216 212 240  wt_falls
+158 156 208  wt_falls_shade
+ 42  49  94  wt_islet
+242 178 140  wt_islet_rim
+ 70  76 130  wt_reflect
+242 194 148  wt_lake_gold
+210 148 164  wt_lake_rose
+142 126 178  wt_lake_violet
+ 98 102 156  wt_lake_mid
+ 70  82 134  wt_lake
+ 50  64 112  wt_lake_deep
+184 168 212  wt_shimmer
+246 200 160  wt_shimmer_warm
+255 240 196  wt_glint
+250 206 148  wt_glint_dim
+198 180 208  wt_foam
+158 118 114  wt_beach
+110  88 106  wt_beach_wet
+ 74  82  82  wt_meadow_far
+ 58  72  64  wt_meadow
+ 44  58  52  wt_meadow_near
+200 160  98  wt_grass_lit
+242 158 106  wt_flower
+246 214 138  wt_flower_2
+106  76  82  wt_dock
+194 136 106  wt_dock_lit
+ 62  48  64  wt_dock_gap
+ 46  76  90  wt_pine_mid
+ 34  56  74  wt_pine_mid_shade
+238 176 132  wt_pine_mid_rim
+214 118  66  wt_autumn
+164  78  54  wt_autumn_deep
+236 178  86  wt_autumn_gold
+122  60  52  wt_autumn_shade
+176 160 166  wt_birch
+142 126 136  wt_birch_shade
+ 58  42  50  wt_trunk
+ 52  72  72  wt_bush
+184 154 106  wt_bush_rim
+ 88  86 118  wt_rock
+ 64  62  92  wt_rock_shade
+216 164 150  wt_rock_rim
+ 30  54  64  wt_pine_near
+ 18  34  46  wt_pine_near_shade
+244 186 130  wt_pine_near_rim
+192  90  52  wt_maple_near
+140  60  44  wt_maple_near_deep
+240 162  78  wt_maple_near_lit
+ 94  62  58  wt_log
+158 102  78  wt_log_lit
+200 150 110  wt_log_end
+ 58  44  62  wt_roof
+138  86  76  wt_roof_lit
+255 216 126  wt_window
+232 150  90  wt_window_glow
+ 92  86 110  wt_stone
+200 112  72  wt_canvas
+138  70  58  wt_canvas_shade
+255 196  94  wt_fire
+255 240 176  wt_fire_core
+224 106  58  wt_ember
+180  82  58  wt_canoe
+ 20  24  38  wt_fg
+110  76  74  wt_fg_rim
+154 142  80  wt_ground_lit
+ 78  94  58  wt_ground_grass
+ 74  58  56  wt_ground_dirt
+ 48  40  46  wt_ground_deep
+200 156 118  wt_ground_sand
+174 130 104  wt_ground_sand_2
+106 102 130  wt_ground_rock
+ 80  78 106  wt_ground_rock_2
+138  94  72  wt_ground_plank
+106  70  62  wt_ground_plank_2

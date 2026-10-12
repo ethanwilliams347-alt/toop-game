@@ -1,0 +1,17 @@
+# What the bg_tarn_wide level puts in its world (format: src/scene/level_list.h).
+#
+# A walk east along the lake shore, 2752 cells: from the camp at the west end,
+# over the plank bridge, along the beach and the open tarn, past the cabin cove,
+# to the troll in the rocky narrows guarding the objective at the east end.
+# Columns only; each thing stands on whatever terrain is under it at the start.
+#
+# Ghouls are spaced a screen or more apart at 1920x1080 (193 cells), so each is
+# met on its own: the first on the bridge, which burns.
+
+player     80
+enemy      ghoul  630
+enemy      ghoul  1000
+enemy      ghoul  1560
+enemy      ghoul  1950
+enemy      troll  2330
+objective  2620
