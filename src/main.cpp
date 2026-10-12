@@ -818,6 +818,9 @@ int main(int argc, char* argv[]) {
                 // A troll at the cursor, standing on it -- point at the ground.
                 if (e.key.keysym.sym == SDLK_t && !repeat)
                     pending_command = Command::spawn(species::TROLL);
+                // A fish -- the bass -- likewise; B for bass, since F is the camera.
+                if (e.key.keysym.sym == SDLK_b && !repeat)
+                    pending_command = Command::spawn(species::FISH);
                 // Enemies' animation style: continuous turn or held key poses, for
                 // comparing the two. A command for the spawn keys' reason -- the
                 // pose is where arrows hit -- and a function key for F9's.

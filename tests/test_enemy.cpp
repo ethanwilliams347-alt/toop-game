@@ -101,8 +101,9 @@ Enemy standing_enemy(Grid& g, int x) {
 
 int main() {
     // Every Run below is on the heap, behind a `Run&` of the name a stack Run
-    // would have had. A Run is about 100 KB -- 24 enemy slots, each carrying a
-    // pixel mask sized for the troll's 52x70 frame -- and this function declares
+    // would have had. A Run is about 120 KB -- 24 enemy slots, each carrying a
+    // pixel mask sized for the largest frame, the fish's 94x84 at four bits a
+    // pixel -- and this function declares
     // a dozen of them in sibling blocks. MSVC does not reliably give sibling
     // blocks the same stack slots, so on Windows' 1 MB default stack they add up
     // and the suite died of a stack overflow before printing a line. Linux's 8 MB
@@ -988,6 +989,177 @@ int main() {
         check("snapped, every troll pose draws what is hit, within its pad", troll_sound, why);
         check("snapped, the troll still raises its club over its head", overhead);
         check("and still lands it out in front", forward_at_impact);
+    }
+
+    // ================= the fish =================
+    //
+    // The body rules with the arm named by letter rather than by place: the lure
+    // arm grows out of the top of the head, so everything the troll's arms get
+    // from the box's columns, this one gets from fish_art's letters.
+    const Species& F = species::FISH;
+    const body_art::Art& FA = *F.art;
+    // The lowest pixel of the arm: a fingertip of the dangling hand.
+    int hand_x = 0, hand_y = -1;
+    for (int y = 0; y < FA.h; ++y)
+        for (int x = 0; x < FA.w; ++x)
+            if (FA.is_arm(x, y) && y > hand_y) {
+                hand_x = x;
+                hand_y = y;
+            }
+    // On the heap, for the reason at the top of main().
+    auto fish_arena = [&](int player_x) {
+        auto run = std::make_unique<Run>(WORLD_W, WORLD_H);
+        for (int y = FLOOR_Y; y < WORLD_H; ++y)
+            for (int x = 0; x < WORLD_W; ++x) run->grid.set_element(x, y, ElementType::Wall);
+        run->player = Player(player_x, FLOOR_Y - Player::HEIGHT);
+        run->spawn_enemy(100, FLOOR_Y - F.height, F);
+        return run;
+    };
+
+    // --- a fresh fish ---
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - F.height - 4, F);
+        settle(g, e, 30);
+        check("a spawned fish is alive and whole",
+              e.is_alive() && e.pixel_count() == fish_art::PIXEL_COUNT,
+              "pixels=" + std::to_string(e.pixel_count()));
+        check("it stands on the floor", e.cell_y() + F.height == FLOOR_Y,
+              "feet=" + std::to_string(e.cell_y() + F.height));
+        check("it has its arm and its feet", e.has_arms() && e.has_feet());
+
+        // Every arm letter is the front arm, wherever it sits, and nothing is the
+        // rear arm; everything inside the box from the hips down is leg.
+        bool arm_is_front = true, legs_are_legs = true;
+        int arm_pixels = 0;
+        for (int y = 0; y < FA.h; ++y)
+            for (int x = 0; x < FA.w; ++x) {
+                if (!FA.is_body(x, y)) continue;
+                const rig::Part p = rig::part_of(FA, F.rig, x, y);
+                if (FA.is_arm(x, y)) ++arm_pixels;
+                if (FA.is_arm(x, y) != (p == rig::FrontArm) || p == rig::RearArm)
+                    arm_is_front = false;
+                const bool in_legs = y >= F.rig.hip_row && x >= FA.box_left && x < FA.box_right();
+                if (in_legs != (p == rig::RearLeg || p == rig::FrontLeg)) legs_are_legs = false;
+            }
+        check("the lettered arm is exactly the front arm", arm_is_front && arm_pixels > 100,
+              "arm=" + std::to_string(arm_pixels));
+        check("and the legs are what the box holds below the hips", legs_are_legs);
+        check("the arm's bounds hold every arm pixel",
+              FA.arm_box.x0 <= hand_x && hand_x < FA.arm_box.x1 && FA.arm_box.y1 == hand_y + 1);
+    }
+
+    // --- the lure arm comes off at the shoulder ---
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - F.height, F);
+        const int before = e.pixel_count();
+        // Two arrows' bites where the arm leaves the head: the root is wider than
+        // one bite, as the troll's arms are.
+        const int sx = fish_art::SHOULDER_X, sy = fish_art::SHOULDER_Y;
+        e.shatter(g, world_x(e, sx - 2, sy), world_y(e, sx - 2, sy), Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, sx + 2, sy), world_y(e, sx + 2, sy), Quiver::BITE_RADIUS);
+        check("two shots through the shoulder take the whole arm off",
+              e.is_alive() && !e.has_arms() && !e.has_pixel(hand_x, hand_y),
+              "arms=" + std::to_string(e.has_arms()));
+        check("as sand, grain for pixel", count_sand(g) == before - e.pixel_count(),
+              "sand=" + std::to_string(count_sand(g)) +
+                  " lost=" + std::to_string(before - e.pixel_count()));
+    }
+
+    // --- one arrow in the eye is not enough; two are ---
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - F.height, F);
+        int ex = -1, ey = -1;  // the eye's top-left 'O'
+        for (int y = 0; y < FA.h && ex < 0; ++y)
+            for (int x = 0; x < FA.w && ex < 0; ++x)
+                if (FA.at(x, y) == 'O') {
+                    ex = x;
+                    ey = y;
+                }
+        e.shatter(g, world_x(e, ex, ey), world_y(e, ex, ey), Quiver::BITE_RADIUS);
+        check("an arrow through the pupil leaves the fish standing", e.is_alive());
+        e.shatter(g, world_x(e, ex + 2, ey + 2), world_y(e, ex + 2, ey + 2), Quiver::BITE_RADIUS);
+        check("a second through what is left of the eye kills it", !e.is_alive());
+        check("and all of it comes down as sand", count_sand(g) == fish_art::PIXEL_COUNT,
+              "sand=" + std::to_string(count_sand(g)));
+    }
+
+    // --- the cast: back over the head, down in front, nothing broken ---
+    {
+        const auto run_owner = fish_arena(100 + F.width + 4);
+        Run& run = *run_owner;
+        const int walls = count_type(run.grid, ElementType::Wall);
+        bool sound = true, overhead = false, forward_at_impact = false, moved = false;
+        int wound_up_at = -1, hit_at = -1, x_at_windup = 0;
+        std::string why;
+        for (int i = 0; i < 300 && sound && hit_at < 0; ++i) {
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            sound = pose_is_sound(e, why);
+            if (wound_up_at < 0 && e.windup_left() > 0) {
+                wound_up_at = i;
+                x_at_windup = e.cell_x();
+            }
+            if (e.windup_left() > 0 && e.cell_x() != x_at_windup) moved = true;
+            // Over the head: the hand above the shoulder it hangs from.
+            if (e.windup_left() > 0 && world_y(e, hand_x, hand_y) < rest_y(e, fish_art::SHOULDER_Y))
+                overhead = true;
+            if (run.player.damage_this_step() > 0) {
+                hit_at = i;
+                const int hx = world_x(e, hand_x, hand_y);
+                const int front = e.facing_left() ? e.cell_x() : e.cell_x() + F.width;
+                forward_at_impact = e.facing_left() ? hx < front : hx > front;
+            }
+        }
+        check("a fish with you in reach winds up a cast and stands still for it",
+              wound_up_at >= 0 && !moved);
+        check("the hand goes back over its head", overhead);
+        check("the cast lands after the wind-up", hit_at - wound_up_at == F.windup_steps,
+              "wound=" + std::to_string(wound_up_at) + " hit=" + std::to_string(hit_at));
+        check("with the hand out in front of the body", forward_at_impact);
+        check("for the fish's damage", run.player.health() == Player::MAX_HEALTH - F.damage,
+              "hp=" + std::to_string(run.player.health()));
+        check("and the ground it lands on is left whole",
+              count_type(run.grid, ElementType::Wall) == walls &&
+                  count_type(run.grid, ElementType::Sand) == 0);
+        check("every fish pose through a cast draws what is hit, within its pad", sound, why);
+    }
+
+    // --- the walk ---
+    {
+        // Wandering, so it walks the whole time; then the same snapped.
+        for (const bool snapped : {false, true}) {
+            const auto run_owner = fish_arena(WORLD_W * 4);
+            Run& run = *run_owner;
+            run.enemies[0].set_snapped_poses(snapped);
+            // The front foot's toe, the bottom row's last pixel inside the box.
+            int toe = -1;
+            for (int x = FA.box_right() - 1; x >= FA.box_left && toe < 0; --x)
+                if (FA.is_foot(x, FA.h - 2)) toe = x;
+            int ahead = 0, behind = 0;
+            bool sound = true;
+            std::string why;
+            for (int i = 0; i < 300 && sound; ++i) {
+                run.step(Input{});
+                const Enemy& e = run.enemies[0];
+                sound = pose_is_sound(e, why);
+                const int rest = rest_x(e, toe);
+                const int now = world_x(e, toe, FA.h - 2);
+                const int fwd = e.facing_left() ? rest - now : now - rest;
+                if (fwd > 0) ++ahead;
+                if (fwd < 0) ++behind;
+            }
+            const std::string mode = snapped ? " (snapped)" : "";
+            check(("a walking fish's foot swings ahead and behind" + mode).c_str(),
+                  ahead > 10 && behind > 10,
+                  "ahead=" + std::to_string(ahead) + " behind=" + std::to_string(behind));
+            check(("every walking fish pose is sound" + mode).c_str(), sound, why);
+        }
     }
 
     return report();

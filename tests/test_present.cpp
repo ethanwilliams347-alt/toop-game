@@ -47,9 +47,9 @@ void test_drawn_is_hit() {
     Run run(240, 120, 3);
     build_floor(run.grid, 100);
     run.player = Player(116, 100 - Player::HEIGHT);
-    const Species* kinds[] = {&species::GHOUL, &species::TROLL, &species::GHOUL};
-    const int columns[] = {40, 170, 205};
-    for (int i = 0; i < 3; ++i) {
+    const Species* kinds[] = {&species::GHOUL, &species::TROLL, &species::GHOUL, &species::FISH};
+    const int columns[] = {40, 170, 205, 72};
+    for (int i = 0; i < 4; ++i) {
         const int y = boot::standing_y(run.grid, columns[i], *kinds[i]);
         check("present: the fixture's enemies stand",
               y >= 0 && run.spawn_enemy(columns[i], y, *kinds[i]));

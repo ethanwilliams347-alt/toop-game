@@ -73,9 +73,10 @@ void Enemy::spawn(int x, int y, const Species& k) {
     const body_art::Art& art = *kind->art;
     for (int fy = 0; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
-            pixels[fy * art.w + fx] =
-                art.is_body(fx, fy) ? static_cast<uint8_t>(1 + rig::part_of(art, kind->rig, fx, fy))
-                                    : 0;
+            set_pixel(fy * art.w + fx,
+                      art.is_body(fx, fy)
+                          ? static_cast<uint8_t>(1 + rig::part_of(art, kind->rig, fx, fy))
+                          : 0);
     remaining = kind->pixel_count;
     // Every animation clock is at zero, so this is the rest pose: every pixel
     // exactly where the art has it.
@@ -101,8 +102,8 @@ int Enemy::world_column(int frame_x) const {
 void Enemy::world_of(int x, int y, int& wx, int& wy) const {
     const body_art::Art& art = *kind->art;
     const int index = y * art.w + x;
-    const rig::Part part = pixels[index] ? static_cast<rig::Part>(pixels[index] - 1)
-                                         : rig::part_of(art, kind->rig, x, y);
+    const rig::Part part = pixel(index) ? static_cast<rig::Part>(pixel(index) - 1)
+                                        : rig::part_of(art, kind->rig, x, y);
     const rig::Point p = pose.forward(part, x, y);
     wx = world_column(rig::nearest(p.x));
     wy = body.y - kind->offset_y() + rig::nearest(p.y);
@@ -123,7 +124,7 @@ int Enemy::posed_pixel(int px, int py) const {
         const rig::Box home = rig::rest_box(art, r, part);
         if (x < home.x0 || x >= home.x1 || y < home.y0 || y >= home.y1) continue;
         const int index = y * art.w + x;
-        if (pixels[index] == 1 + part) return index;
+        if (pixel(index) == 1 + part) return index;
     }
     return -1;
 }
@@ -140,7 +141,7 @@ bool Enemy::has_arms() const {
     const body_art::Art& art = *kind->art;
     for (int fy = art.arm_top; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
-            if (pixels[fy * art.w + fx] && art.is_arm(fx, fy)) return true;
+            if (pixel(fy * art.w + fx) && art.is_arm(fx, fy)) return true;
     return false;
 }
 
@@ -148,13 +149,13 @@ bool Enemy::has_feet() const {
     const body_art::Art& art = *kind->art;
     for (int fy = art.h - art.foot_rows; fy < art.h; ++fy)
         for (int fx = 0; fx < art.w; ++fx)
-            if (pixels[fy * art.w + fx] && art.is_foot(fx, fy)) return true;
+            if (pixel(fy * art.w + fx) && art.is_foot(fx, fy)) return true;
     return false;
 }
 
 void Enemy::crumble(Grid& grid, int index) {
-    if (!pixels[index]) return;
-    pixels[index] = 0;
+    if (!pixel(index)) return;
+    set_pixel(index, 0);
     --remaining;
 
     const int fx = index % kind->frame_w();
@@ -218,7 +219,7 @@ void Enemy::settle_after_loss(Grid& grid) {
     std::array<int16_t, MAX_FRAME_PIXELS> queue{};
     int head = 0, tail = 0;
     for (int i = 0; i < N; ++i) {
-        if (pixels[i] && art.is_heart(i % W, i / W)) {
+        if (pixel(i) && art.is_heart(i % W, i / W)) {
             seen[i] = 1;
             queue[tail++] = static_cast<int16_t>(i);
         }
@@ -231,19 +232,19 @@ void Enemy::settle_after_loss(Grid& grid) {
                 const int nx = x + dx, ny = y + dy;
                 if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
                 const int n = ny * W + nx;
-                if (seen[n] || !pixels[n]) continue;
+                if (seen[n] || !pixel(n)) continue;
                 seen[n] = 1;
                 queue[tail++] = static_cast<int16_t>(n);
             }
         }
     }
     for (int i = 0; i < N; ++i)
-        if (pixels[i] && !seen[i]) crumble(grid, i);
+        if (pixel(i) && !seen[i]) crumble(grid, i);
 
     // --- is it still alive ---
     bool head_left = false, heart_left = false;
     for (int i = 0; i < N; ++i) {
-        if (!pixels[i]) continue;
+        if (!pixel(i)) continue;
         const int x = i % W, y = i / W;
         head_left = head_left || art.is_head(x, y);
         heart_left = heart_left || art.is_heart(x, y);
@@ -263,7 +264,7 @@ int Enemy::shatter(Grid& grid, int wx, int wy, int radius) {
     for (int fy = 0; fy < kind->frame_h(); ++fy) {
         for (int fx = 0; fx < frame_w; ++fx) {
             const int i = fy * frame_w + fx;
-            if (!pixels[i]) continue;
+            if (!pixel(i)) continue;
             int px = 0, py = 0;
             world_of(fx, fy, px, py);
             const int dx = px - wx;
@@ -317,7 +318,7 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         const int frame_w = kind->frame_w();
         for (int i = frame_w * kind->frame_h() - 1; i >= 0 && burned < kind->burn_pixels_per_tick;
              --i) {
-            if (!pixels[i]) continue;
+            if (!pixel(i)) continue;
             int wx = 0, wy = 0;
             world_of(i % frame_w, i / frame_w, wx, wy);
             if (grid.get_element(wx, wy).temperature < BURN_TEMPERATURE) continue;
@@ -669,7 +670,9 @@ bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
             return false;
         }
         if (--windup > 0) return false;
-        slam(grid);
+        // A body with no crush radius hits with something that breaks nothing --
+        // the fish's hand -- and the ground under the blow is left as it was.
+        if (kind->crush_radius > 0) slam(grid);
         attack_timer = kind->attack_interval;
         // Tested where the target is now, not where it was when the wind-up
         // began: that difference is the whole point of winding up.
