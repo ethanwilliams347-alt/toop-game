@@ -60,6 +60,16 @@ Grid make_world(int w, int h, int floor_y) {
 // of storing position as whole cells plus a remainder.
 int feet(const Player& p) { return p.cell_y() + Player::HEIGHT; }
 
+// The body's drawn position: the whole cell plus the sub-cell remainder, the
+// conversion present::player_visual makes for the renderer. Written out here
+// because this suite links the simulation alone.
+float visual_x(const Player& p) {
+    return static_cast<float>(p.cell_x()) + fx::to_float(p.remainder_x());
+}
+float visual_y(const Player& p) {
+    return static_cast<float>(p.cell_y()) + fx::to_float(p.remainder_y());
+}
+
 std::string feet_detail(const Player& p) {
     return "feet=" + std::to_string(feet(p)) + " x=" + std::to_string(p.cell_x());
 }
@@ -355,7 +365,8 @@ int main() {
 
     // --- the sub-cell remainder must not carry the body into terrain ---
     //
-    // These assert on visual_x()/visual_y(), which is the only thing in the suites
+    // These assert on visual_x()/visual_y() -- the cell plus the sub-cell
+    // remainder, as the renderer draws it -- which is the only thing in the suites
     // that does and is meant to stay that way -- but the bug they cover is a
     // simulation bug, not a rendering one. rem_y left holding pending motion that
     // had been decided against sinks a standing player a full cell into the floor
@@ -366,18 +377,18 @@ int main() {
         Player p(10, AIR_Y);
         step(g, p, NOTHING, 120);  // land and settle
 
-        const float rest_y = p.visual_y();
+        const float rest_y = visual_y(p);
         float lowest = rest_y;
         for (int i = 0; i < 120; ++i) {
             step(g, p, NOTHING, 1);
-            if (p.visual_y() > lowest) lowest = p.visual_y();
+            if (visual_y(p) > lowest) lowest = visual_y(p);
         }
 
         check("a standing player does not sink into the floor",
               lowest - rest_y < 0.001f,
               "sank " + std::to_string(lowest - rest_y) + " cells below rest");
-        check("a standing player does not drift off the floor",
-              p.visual_y() == rest_y, feet_detail(p));
+        check("a standing player does not drift off the floor", visual_y(p) == rest_y,
+              feet_detail(p));
     }
 
     {
@@ -392,7 +403,7 @@ int main() {
         // fractionally. Held against it, rem_x otherwise accumulates most of a cell
         // before a whole-cell step is attempted, drawing the player inside the wall
         // it is flush against.
-        const float right_edge = p.visual_x() + Player::WIDTH;
+        const float right_edge = visual_x(p) + Player::WIDTH;
         check("a player held against a wall does not phase into it",
               right_edge <= static_cast<float>(OBSTACLE_X),
               "right edge at " + std::to_string(right_edge) + ", wall face at " +

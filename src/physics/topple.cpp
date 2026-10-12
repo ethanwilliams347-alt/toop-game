@@ -194,7 +194,15 @@ void Grid::start_tipping(int px, int py, int ground_idx) {
     // A new pool entry only at a new high-water mark; after that, entries and the
     // vectors inside them are reused, so a world that keeps knocking things over
     // stops allocating once it has seen its busiest moment.
-    if (tip_count == static_cast<int>(tip_bodies.size())) tip_bodies.emplace_back();
+    //
+    // A new entry reserves its two vectors to the most a body can hold -- one past
+    // MAX_SUPPORT_CELLS, the balance check's own cap -- so a body that reuses it
+    // later, however large, never grows them mid-step.
+    if (tip_count == static_cast<int>(tip_bodies.size())) {
+        TipBody& fresh = tip_bodies.emplace_back();
+        fresh.shape.reserve(MAX_SUPPORT_CELLS + 1);
+        fresh.at.reserve(MAX_SUPPORT_CELLS + 1);
+    }
     TipBody& b = tip_bodies[tip_count++];
 
     b.px = px;

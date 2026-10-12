@@ -311,6 +311,14 @@ if(BUILD_TESTING)
     target_link_libraries(run_test PRIVATE slop_engine)
     add_test(NAME run_test COMMAND run_test)
 
+    # The step loop's no-allocation invariant, by counting: this executable
+    # replaces global operator new, so it is its own target and links nothing
+    # that would bring a second definition.
+    add_executable(alloc_test tests/test_alloc.cpp)
+    target_include_directories(alloc_test PRIVATE src tests)
+    target_link_libraries(alloc_test PRIVATE slop_engine)
+    add_test(NAME alloc_test COMMAND alloc_test)
+
     # The debug tooling. Links only ENGINE_SOURCES because src/game/debug_view.h
     # is a header -- it deliberately does not become another source variable, so
     # the guard the sets above enforce is untouched.

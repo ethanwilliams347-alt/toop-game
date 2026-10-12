@@ -477,8 +477,6 @@ int main(int argc, char* argv[]) {
         // scene the same way.
         const level_files::Loaded loaded = level_files::load(def, "assets/", level::is_species);
         for (const std::string& e : loaded.errors) std::fprintf(stderr, "ERROR: %s\n", e.c_str());
-        for (const std::string& w : loaded.warnings)
-            std::fprintf(stderr, "WARNING: %s\n", w.c_str());
         const scene_activation::Resolved resolved = scene_activation::resolve(
             def, loaded.scene.width, loaded.scene.height, GRID_WIDTH, GRID_HEIGHT, view_scale);
         world_infinite = resolved.infinite;
@@ -621,8 +619,8 @@ int main(int argc, char* argv[]) {
     // loop so it always holds the state one step behind the current one --
     // including on frames where no step runs at all, which is most of them at a
     // high refresh rate.
-    float prev_player_x = run.player.visual_x();
-    float prev_player_y = run.player.visual_y();
+    float prev_player_x = present::player_visual(run.player).x;
+    float prev_player_y = present::player_visual(run.player).y;
 
     // --- starting the run over ---
     //
@@ -652,8 +650,8 @@ int main(int argc, char* argv[]) {
         // is not something to ease away from. The interpolation clamp below would
         // catch this on its own; setting them is the honest version of relying on
         // that.
-        prev_player_x = run.player.visual_x();
-        prev_player_y = run.player.visual_y();
+        prev_player_x = present::player_visual(run.player).x;
+        prev_player_y = present::player_visual(run.player).y;
         anim_state = player_anim::State{};
         frame_pacer.accumulator = 0.0;
     };
@@ -675,8 +673,8 @@ int main(int argc, char* argv[]) {
     // The accumulator is deliberately not touched here. Time is the pacer's
     // business, and a single-step is a step that no time was spent on.
     auto advance_one_step = [&](const Input& step_input) {
-        prev_player_x = run.player.visual_x();
-        prev_player_y = run.player.visual_y();
+        prev_player_x = present::player_visual(run.player).x;
+        prev_player_y = present::player_visual(run.player).y;
 
         // Captured here, inside the one place a step happens, and this placement
         // is the whole of what makes the log replayable. One record per step,
@@ -716,7 +714,7 @@ int main(int argc, char* argv[]) {
         // in it the tool is. The direction still holds: rendering must not drive
         // simulation, and this is a read, on the fixed step, of a value the tool
         // would have computed with no window attached.
-        cond.dig_progress = run.dig_tool.swing_progress();
+        cond.dig_progress = present::dig_progress(run.dig_tool);
         cond.flapped = run.player.flapped();
         player_anim::update(anim_state, cond, 1);
     };
@@ -890,8 +888,8 @@ int main(int argc, char* argv[]) {
 
                     // The body is somewhere else entirely, so last frame's drawn
                     // position is not something to ease away from.
-                    prev_player_x = run.player.visual_x();
-                    prev_player_y = run.player.visual_y();
+                    prev_player_x = present::player_visual(run.player).x;
+                    prev_player_y = present::player_visual(run.player).y;
                     anim_state = player_anim::State{};
                     frame_pacer.accumulator = 0.0;
 
@@ -1099,9 +1097,9 @@ int main(int argc, char* argv[]) {
         // alpha keep climbing on the frames that buy no step at all; the flag is the
         // last step's, which is the step prev_* was taken from.
         const float alpha = frame_pacer.alpha(debug.paused);
-        const pacer::Interpolated draw_player =
-            pacer::interpolate(prev_player_x, prev_player_y, run.player.visual_x(),
-                               run.player.visual_y(), alpha, run.player.teleported());
+        const pacer::Interpolated draw_player = pacer::interpolate(
+            prev_player_x, prev_player_y, present::player_visual(run.player).x,
+            present::player_visual(run.player).y, alpha, run.player.teleported());
         float draw_player_x = draw_player.x;
         float draw_player_y = draw_player.y;
 

@@ -515,8 +515,8 @@ public:
     int center_y() const { return body.y + kind->height / 2; }
 
     // The sub-cell remainder and last step's box, for the renderer's interpolation
-    // and nothing else -- the same arrangement as Player::visual_x, except that the
-    // float conversion happens on the render side rather than in this header.
+    // and nothing else -- the same arrangement as Player::remainder_x, with the
+    // float conversion on the render side (present::paint_enemies).
     fx::v remainder_x() const { return body.rem_x; }
     fx::v remainder_y() const { return body.rem_y; }
     int prev_cell_x() const { return prev_x; }

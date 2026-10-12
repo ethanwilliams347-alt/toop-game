@@ -52,8 +52,8 @@ struct Conditions {
     int vel_y = 0;
 
     // Where the tool is in its swing: 0 at the start, up to but never reaching 1,
-    // and negative when no swing is in progress. Straight from
-    // DigTool::swing_progress().
+    // and negative when no swing is in progress. DigTool::swing_progress(), which
+    // is fixed point, converted on the render side (present::dig_progress).
     //
     // Neither the button nor the impact is the thing to animate. A held button fires
     // on a cooldown, so animating the button plays a swing on steps where nothing

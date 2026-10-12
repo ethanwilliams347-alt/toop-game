@@ -31,8 +31,7 @@ void DigTool::march(const Grid& grid, int from_x, int from_y, int aim_x, int aim
     // Integer-only, which is why this reads more awkwardly than sqrt would. This
     // picks which cells a dig deletes, and digging writes to the grid, so a last-bit
     // difference from excess precision, an FMA contraction or a fast-math flag is a
-    // different world on another toolchain, not a different pixel. (swing_progress()
-    // below is still a float and is meant to be: only the animation reads it.)
+    // different world on another toolchain, not a different pixel.
     //
     // The comparison is squared so no length is ever taken:
     //   len <= RANGE   <=>   dx*dx + dy*dy <= RANGE*RANGE

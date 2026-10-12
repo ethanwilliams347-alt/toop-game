@@ -54,8 +54,30 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                    std::vector<frame::EnemySprite>& out);
 
 // One sprite per arrow in flight or at rest, interpolated like the enemies but
-// without the teleport clamp: an arrow covers several cells a step by design.
+// never snapped: an arrow is never relocated, only moved.
 void arrows(const Run& run, float alpha, std::vector<frame::ArrowSprite>& out);
+
+// --- the simulation's numbers, as the renderer reads them ----------------------
+//
+// The float conversions the simulation does not make. src/physics/ is fixed
+// point throughout; these are where its numbers cross into the float the
+// renderer multiplies by a screen scale and rounds to a pixel, so a last-bit
+// difference here is a pixel that was going to be rounded anyway.
+
+struct Point {
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+// The player's position including its sub-cell remainder, in cells.
+inline Point player_visual(const Player& p) {
+    return Point{static_cast<float>(p.cell_x()) + fx::to_float(p.remainder_x()),
+                 static_cast<float>(p.cell_y()) + fx::to_float(p.remainder_y())};
+}
+
+// How far through its swing the dig tool is, 0 up to but not reaching 1, or -1
+// between swings -- the form player_anim::Conditions takes.
+inline float dig_progress(const DigTool& tool) { return fx::to_float(tool.swing_progress()); }
 
 // --- the HUD's words ---------------------------------------------------------
 

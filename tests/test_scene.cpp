@@ -3,8 +3,10 @@
 #include "scene/legend.h"
 #include "physics/grid.h"
 #include "test_util.h"
+#include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -31,6 +33,67 @@ namespace {
 // it measures two changes and reports one -- reverting a pit alone also stretches
 // the bridge beam that spans it.
 constexpr int FIXTURE_SCENE_CELLS = 334501;
+
+void put16(std::vector<uint8_t>& b, uint32_t v) {
+    for (int i = 0; i < 2; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i)));
+}
+void put32(std::vector<uint8_t>& b, uint32_t v) {
+    for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i)));
+}
+void write_file(const char* path, const std::vector<uint8_t>& b) {
+    std::FILE* f = std::fopen(path, "wb");
+    if (!f) return;
+    std::fwrite(b.data(), 1, b.size(), f);
+    std::fclose(f);
+}
+
+// A 24-bit top-down BMP of `pixels` (0xRRGGBB, row-major), written byte by byte
+// so the file is exactly what the reader is being asked about.
+void write_bmp24(const char* path, int w, int h, const std::vector<uint32_t>& pixels) {
+    const int row = (w * 3 + 3) / 4 * 4;
+    std::vector<uint8_t> b{'B', 'M'};
+    put32(b, static_cast<uint32_t>(54 + row * h));
+    put32(b, 0);
+    put32(b, 54);
+    put32(b, 40);
+    put32(b, static_cast<uint32_t>(w));
+    put32(b, static_cast<uint32_t>(-h));  // top-down
+    put16(b, 1);
+    put16(b, 24);
+    for (int i = 0; i < 6; ++i) put32(b, 0);  // BI_RGB, then the unused fields
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const uint32_t c =
+                pixels[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+            b.push_back(static_cast<uint8_t>(c));
+            b.push_back(static_cast<uint8_t>(c >> 8));
+            b.push_back(static_cast<uint8_t>(c >> 16));
+        }
+        for (int p = w * 3; p < row; ++p) b.push_back(0);
+    }
+    write_file(path, b);
+}
+
+// A one-pixel 32-bit BI_BITFIELDS BMP whose masks are (r, g, b), with the pixel
+// stored as BGRA bytes -- what the reader decodes regardless of the masks.
+void write_bmp32_bitfields(const char* path, uint32_t r, uint32_t g, uint32_t bl, uint32_t rgb) {
+    std::vector<uint8_t> b{'B', 'M'};
+    put32(b, 66 + 4);
+    put32(b, 0);
+    put32(b, 66);
+    put32(b, 40);
+    put32(b, 1);
+    put32(b, 1);
+    put16(b, 1);
+    put16(b, 32);
+    put32(b, 3);  // BI_BITFIELDS
+    for (int i = 0; i < 5; ++i) put32(b, 0);
+    put32(b, r);
+    put32(b, g);
+    put32(b, bl);
+    put32(b, rgb | 0xFF000000u);
+    write_file(path, b);
+}
 
 } // namespace
 
@@ -163,6 +226,50 @@ int main() {
         check("...and leaves the grid alone", g.get_element(0, 0).type == ElementType::Empty);
     }
 
+    // --- a material map naming an unknown colour is refused whole ---
+    //
+    // The rule every parser here follows: one bad record rejects the file. A map
+    // whose unknown pixels loaded as Empty was a scene that rendered wrong and
+    // said so only on stderr.
+    {
+        const char* mat = "scene_test_tmp_material.bmp";
+        const char* alb = "scene_test_tmp_albedo.bmp";
+        std::vector<uint32_t> px(4 * 3, 0x888888);  // Wall
+        px[1 * 4 + 2] = 0x123456;                    // (2, 1): in no legend entry
+        write_bmp24(mat, 4, 3, px);
+        write_bmp24(alb, 4, 3, std::vector<uint32_t>(4 * 3, 0x808080));
+        std::string error;
+        const Scene s = bmp::load(mat, alb, &error);
+        check("a material map with an unknown colour is refused", s.width == 0 && !error.empty());
+        check("...naming where the first one is and what colour it is",
+              error.find("(2, 1)") != std::string::npos &&
+                  error.find("#123456") != std::string::npos,
+              error);
+        std::remove(mat);
+        std::remove(alb);
+    }
+
+    // --- a bitfield BMP is read only when its masks say BGRA ---
+    //
+    // The rows are decoded as BGRA whatever the header says, so a file whose
+    // masks put the channels anywhere else would load with them swapped and
+    // nothing failing.
+    {
+        const char* path = "scene_test_tmp_bitfields.bmp";
+        write_bmp32_bitfields(path, 0x00FF0000u, 0x0000FF00u, 0x000000FFu, 0x00ABCDEF);
+        bmp::Image img;
+        std::string error;
+        check("a BGRA bitfield BMP reads",
+              bmp::read(path, img, &error) && img.pixels.size() == 1 &&
+                  (img.pixels[0] & 0xFFFFFF) == 0xABCDEF,
+              error);
+        write_bmp32_bitfields(path, 0x000000FFu, 0x0000FF00u, 0x00FF0000u, 0x00ABCDEF);
+        error.clear();
+        check("a bitfield BMP with its channels in another order is refused",
+              !bmp::read(path, img, &error) && error.find("masks") != std::string::npos, error);
+        std::remove(path);
+    }
+
     // --- the shipped fixture, loaded the way the game loads it ---
     //
     // The first test that reads the actual scene files. Everything above builds a
@@ -170,15 +277,15 @@ int main() {
     // blind to the thing that has gone wrong here twice: the world the game boots
     // into being empty or different from what everyone believes.
     {
-        std::string error, warning;
-        const Scene s = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp",
-                                  &error, &warning);
-        check("the shipped fixture scene loads", error.empty(), error);
+        // An error here includes an authored pixel matching no legend entry, which
+        // rejects the file: the failure that once emptied the whole world and said
+        // nothing.
+        std::string error;
+        const Scene s = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp", &error);
+        check("the shipped fixture scene loads, every authored pixel in the legend", error.empty(),
+              error);
         check("...at the size main.cpp simulates", s.width == 1920 && s.height == 1080,
               std::to_string(s.width) + "x" + std::to_string(s.height));
-        // A warning here means an authored pixel matched no legend entry, which is
-        // the failure that emptied the whole world once and said nothing.
-        check("...with every authored pixel in the legend", warning.empty(), warning);
 
         Grid g(1920, 1080, 1);
         const int placed = load_scene(g, s, 0, 0);
