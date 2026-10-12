@@ -15,16 +15,23 @@ visual style of assets/ to a 688x288 canvas:
   satisfying strict automated palette validator checks.
 """
 
+import math
 import os
 import shutil
 import sys
-import math
 
 # Derived REPO_ROOT from the current file's directory.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
-from pixel_art import (LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header,
-                       write_bmp, write_png, color_of, dither_mix)
+from pixel_art import (
+    LEGEND_EMPTY,
+    LEGEND_WALL,
+    assert_legend_matches_header,
+    color_of,
+    dither_mix,
+    write_bmp,
+    write_png,
+)
 
 DST_DIR = os.path.join(REPO_ROOT, "assets", "bg_forest")
 BUILD_DST_DIR = os.path.join(REPO_ROOT, "build", "Release", "assets", "bg_forest")
@@ -301,7 +308,7 @@ def generate_hills_midnear():
     ]
 
     # Paint trunks
-    for tx, ty_top, rx, ry in trunks:
+    for tx, ty_top, _rx, _ry in trunks:
         for y in range(ty_top, base_y):
             offset = int(1.5 * math.sin(y / 15.0))
             for dx in [-1, 0, 1]:
@@ -371,7 +378,7 @@ def generate_hills_near():
     ]
 
     # Paint trunks
-    for tx, ty_top, rx, ry in trunks:
+    for tx, ty_top, _rx, _ry in trunks:
         for y in range(ty_top, base_y):
             offset = int(2.5 * math.sin(y / 20.0))
             for dx in [-2, -1, 0, 1]:
@@ -508,8 +515,6 @@ LAYER_DEFS = [
 def write_scene_maps(composite_rgb):
     """Generates and writes out the material and albedo map pairs."""
     assert_legend_matches_header()
-    mat_path = os.path.join(DST_DIR, "bg_forest_material.bmp")
-    alb_path = os.path.join(DST_DIR, "bg_forest_albedo.bmp")
     root_mat = os.path.join(REPO_ROOT, "assets", "bg_forest_material.bmp")
     root_alb = os.path.join(REPO_ROOT, "assets", "bg_forest_albedo.bmp")
 
@@ -525,16 +530,8 @@ def write_scene_maps(composite_rgb):
                 mat_pixels.append(LEGEND_EMPTY)
             alb_pixels.append(composite_rgb[y * TARGET_W + x])
 
-    write_bmp(mat_path, TARGET_W, TARGET_H, mat_pixels)
-    write_bmp(alb_path, TARGET_W, TARGET_H, alb_pixels)
     write_bmp(root_mat, TARGET_W, TARGET_H, mat_pixels)
     write_bmp(root_alb, TARGET_W, TARGET_H, alb_pixels)
-
-    if os.path.exists(BUILD_DST_DIR):
-        build_mat = os.path.join(BUILD_DST_DIR, "bg_forest_material.bmp")
-        build_alb = os.path.join(BUILD_DST_DIR, "bg_forest_albedo.bmp")
-        write_bmp(build_mat, TARGET_W, TARGET_H, mat_pixels)
-        write_bmp(build_alb, TARGET_W, TARGET_H, alb_pixels)
 
     print(f"Scene maps written: floor at row {FLOOR_ROW}, {solid} solid cells.")
 
@@ -604,7 +601,7 @@ not move - only what stands at them did.
   Nearer is darker and more contrasty; further is closer to the sky.
 - **Floor row**: the terrain floor is at art row 264, 16512 solid cells. The
   scene finds it with `spawn terrain`'s own scan, not from a constant.
-- **Albedo map**: the finished composite, exactly as `composite_preview.png`
+- **Albedo map**: the finished composite, exactly as `art_src/previews/bg_forest.png`
   shows it.
 """
     with open(readme_path, "w", encoding="utf-8") as f:
@@ -617,7 +614,7 @@ def main():
     print("Generating standard 688x288 backdrop layers for bg_forest...")
     composite_rgb = [MAGENTA] * (TARGET_H * TARGET_W)
 
-    for tag, fname, gen_fn in LAYER_DEFS:
+    for _tag, fname, gen_fn in LAYER_DEFS:
         layer_arr = gen_fn()
 
         dst_path = os.path.join(DST_DIR, fname)
@@ -636,12 +633,13 @@ def main():
 
         print(f"Generated {fname}")
 
-    preview_path = os.path.join(DST_DIR, "composite_preview.png")
+    # The preview is for people, not the game, so it lives with the source art
+    # rather than in assets/, which is staged next to the exe.
+    preview_path = os.path.join(REPO_ROOT, "art_src", "previews", "bg_forest.png")
+    os.makedirs(os.path.dirname(preview_path), exist_ok=True)
     write_png(preview_path, TARGET_W, TARGET_H, composite_rgb)
     print("Composite preview saved.")
 
-    if os.path.exists(BUILD_DST_DIR):
-        shutil.copyfile(preview_path, os.path.join(BUILD_DST_DIR, "composite_preview.png"))
 
     write_scene_maps(composite_rgb)
     write_readme()

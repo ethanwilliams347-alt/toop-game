@@ -93,8 +93,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (argc > 4) {
-        int w = 0, h = 0;
-        if (std::sscanf(argv[4], "%dx%d", &w, &h) != 2 || w < SCALE || h < SCALE) {
+        // strtol rather than sscanf, so a malformed number is reported rather than
+        // read as whatever prefix happened to parse.
+        char* end = nullptr;
+        const long w = std::strtol(argv[4], &end, 10);
+        const bool has_x = end != argv[4] && *end == 'x';
+        const char* h_text = has_x ? end + 1 : end;
+        const long h = has_x ? std::strtol(h_text, &end, 10) : 0;
+        if (!has_x || end == h_text || *end != '\0' || w < SCALE || h < SCALE) {
             std::fprintf(stderr, "window '%s' is not WxH\n", argv[4]);
             return 2;
         }
@@ -122,7 +128,8 @@ int main(int argc, char** argv) {
     }
     const std::string out = argv[2];
     const bool pan = argc > 3 && std::string(argv[3]).compare(0, 4, "pan=") == 0;
-    const int flight = argc > 3 ? std::atoi(argv[3] + (pan ? 4 : 0)) : 0;
+    const int flight =
+        argc > 3 ? static_cast<int>(std::strtol(argv[3] + (pan ? 4 : 0), nullptr, 10)) : 0;
 
     SDL_Surface* surface =
         SDL_CreateRGBSurfaceWithFormat(0, WINDOW_W, WINDOW_H, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -195,8 +202,6 @@ int main(int argc, char** argv) {
         fp.camera = &camera;
         fp.padded_w = PADDED_W;
         fp.padded_h = PADDED_H;
-        fp.world_w = world_w;
-        fp.world_h = world_h;
         fp.backdrop = &backdrop;
         fp.cells = cells;
         fp.time_s = t;

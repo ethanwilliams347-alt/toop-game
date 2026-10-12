@@ -16,7 +16,6 @@ deciding about lives here until it wins.
 | File | What it is |
 |---|---|
 | `prev_player_sheet_a.bmp` | Superseded player sheet |
-| `prev_player_sheet_a_duplicate.bmp` | Byte-identical copy of the above — it was `player_sheet_2.bmp` |
 | `prev_player_sheet_fly.bmp` | The first fly-pose sheet, superseded by the current one |
 | `copy_candidate_a.bmp` | Single-frame candidate |
 | `v2_owl_pixel_art.bmp` | Single-frame candidate |
@@ -30,7 +29,7 @@ tidying.
 
 Filenames say **what a thing is**, never **which revision it is**. `COPY_`,
 `_2`, `_final`, `_new` are all filename-as-version-control in a repository that
-already has version control — that is how five player sheets ended up here with
+already has version control — that is how five player sheets ended up in assets/ with
 no way to tell which one the game was loading.
 
 `prev_` is the one deliberate exception, and only inside this folder, because

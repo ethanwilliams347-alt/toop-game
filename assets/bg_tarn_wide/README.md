@@ -7,12 +7,13 @@ scale 10 by the `bg_tarn_wide` row in `assets/scenes.txt`; its level is
 `assets/bg_tarn_wide_level.txt`.
 
 **Generated, not drawn.** `python tools/generate_bg_tarn_wide.py` writes every
-BMP here, `composite_preview.png`, and `assets/bg_tarn_wide_material.bmp` /
-`bg_tarn_wide_albedo.bmp`. Deterministic: a diff here is a change to the script.
+BMP here, `assets/bg_tarn_wide_material.bmp` /
+`bg_tarn_wide_albedo.bmp`, and the preview `art_src/previews/bg_tarn_wide.png`.
+Deterministic: a diff here is a change to the script.
 This README is the one hand-written file. Every colour is a `wt_*` name in
 `tools/pixel_art.py`.
 
-`composite_preview.png` is a map of the walk, not a frame: each column is what
+The preview is a map of the walk, not a frame: each column is what
 stands behind that world column when the camera is centred on it.
 
 ## The style

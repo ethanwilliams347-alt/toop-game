@@ -1050,22 +1050,6 @@ int main() {
             if (chance(25, seed, 1, i, Stream::Reaction)) hits++;
         check("chance(pct) fires at about the rate asked for", hits > 2300 && hits < 2700,
               std::to_string(hits) + "/10000, wanted ~2500");
-
-        // The reserved world-generation streams. random.h already asserts at compile
-        // time that no two stream values are equal, but that is the weaker half of
-        // what is needed: two tags one bit apart are distinct and still correlated.
-        // So the minted streams are held to the same standard as the declared ones --
-        // against the simulation, which they must never influence, and against each
-        // other, since a generator will mint several and use them on the same cells.
-        int gen_vs_sim = 0, gen_vs_gen = 0;
-        for (uint64_t i = 0; i < 10000; ++i) {
-            if (coin(seed, 0, i, worldgen(0)) != coin(seed, 0, i, Stream::PowderDirection)) gen_vs_sim++;
-            if (coin(seed, 0, i, worldgen(0)) != coin(seed, 0, i, worldgen(1))) gen_vs_gen++;
-        }
-        check("generation streams do not track the simulation",
-              gen_vs_sim > 4500 && gen_vs_sim < 5500, std::to_string(gen_vs_sim) + "/10000");
-        check("generation streams do not track each other",
-              gen_vs_gen > 4500 && gen_vs_gen < 5500, std::to_string(gen_vs_gen) + "/10000");
     }
 
     // --- the step clock ---

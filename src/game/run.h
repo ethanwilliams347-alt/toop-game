@@ -144,20 +144,15 @@ public:
     void reset(uint64_t seed, int new_width = 0, int new_height = 0);
 
     // Advances grid, player, dig tool, arrows and enemies by exactly one fixed
-    // step, in that order.
-    // The brush paints first, before the grid steps: a cell should not move on the
-    // same step it was placed.
+    // step, in that order. The brush paints first, before the grid steps: a cell
+    // should not move on the same step it was placed.
     //
-    // Returns whether the dig tool actually removed material this step --
-    // DigTool::update's own answer, forwarded rather than recomputed.
-    //
-    // Nothing currently reads it. The animation reads DigTool::swing_progress()
-    // instead, because an impact is one step and a swing is a duration, and it was
-    // the duration that needed portraying. Kept because "a blow landed this step" is
-    // a real event that a hit reaction, a sound or a screen shake will each want, and
-    // because it costs a forwarded bool. Do not reintroduce it as an animation
-    // trigger.
-    bool step(const Input& input);
+    // What the step did is in events() -- a dig that removed material is an
+    // Event::Kind::Dug, for a hit reaction, a sound or a screen shake. The
+    // animation reads DigTool::swing_progress() instead, because an impact is one
+    // step and a swing is a duration, and it was the duration that needed
+    // portraying.
+    void step(const Input& input);
 
     // --- the objective, and how a run ends -----------------------------
     //

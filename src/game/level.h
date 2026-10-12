@@ -36,7 +36,7 @@ namespace level {
 struct Report {
     int world_w = 0;
     int world_h = 0;
-    bool infinite = false;
+    bool unclamped = false;
 
     int scene_cells = 0;
     // The scene named a material map, and it placed nothing: a legend that matched

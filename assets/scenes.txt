@@ -6,7 +6,7 @@
 # spawn is `terrain` (stand on ground under spawn column) or `floor`
 # (stand on world border). A scene without a material map must use `floor`.
 #
-# Optional fields: `mode` (`fixed` or `infinite`), `width`, `height`, `scale`.
+# Optional fields: `mode` (`fixed` or `unclamped`), `width`, `height`, `scale`.
 #
 # Named fields, `key=value`, anywhere after the five required ones:
 #   level=<file>   what the level puts in the world: player column, objective,
@@ -17,7 +17,7 @@
 #                  (src/render/backdrop_set.h). Without one, the clear colour.
 
 # name     material           albedo           props           spawn    mode      width  height
-empty      -                  -                -               floor    infinite  1920   1080
+empty      -                  -                -               floor    unclamped 1920   1080
 
 # Authoring nine-layer backdrop set (art_src/Background_1)
 # name     material          albedo          props  spawn    mode   width height scale

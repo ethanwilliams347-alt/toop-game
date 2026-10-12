@@ -36,9 +36,10 @@ validator nobody reads, which costs the baseline checks only this script can
 make -- a frame hovering a cell above every floor, a hole through a silhouette,
 a declared frame nobody drew.
 """
+import os
 import sys
-from pixel_art import (PALETTE, COLOR_KEY, asset_path, read_bmp, src_path,
-                       write_bmp)
+
+from pixel_art import COLOR_KEY, PALETTE, ROOT, asset_path, read_bmp, src_path, write_bmp
 
 # --- the layout contract ---------------------------------------------------
 #
@@ -88,21 +89,23 @@ class Anim:
 # frames in the file.
 ANIMATIONS = [
     #    name     row  col  frames  wait  loop
-    Anim('idle',   0,   0,     2,    30,  True),
+    Anim('idle', 0, 0, 2, 30, True),
     # Nothing is latched to this row, so unlike `fly` against
     # FLAP_INTERVAL_STEPS there is no second number to keep it in phase with;
     # the only thing it has to agree with is how fast the figure actually
     # crosses ground, which is judged by eye.
-    Anim('walk',   1,   0,     6,     6,  True),
+    Anim('walk', 1, 0, 6, 6, True),
     # Two poses, one row. Neither advances on a clock: which one shows is
     # decided by the sign of the player's vertical velocity, so a long fall
     # holds the falling pose instead of cycling through a rise it is not doing.
-    Anim('rise',   2,   0,     1,     0,  True),
-    Anim('fall',   2,   1,     1,     0,  True),
-    # The swing's length is DigTool::SWING_STEPS, not this row's wait -- the
-    # animation is driven by the tool's reported phase. Only `frames` is
-    # load-bearing here, as the number of columns to spread the swing across.
-    Anim('dig',    3,   0,     3,     8,  False),  # one-shot; see player_anim.h
+    Anim('rise', 2, 0, 1, 0, True),
+    Anim('fall', 2, 1, 1, 0, True),
+    # No clock of its own, so wait is 0: the frame shown is a function of the
+    # tool's reported phase, and the swing's length is DigTool::SWING_STEPS.
+    # Only `frames` is load-bearing, as the number of columns to spread the
+    # swing across. --validate refuses any other wait here, because a number
+    # in this column would look like a speed and change nothing.
+    Anim('dig', 3, 0, 3, 0, False),  # see player_anim.h
     # One wing beat, latched by Player::flapped() the way `dig` is latched by
     # the tool firing. This row's `wait` and Player::FLAP_INTERVAL_STEPS have
     # to be read together: the animation's total length is deliberately longer
@@ -119,7 +122,7 @@ ANIMATIONS = [
     # which is the part that has to stay in phase, and the last are the
     # recovery back to the top. They play when the player stops flapping,
     # which is why the final frame is drawn to read as a still.
-    Anim('fly',    4,   0,     6,     3,  False,  airborne=True),
+    Anim('fly', 4, 0, 6, 3, False, airborne=True),
 ]
 
 SHEET_ROWS = 1 + max(a.row for a in ANIMATIONS)
@@ -201,6 +204,15 @@ def validate(strict_palette=False):
     """
     errors = []
 
+    # The table itself, before the art. `dig` has no clock -- its frame is the
+    # tool's phase -- so a wait there would read as a speed and change nothing.
+    for anim in ANIMATIONS:
+        if anim.name == 'dig' and anim.wait != 0:
+            errors.append(
+                f'dig: wait is {anim.wait}; it must be 0, because the dig frame '
+                "is the tool's swing phase and DigTool::SWING_STEPS is its length"
+            )
+
     def load(path, expect_w, expect_h):
         try:
             w, h, px = read_bmp(path)
@@ -218,7 +230,7 @@ def validate(strict_palette=False):
         allowed = set(PALETTE.values()) | {COLOR_KEY}
         off = {p for p in sheet if p not in allowed}
         if off:
-            sample = ', '.join('#%02X%02X%02X' % p for p in sorted(off)[:5])
+            sample = ', '.join(f'#{r:02X}{g:02X}{b:02X}' for r, g, b in sorted(off)[:5])
             message = f'{SHEET_PATH}: {len(off)} off-palette colour(s): {sample}'
             if strict_palette:
                 errors.append(message)
@@ -269,7 +281,10 @@ def emit_header():
     w('//')
     w('// Regenerate with:  python tools/player_sheet.py --header')
     w('//')
-    w(f'// Everything main.cpp needs to know about {SHEET_PATH}, emitted')
+    # Repo-relative, with forward slashes: the absolute path is the machine that
+    # ran the generator, and in a committed header it is noise in every diff.
+    sheet_rel = os.path.relpath(SHEET_PATH, ROOT).replace(os.sep, '/')
+    w(f'// Everything main.cpp needs to know about {sheet_rel}, emitted')
     w('// from the one file that also validates it.')
     w('#pragma once')
     w('#include "physics/player.h"')

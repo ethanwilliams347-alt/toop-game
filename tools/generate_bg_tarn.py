@@ -818,8 +818,12 @@ def main():
             f'(factor {factor_at(feet):.3f})'
         )
     alb = write_scene(composite)
-    write_png(os.path.join(DST_DIR, 'composite_preview.png'), W, H, alb)
-    print('wrote bg_tarn_material.bmp, bg_tarn_albedo.bmp, composite_preview.png')
+    # The preview is for people, not the game, so it lives with the source art
+    # rather than in assets/, which is staged next to the exe.
+    preview = os.path.join(REPO_ROOT, 'art_src', 'previews', 'bg_tarn.png')
+    os.makedirs(os.path.dirname(preview), exist_ok=True)
+    write_png(preview, W, H, alb)
+    print('wrote bg_tarn_material.bmp, bg_tarn_albedo.bmp, art_src/previews/bg_tarn.png')
 
 
 if __name__ == '__main__':

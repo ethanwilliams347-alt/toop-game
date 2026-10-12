@@ -9,18 +9,14 @@
 // of any SDL dependency, so the player is testable headlessly for the same
 // reason the grid is, and main.cpp remains the only file that knows a keyboard
 // exists.
+//
+// Movement only. Aiming and digging are the tools' inputs, not the body's: the
+// dig tool and the bow take the cursor from Input directly (Run::step), and a
+// body that never writes to the grid has no use for either.
 struct PlayerInput {
     bool left = false;
     bool right = false;
     bool jump = false;
-
-    // Where the player is aiming, in absolute grid cells. Grid coordinates rather
-    // than a direction vector because the caller already has the cursor in world
-    // space, and converting to an angle here would throw away information the tool
-    // wants back.
-    int aim_x = 0;
-    int aim_y = 0;
-    bool dig = false;
 };
 
 // A rigid body that lives outside the cell grid.

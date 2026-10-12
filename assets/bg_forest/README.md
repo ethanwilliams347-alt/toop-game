@@ -60,5 +60,5 @@ not move - only what stands at them did.
   Nearer is darker and more contrasty; further is closer to the sky.
 - **Floor row**: the terrain floor is at art row 264, 16512 solid cells. The
   scene finds it with `spawn terrain`'s own scan, not from a constant.
-- **Albedo map**: the finished composite, exactly as `composite_preview.png`
+- **Albedo map**: the finished composite, exactly as `art_src/previews/bg_forest.png`
   shows it.

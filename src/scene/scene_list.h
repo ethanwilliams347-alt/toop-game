@@ -14,7 +14,7 @@
 //
 //     # name    material           albedo            props           spawn    mode      w     h    scale
 //     fixture    test_material.bmp  test_albedo.bmp   test_props.txt  terrain
-//     empty      -                  -                 -               floor    infinite  1920  1080
+//     empty      -                  -                 -               floor    unclamped 1920  1080
 //     bg1        bg1_material.bmp   bg1_albedo.bmp    -               terrain  fixed      344   144  10
 //
 // Five fields required, `-` meaning none for the three filenames. Blank lines
@@ -24,8 +24,11 @@
 // Three optional fields follow: `mode`, then `width` and `height` together. An
 // omitted field is not an ignored one -- it is a row that made no claim, and the
 // default it falls back to is stated at the field. `mode` is `fixed` (a bounded
-// world with solid borders and non-repeating backdrops) or `infinite`
-// (unbounded horizontal travel with tiling backdrops), defaulting to `fixed`.
+// world with solid borders and non-repeating backdrops) or `unclamped` (the
+// camera may scroll past the world's left and right edges, over tiling
+// backdrops), defaulting to `fixed`. Unclamped is not infinite: the grid is
+// still the stated size and its borders are still solid, so the body stops at
+// them -- only the view goes further.
 // `width height` must appear as a pair, since half a size is not a size; omitted
 // they mean derive it from the material BMP's own dimensions, or the engine
 // default when the scene names no BMP.
@@ -66,10 +69,13 @@ enum class SceneMode : uint8_t {
     // the world rect and each backdrop layer is panned across its own width
     // exactly once, so authored art never repeats and never runs out.
     Fixed,
-    // Unbounded horizontal travel. The camera does not clamp horizontally and
-    // the backdrop layers tile through backdrop_wrap::wrap_axis. Vertical is
-    // still clamped, because the world has a floor and a ceiling either way.
-    Infinite,
+    // The camera does not clamp horizontally, so the view can scroll past the
+    // world's side edges, and the backdrop layers tile through
+    // backdrop_wrap::wrap_axis. The world itself is the same finite grid with
+    // solid borders -- this is about the view, which is why it is not called
+    // infinite. Vertical is still clamped, because the world has a floor and a
+    // ceiling either way.
+    Unclamped,
 };
 
 struct SceneDef {
@@ -111,7 +117,7 @@ struct SceneDef {
     // colour also places no cells, and that is a defect.
     bool declared_empty() const { return material.empty() && albedo.empty(); }
 
-    bool is_infinite() const { return mode == SceneMode::Infinite; }
+    bool is_unclamped() const { return mode == SceneMode::Unclamped; }
 };
 
 // Parses a scene list. Returns the records; on any malformed line the list comes

@@ -2,7 +2,7 @@
 //
 // Regenerate with:  python tools/player_sheet.py --header
 //
-// Everything main.cpp needs to know about C:\Users\Ethan\Desktop\toop-share\assets\player_sheet.bmp, emitted
+// Everything main.cpp needs to know about assets/player_sheet.bmp, emitted
 // from the one file that also validates it.
 #pragma once
 #include "physics/player.h"
@@ -53,7 +53,7 @@ inline constexpr Anim IDLE{0, 0, 2, 30, true};
 inline constexpr Anim WALK{1, 0, 6, 6, true};
 inline constexpr Anim RISE{2, 0, 1, 0, true};
 inline constexpr Anim FALL{2, 1, 1, 0, true};
-inline constexpr Anim DIG{3, 0, 3, 8, false};
+inline constexpr Anim DIG{3, 0, 3, 0, false};
 inline constexpr Anim FLY{4, 0, 6, 3, false};
 
 }  // namespace player_sprite

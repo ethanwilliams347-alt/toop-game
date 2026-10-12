@@ -188,7 +188,6 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
         l.ripple_row0 = sp.ripple_row0;
         l.ripple_row1 = sp.ripple_row1;
         l.drift = sp.drift;
-        l.grade = frame::Grade{};  // identity; the art carries its own depth
         l.is_foreground = sp.foreground;
         backdrop.layers.push_back(l);
     }

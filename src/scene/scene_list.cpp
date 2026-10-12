@@ -186,8 +186,13 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
         std::string mode;
         if (fields >> mode) {
             if (mode == "fixed") def.mode = SceneMode::Fixed;
-            else if (mode == "infinite") def.mode = SceneMode::Infinite;
-            else return fail("'" + mode + "' is not a scene mode (fixed or infinite)");
+            else if (mode == "unclamped")
+                def.mode = SceneMode::Unclamped;
+            else if (mode == "infinite")
+                return fail("`infinite` is now `unclamped`: the mode only lets the camera "
+                            "scroll past the world's side edges, and the world stays finite");
+            else
+                return fail("'" + mode + "' is not a scene mode (fixed or unclamped)");
 
             // The size is a pair or it is absent. Half a size is not a size, and
             // accepting one gives a world as wide as the author said and as tall
@@ -219,7 +224,7 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                     return fail("'" + h_raw + "' is not a usable world height");
 
                 // Nested inside the size on purpose. These fields are positional, so a
-                // row reading `... infinite 10` cannot be told from one meaning a width
+                // row reading `... unclamped 10` cannot be told from one meaning a width
                 // of 10; the only unambiguous place a scale can sit is after a size that
                 // is already stated. A row wanting a scale therefore states its size
                 // too, which every row that would want one already does.

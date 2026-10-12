@@ -379,7 +379,7 @@ int main(int argc, char* argv[]) {
     // from outside the grid.
     int world_w = GRID_WIDTH;
     int world_h = GRID_HEIGHT;
-    bool world_infinite = false;
+    bool world_unclamped = false;
     // --- the session recorder ---
     //
     // Recording is always on, and F9 saves what has been recorded so far. The
@@ -479,7 +479,7 @@ int main(int argc, char* argv[]) {
         for (const std::string& e : loaded.errors) std::fprintf(stderr, "ERROR: %s\n", e.c_str());
         const scene_activation::Resolved resolved = scene_activation::resolve(
             def, loaded.scene.width, loaded.scene.height, GRID_WIDTH, GRID_HEIGHT, view_scale);
-        world_infinite = resolved.infinite;
+        world_unclamped = resolved.unclamped;
         world_w = resolved.world_w;
         world_h = resolved.world_h;
 
@@ -989,15 +989,16 @@ int main(int argc, char* argv[]) {
         // Camera is unchanged and still owns every conversion and the clamp, it is
         // simply handed a different centre.
         if (debug.free_camera) {
-            // The free camera stays clamped even in an infinite scene, and that is
+            // The free camera stays clamped even in an unclamped scene, and that is
             // not an oversight: debug.pan already clamps its own centre to the world
             // rect, so an unclamped follow here would disagree with the thing feeding
             // it. This camera is for inspecting the world that exists.
             camera.follow(debug.cam_x, debug.cam_y,
                           mode.padded_w(view_scale), mode.padded_h(view_scale), world_w, world_h);
         } else {
-            camera.follow_mode(static_cast<float>(run.player.center_x()), static_cast<float>(run.player.center_y()),
-                               mode.padded_w(view_scale), mode.padded_h(view_scale), world_w, world_h, world_infinite);
+            camera.follow_mode(static_cast<float>(run.player.center_x()),
+                               static_cast<float>(run.player.center_y()), mode.padded_w(view_scale),
+                               mode.padded_h(view_scale), world_w, world_h, world_unclamped);
         }
 
         // Handle continuous mouse pressing.
@@ -1116,8 +1117,9 @@ int main(int argc, char* argv[]) {
             // this is the second of the two aiming calls in one rendered frame, and
             // a framing rule applied at one of them and not the other tears the
             // backdrop against the world every frame.
-            camera.follow_mode(draw_player_x + Player::WIDTH / 2.0f, draw_player_y + Player::HEIGHT / 2.0f,
-                               mode.padded_w(view_scale), mode.padded_h(view_scale), world_w, world_h, world_infinite);
+            camera.follow_mode(draw_player_x + Player::WIDTH / 2.0f,
+                               draw_player_y + Player::HEIGHT / 2.0f, mode.padded_w(view_scale),
+                               mode.padded_h(view_scale), world_w, world_h, world_unclamped);
         }
 
         // The camera's view of the grid, into the cell texture. Clamped to the grid's
@@ -1168,9 +1170,6 @@ int main(int argc, char* argv[]) {
         fp.camera = &camera;
         fp.padded_w = mode.padded_w(view_scale);
         fp.padded_h = mode.padded_h(view_scale);
-        fp.is_infinite = world_infinite;
-        fp.world_w = world_w;
-        fp.world_h = world_h;
         fp.backdrop = &backdrop;
         fp.props = &props;
         fp.cells = targets.cells;
