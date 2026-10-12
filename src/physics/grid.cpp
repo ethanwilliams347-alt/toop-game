@@ -982,8 +982,8 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
         return true;
     }
 
-    // A grain that rolls keeps falling in the same step, which removes the
-    // horizontal shelves without freezing the pile into columns.
+    // A grain that cannot fall rolls one cell diagonally, a cell a step like every
+    // other powder move.
     //
     // swap_elements tags only the two cells it touches, so an entire row can cascade
     // diagonally inside one sweep -- grain at x to (x+1, y+1), grain at x+1 still
@@ -992,21 +992,31 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
     // earlier and has not caught up, leaving a one-cell shelf standing proud of the
     // pile with nothing under it.
     //
-    // Rather than forbid the move, finish it: a grain that rolls off an edge takes
-    // its one further cell of fall immediately, arriving at its resting depth in the
-    // same step instead of hanging a row above the slope. There is no moment at
-    // which the shelf exists, so nothing has to be forbidden to prevent it, and
-    // settled grains still slump freely down a face. Restricting the diagonal
-    // instead catches rest as well as motion, and holds piles in vertical columns no
-    // powder would.
+    // The roll is refused while the cell beside the grain is solid, which is what
+    // the cascade relies on: each grain in it rolls past a neighbour that was still
+    // standing beside it. A surface grain on a slope has open air beside it and
+    // rolls as before, so settled grains still slump freely down a face.
+    //
+    // Two other fixes were tried. Refusing the roll unless its destination is
+    // already supported removes the shelves but catches rest as well as motion,
+    // and holds piles in vertical columns no powder would. Letting a rolled grain
+    // take a second cell of fall in the same step hid the shelf, but made powder
+    // fall twice as far on a diagonal as straight down. grid_test holds both
+    // failures: shelves while pouring, and vertical faces once settled.
     const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::PowderDirection) ? -1 : 1;
 
     for (const int d : {dir, -dir}) {
         const int nx = x + d;
         if (!can_displace(mat, nx, y + 1, 1)) continue;
+        // A grain rolls past the corner only if the cell beside it is clear. The
+        // cascade above needs the opposite: each grain in it rolls through the
+        // spot its neighbour has only just left, past a cell the neighbour was
+        // standing in when the row was set up. With the side checked, a row of
+        // grains on a ledge rolls off one at a time from its open end instead of
+        // all at once.
+        if (is_solid(get_element(nx, y).type)) continue;
 
         swap_elements(x, y, nx, y + 1);
-        if (can_displace(mat, nx, y + 2, 1)) swap_elements(nx, y + 1, nx, y + 2);
         return true;
     }
 
