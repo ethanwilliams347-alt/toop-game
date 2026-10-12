@@ -883,6 +883,11 @@ private:
     std::vector<Element> tip_carry;      // scratch: the body's cells in transit
     std::vector<Element> tip_displaced;  // scratch: fluid the body moves into
 
+    // tip_move's "this cell is the body" marks, on the epoch trick. Its own
+    // array rather than support_visit borrowed between passes: see tip_move.
+    std::vector<uint8_t> tip_visit;
+    uint8_t tip_epoch = 0;
+
     // Stamps for topple_if_unbalanced, so a piece with hundreds of seeds queued is
     // judged once per pass. Separate from scratch_visit because fracture_landing
     // runs immediately before on the same piece and has already stamped it there.

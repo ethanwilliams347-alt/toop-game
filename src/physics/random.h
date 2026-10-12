@@ -23,30 +23,34 @@ namespace sim_random {
 // world its seed ever produced. They are large odd constants sharing no
 // structure, so the tag mixes rather than merely offsets.
 enum class Stream : uint64_t {
-    ColorJitter     = 0x9E3779B97F4A7C15ull,
-    SweepDirection  = 0xD1B54A32D192ED03ull,
+    ColorJitter = 0x9E3779B97F4A7C15ull,
+    SweepDirection = 0xD1B54A32D192ED03ull,
     PowderDirection = 0xA0761D6478BD642Full,
-    FluidDirection  = 0xE7037ED1A0B428DBull,
-    Reaction        = 0x8EBC6AF09C88C6E3ull,
-    Fracture        = 0xC2B2AE3D27D4EB4Full,
-    // Whether a burning cell throws a flame this step, and which empty neighbour it
-    // goes to. Two decisions on one stream, separated by index rather than by tag;
-    // see emit_flame().
-    Emission        = 0xF1BBCDCBB3D935A7ull,
+    FluidDirection = 0xE7037ED1A0B428DBull,
+    Reaction = 0x8EBC6AF09C88C6E3ull,
+    Fracture = 0xC2B2AE3D27D4EB4Full,
+    // Whether a burning cell throws a flame this step, and which empty neighbour
+    // it goes to: two decisions about one cell on one step, so two streams.
+    Emission = 0xF1BBCDCBB3D935A7ull,
+    EmissionSlot = 0x8CB92BA72F3D8DD5ull,
     // How long one flame lives. Its own stream because it is drawn about the new
     // cell at the moment of emission; sharing would correlate a flame's lifetime
     // with whether its parent chose to emit at all.
-    FlameLifetime   = 0xB5026F5AA96619E9ull,
+    FlameLifetime = 0xB5026F5AA96619E9ull,
     // Whether a flame rises this step. Per cell per step, so it must not share with
     // anything else asked about the same cell on the same step.
-    FlameRise       = 0xCA9E6D9C1B5D4C77ull,
+    FlameRise = 0xCA9E6D9C1B5D4C77ull,
     // How far this spot's ignition point sits from its material's stated figure.
     // Drawn with authored_spread, pinned at step 0, because it is a property of the
     // material at that coordinate rather than a decision retaken every step.
-    IgnitionPoint   = 0xD6E8FEB86659FD93ull,
+    IgnitionPoint = 0xD6E8FEB86659FD93ull,
     // How long one steam cell lasts before it condenses. Its own stream for the
     // same reason FlameLifetime has one.
-    SteamLifetime   = 0xA3B195354A39B70Dull,
+    SteamLifetime = 0xA3B195354A39B70Dull,
+    // Which way vent_fluid mirrors its scan for a grain sinking into fluid. Its
+    // own stream rather than FluidDirection, which the same fluid cell draws
+    // from for its own sideways move.
+    VentMirror = 0xC13FA9A902A6328Full,
 };
 
 // splitmix64's finalizer. Not cryptographic, and does not need to be: the
@@ -108,17 +112,10 @@ inline constexpr int spread(int range, uint64_t seed, uint64_t step, uint64_t in
 // Every simulation stream, listed once so the check below can see them all. A
 // new tag has to be added here as well as to the enum.
 inline constexpr Stream SIM_STREAMS[] = {
-    Stream::ColorJitter,
-    Stream::SweepDirection,
-    Stream::PowderDirection,
-    Stream::FluidDirection,
-    Stream::Reaction,
-    Stream::Fracture,
-    Stream::Emission,
-    Stream::FlameLifetime,
-    Stream::FlameRise,
-    Stream::IgnitionPoint,
-    Stream::SteamLifetime,
+    Stream::ColorJitter, Stream::SweepDirection, Stream::PowderDirection, Stream::FluidDirection,
+    Stream::Reaction,    Stream::Fracture,       Stream::Emission,        Stream::FlameLifetime,
+    Stream::FlameRise,   Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
+    Stream::VentMirror,
 };
 
 // Two streams sharing a value are one stream, silently, with no assertion that

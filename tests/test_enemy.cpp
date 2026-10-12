@@ -284,6 +284,53 @@ int main() {
               ground_untouched);
     }
 
+    // --- a body shattered inside a deep drift keeps every grain ---
+    //
+    // A pixel over loose powder puts its grain on top of the powder. The climb
+    // used to stop at twice the frame's height, so under a drift deeper than that
+    // the grain landed inside the sand and was dropped -- a body that lost pixels
+    // without the grid gaining them, which is the bug this suite exists for.
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - G.height);
+        const int drift_top = FLOOR_Y - 3 * G.frame_h();  // well past the old cap
+        for (int y = drift_top; y < FLOOR_Y; ++y)
+            for (int x = 80; x < 140; ++x) g.set_element(x, y, ElementType::Sand);
+        const int sand_before = count_sand(g);
+        const int pixels = e.pixel_count();
+        e.shatter(g, e.center_x(), e.center_y(), 4 * G.frame_h());
+        check("a body shattered in a deep drift comes apart entirely", !e.is_alive());
+        check("...and every pixel is a grain on top of the drift",
+              count_sand(g) - sand_before == pixels,
+              std::to_string(count_sand(g) - sand_before) + " grains for " +
+                  std::to_string(pixels) + " pixels");
+    }
+
+    // --- an enemy buried to the waist works itself free ---
+    //
+    // Deeper than it can step out of, the stuck branch used to hold it still for
+    // good -- no gravity, no walking -- until the player dug it out. It now pushes
+    // the powder out of its box the way a wading species does, and recovers.
+    {
+        Grid g = make_world();
+        Enemy e = standing_enemy(g, 100);
+        for (int y = FLOOR_Y - 12; y < FLOOR_Y; ++y)
+            for (int x = e.cell_x() - 3; x < e.cell_x() + G.width + 3; ++x)
+                if (g.get_element(x, y).type == ElementType::Empty)
+                    g.set_element(x, y, ElementType::Sand);
+        check("an enemy with sand to its waist starts out stuck",
+              e.overlaps_solid(g, e.cell_x(), e.cell_y()));
+        int steps = 0;
+        for (; steps < 120 && e.overlaps_solid(g, e.cell_x(), e.cell_y()); ++steps) {
+            g.update();
+            e.update(g, -10000, -10000, false);
+        }
+        check("...and works itself free rather than standing frozen",
+              e.is_alive() && !e.overlaps_solid(g, e.cell_x(), e.cell_y()),
+              "steps=" + std::to_string(steps));
+    }
+
     // --- a pool full of sinking arrows does not stop the bow ---
     //
     // Fluid drag slows an arrow in deep water to a sixth of a cell a step, so a bow

@@ -173,19 +173,46 @@ bool Enemy::crumble(Grid& grid, int index, int* gx, int* gy) {
     const uint32_t color = kind->art->color_at(fx, fy);
     ElementType there = grid.get_element(wx, wy).type;
 
+    // Solid and not loose: a foot inside the step it is climbing. The pixel goes
+    // and leaves no grain, for the reason at the declaration.
+    if (is_solid(there) && material_of(there).move != MoveKind::Powder) return false;
+
     // Loose powder already there -- most often a grain this same body dropped a
     // moment ago, because a turned limb can put two pixels within a cell of the
     // same spot (rig.h), and a whole body coming down at once is a solid block
     // of its own grains. The grain goes on top of the powder instead, as a grain
     // dropped onto a pile would, so a body still turns into exactly as many
     // grains as it had pixels. Straight up the column, so the result is the same
-    // on every machine; through powder only, never through a wall; and as far as
-    // twice the frame's height, because the column a whole body leaves is the
-    // body's own height of grains with whatever it was standing in under them.
-    for (int climbed = 0;
-         material_of(there).move == MoveKind::Powder && climbed < 2 * kind->frame_h(); ++climbed) {
-        --wy;
-        there = grid.get_element(wx, wy).type;
+    // on every machine, and through powder only, never through a wall -- as far
+    // as the powder goes. It used to stop at twice the frame's height, which
+    // under a deep drift dropped the grain inside the powder and lost it.
+    const auto climb = [&](int cx, int& cy) {
+        ElementType t = grid.get_element(cx, cy).type;
+        // Terminates: past the top of the world get_element answers Wall.
+        while (material_of(t).move == MoveKind::Powder) t = grid.get_element(cx, --cy).type;
+        return t;
+    };
+    there = climb(wx, wy);
+
+    // The column is capped -- a ceiling over the drift, or the top of the world.
+    // Try the columns either side, nearest first and left before right so it is
+    // the same on every machine, out to the frame's width; a pile against a wall
+    // spills over the side rather than vanishing. Only when every one of those is
+    // capped too is the grain lost.
+    if (is_solid(there)) {
+        const int start_y = wy;
+        for (int d = 1; d <= kind->frame_w() && is_solid(there); ++d) {
+            for (const int side : {-d, d}) {
+                int cy = start_y;
+                const ElementType t = climb(wx + side, cy);
+                if (is_solid(t)) continue;
+                wx += side;
+                wy = cy;
+                there = t;
+                break;
+            }
+        }
+        if (is_solid(there)) return false;
     }
 
     if (there == ElementType::Empty) {
@@ -196,10 +223,6 @@ bool Enemy::crumble(Grid& grid, int index, int* gx, int* gy) {
         // cell of it; the paint after it only recolours the grain displace wrote.
         grid.displace(wx, wy, ElementType::Sand);
         grid.paint(wx, wy, ElementType::Sand, color);
-    } else {
-        // Solid: a foot inside the step it is climbing. The pixel goes and leaves
-        // no grain, for the reason at the declaration.
-        return false;
     }
     if (gx) *gx = wx;
     if (gy) *gy = wy;
@@ -352,22 +375,34 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     //
     // Most often its own dust: a hit to the chest drops grains inside the box,
     // and they land around the feet. Lifting by at most a climbable step is what a
-    // body standing in a pile of sand would do. Anything worse than that -- buried
-    // by the brush -- leaves it where it is until it is dug out, rather than
-    // teleporting it the way the player's unstuck search does: an enemy appearing
-    // ten cells away from where it was buried reads as a bug, not as an escape.
+    // body standing in a pile of sand would do. Never further, and never
+    // sideways: an enemy appearing ten cells away from where it was buried reads
+    // as a bug, not as an escape.
+    //
+    // Deeper in powder than a step, it pushes the powder out of its box the way a
+    // wading species does every step (shove_powder) and then tries the lift
+    // again. Without that, sand poured to its waist froze it for the rest of the
+    // run: no motion at all, because the stuck branch replaces the step. Buried in
+    // something static, it stays put until the player digs it out.
     //
     // A species that wades never collides with powder (overlaps_solid), so it is
     // only ever stuck in something static; the powder in its box is shoved out
     // of it here, every step, before anything else looks at the box.
     if (kind->wades) shove_powder(grid);
     if (overlaps_solid(grid, body.x, body.y)) {
-        for (int up = 1; up <= kind->max_step_height; ++up) {
-            if (!overlaps_solid(grid, body.x, body.y - up)) {
-                body.y -= up;
-                did_teleport = true;
-                break;
+        const auto lift = [&]() {
+            for (int up = 1; up <= kind->max_step_height; ++up) {
+                if (!overlaps_solid(grid, body.x, body.y - up)) {
+                    body.y -= up;
+                    did_teleport = true;
+                    return true;
+                }
             }
+            return false;
+        };
+        if (!lift() && !kind->wades) {
+            shove_powder(grid);
+            if (overlaps_solid(grid, body.x, body.y)) lift();
         }
         body.vel_x = 0;
         body.vel_y = 0;
