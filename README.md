@@ -22,6 +22,8 @@ automata) built from scratch in C++ and SDL2.
    ```bash
    cmake --build build --config Release
    ```
+   (`Directory.Build.rsp` in the repo root has MSBuild build several targets at
+   once; with another generator, add `--parallel`.)
 5. Run the game:
    ```bash
    .\build\Release\SlopPhysics.exe

@@ -8,10 +8,12 @@ fetched and built statically by `FetchContent`; don't vendor or system-install i
 These hold across the whole tree. Each exists for a reason given alongside it; if a
 task seems to require breaking one, stop and say so rather than working around it.
 
-- **`src/physics/` has no SDL** — no header, type, or include. The test targets
-  don't link `SDL2-static`, so they don't get its include dirs; that is what keeps
-  physics headless-testable. Moving a file into `ENGINE_SOURCES` to fix a build
-  means the boundary has been crossed.
+- **`src/physics/` has no SDL** — no header, type, or include. `slop_engine` (the
+  OBJECT library built from `ENGINE_SOURCES`) links nothing, so it never gets
+  SDL's include dirs; that is what keeps physics headless-testable, and
+  `sdl_boundary_test` fails if that ever changes. Linking SDL into `slop_engine`,
+  or moving a file into `ENGINE_SOURCES` to fix a build, means the boundary has
+  been crossed.
 - **`src/physics/` has no float.** Replay determinism needs every simulation number
   to be reproducible across compilers and `/fp` modes. Use `fx` (signed 16.16,
   `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
@@ -56,7 +58,7 @@ Leave these as they are; each has a rationale comment at the definition.
 
 ```bash
 cmake -S . -B build                                   # configure (VS generator)
-cmake --build build --config Release                  # build all + stage assets
+cmake --build build --config Release                  # build all + stage assets (parallel: Directory.Build.rsp)
 cmake --build build --config Release --target grid_bench
 
 ctest --test-dir build -C Release --output-on-failure
@@ -101,7 +103,7 @@ turn them into `add_test()`.
   of 46.7, and that drift, not the code, is the ±20% that used to appear between
   builds. If the line doesn't say `on`, the numbers are not comparable. With it,
   one binary repeats to 1–3% (worse with other work running, so close other
-  heavy programs and don't build in parallel). Code layout also moves timings
+  heavy programs and don't run a build while it runs). Code layout also moves timings
   with no code change: across six MSVC builds that differed only in
   `SLOP_BENCH_PAD`, the spread was churning 2.5%, light/fire 3%, cascading 7%,
   light/dark 13%. A difference smaller than that on its row is unproven until it

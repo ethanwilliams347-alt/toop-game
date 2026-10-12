@@ -8,8 +8,9 @@
 In order:
   1. clang-format on the C++ lines this branch changed (.clang-format)
   2. clang-tidy on the C++ files this branch changed (.clang-tidy)
-  3. ruff format + ruff check --fix on the Python files this branch changed (ruff.toml)
-  4. cmake --build, then ctest -- every suite, golden_frame_test included
+  3. ruff format on the Python lines this branch changed, then ruff check --fix on
+     the Python files it changed (ruff.toml)
+  4. cmake --build --parallel, then ctest -- every suite, golden_frame_test included
 
 Every step runs even if an earlier one failed, so one pass shows everything, and
 the exit code is non-zero if any of them did.
@@ -262,8 +263,8 @@ def step_clang_tidy(files, build_dir, jobs):
     )
 
 
-def step_ruff(files, check):
-    name = 'ruff (changed files)'
+def step_ruff(files, untracked, base, check):
+    name = 'ruff (changed lines, changed files)'
     if not files:
         results.append((name, True, 'no Python changes'))
         return
@@ -273,9 +274,37 @@ def step_ruff(files, check):
         return
 
     say(f'\n== {name} ==')
-    fmt = run([exe, 'format', *(['--check'] if check else []), *files])
+    # Lint first, the order ruff's own docs give: a --fix can rewrite a line
+    # (an import sort, say), and formatting afterwards is what leaves that line
+    # formatted in the same pass rather than failing the next --check.
     lint = run([exe, 'check', *([] if check else ['--fix']), *files])
-    ok = fmt.returncode == 0 and lint.returncode == 0
+
+    # The formatter gets the same changed-lines rule clang-format does, for the
+    # same reason: tools/ predates ruff.toml, and a one-line docstring fix
+    # once came back as a 101-line reformat of tools/load_sprite.py. ruff takes
+    # one --range per run, so each changed range is a run of its own, last
+    # first: formatting a range can change how many lines it spans, which moves
+    # every range below it but none above.
+    fmt_ok = True
+    check_arg = ['--check'] if check else []
+    for path in files:
+        # An untracked file is new in its entirety, so all of it is "changed".
+        ranges = None if path in untracked else changed_line_ranges(base, path)
+        if ranges is None:
+            fmt_ok &= run([exe, 'format', *check_arg, path]).returncode == 0
+            continue
+        for first, last in reversed(ranges):
+            # The end of a --range is a cursor position, and it has to sit on
+            # line `last` itself, one past its last character. Column 1 of the
+            # next line looks equivalent and is not: it touches the statement
+            # that starts there, and ruff then reformats the whole of it -- an
+            # import changed inside a `try:` pulled in the `except` handler.
+            with open(os.path.join(REPO_ROOT, path), encoding='utf-8') as f:
+                lines = f.read().splitlines()
+            end_col = len(lines[last - 1]) + 1 if last <= len(lines) else 1
+            proc = run([exe, 'format', *check_arg, f'--range={first}:1-{last}:{end_col}', path])
+            fmt_ok &= proc.returncode == 0
+    ok = fmt_ok and lint.returncode == 0
     results.append((name, ok, f'{len(files)} file(s) ' + ('clean' if ok else 'have findings')))
 
 
@@ -284,7 +313,10 @@ def step_build_and_test(build_dir, config):
     if not os.path.isfile(os.path.join(REPO_ROOT, build_dir, 'CMakeCache.txt')):
         results.append(('build', False, f'{build_dir}/ is not configured; run cmake -S . -B build'))
         return
-    if run(['cmake', '--build', build_dir, '--config', config]).returncode != 0:
+    # --parallel for a build tree from another generator. The Visual Studio one
+    # already gets it from Directory.Build.rsp; without either, MSBuild builds
+    # one project at a time and leaves most of the machine idle.
+    if run(['cmake', '--build', build_dir, '--config', config, '--parallel']).returncode != 0:
         results.append(('build', False, 'build failed'))
         results.append(('ctest', False, 'skipped, build failed'))
         return
@@ -325,7 +357,7 @@ def main():
     # Format before linting, so tidy reads the code as it will be committed.
     step_clang_format(cpp, untracked, base, args.check)
     step_clang_tidy(cpp, args.build_dir, max(1, args.jobs))
-    step_ruff(py, args.check)
+    step_ruff(py, untracked, base, args.check)
     if not args.no_tests:
         step_build_and_test(args.build_dir, args.config)
 

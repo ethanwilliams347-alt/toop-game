@@ -23,5 +23,5 @@ code_check *ARGS:
 # AddressSanitizer build in build-asan/, then every ctest suite under it.
 asan:
     cmake -S . -B build-asan -DSLOP_ASAN=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
-    cmake --build build-asan --config RelWithDebInfo
+    cmake --build build-asan --config RelWithDebInfo --parallel
     ctest --test-dir build-asan -C RelWithDebInfo --output-on-failure

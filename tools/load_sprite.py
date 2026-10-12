@@ -137,7 +137,7 @@ def check_against_animation_table(w, h):
     against? Reported as a hard failure rather than a warning, because binding a
     mismatched sheet is a change that looks like it worked."""
     try:
-        from player_sheet import SHEET_W, SHEET_H, SHEET_COLS, SHEET_ROWS, FRAME_W, FRAME_H
+        from player_sheet import FRAME_H, FRAME_W, SHEET_COLS, SHEET_H, SHEET_ROWS, SHEET_W
     except Exception as exc:
         print(f'WARN  could not read the animation table ({exc}); binding without '
               'checking the grid.')
@@ -191,12 +191,14 @@ def stage(files=None, prune=False):
     remember.
 
     **Staging is copy-only, so a build directory accumulates.** A renamed or
-    deleted asset stays next to the exe forever, and this project has already
-    lost a session to validating one file while the game loaded another. Names
-    that no longer exist in assets/ are therefore *reported* on every run, and
-    `--prune` is what removes them. Reporting is unconditional and deleting is
-    opt-in on purpose: the report costs nothing and the deletion is the half
-    that could throw away something a build put there deliberately.
+    deleted asset stays next to the exe until the next time the game relinks
+    (the build empties the staged directory before copying), and this project
+    has already lost a session to validating one file while the game loaded
+    another. Names that no longer exist in assets/ are therefore *reported* on
+    every run, and `--prune` is what removes them. Reporting is unconditional
+    and deleting is opt-in on purpose: the report costs nothing and the
+    deletion is the half that could throw away something a build put there
+    deliberately.
     """
     staged = 0
     for dest in BUILD_ASSET_DIRS:
