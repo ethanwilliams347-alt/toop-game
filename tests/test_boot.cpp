@@ -27,6 +27,7 @@
 #include "scene/props.h"
 #include "scene/scene.h"
 #include "scene/scene_list.h"
+#include "scene/sprites.h"
 #include "test_util.h"
 
 namespace {
@@ -239,6 +240,43 @@ void test_stand_player_on_ground() {
     }
 }
 
+// The free first landing has to survive being stood on the ground. A placed
+// body that does not know it is grounded counts its first step as a landing and
+// spends the free one there, so the first real fall -- the one it was kept for --
+// costs health.
+//
+// Two drops, each well past the safe landing speed (90 and 140 cells, against a
+// safe speed reached after about 58): the first must be free and the second must
+// not, which proves the rule is live rather than switched off.
+void test_free_first_landing() {
+    // Wide, because the body keeps walking while it falls: a 90-cell drop at the
+    // walk speed carries it about 70 cells sideways, and the 140-cell one further.
+    Run run(320, 300);
+    for (int x = 0; x < 20; ++x) run.grid.set_element(x, 60, ElementType::Wall);    // the ledge
+    for (int x = 20; x < 130; ++x)
+        run.grid.set_element(x, 150, ElementType::Wall); // a shelf below
+    for (int x = 0; x < 320; ++x) run.grid.set_element(x, 290, ElementType::Wall);  // the floor
+    run.player = Player(4, 0);
+    const boot::Standing s = boot::stand_player_on_ground(run);
+    check("free landing: the body stands on the ledge", s.placed && s.surface == 60,
+          std::to_string(s.surface));
+
+    Input right;
+    right.right = true;
+    int on_shelf = -1, on_floor = -1;
+    for (int i = 0; i < 600 && on_floor < 0; ++i) {
+        run.step(right);
+        const int feet = run.player.cell_y() + Player::HEIGHT;
+        if (on_shelf < 0 && run.player.is_on_ground() && feet == 150)
+            on_shelf = run.player.health();
+        if (run.player.is_on_ground() && feet == 290) on_floor = run.player.health();
+    }
+    check("free landing: the first hard landing after a placed spawn is free",
+          on_shelf == Player::MAX_HEALTH, std::to_string(on_shelf));
+    check("free landing: ...and the second one is not", on_floor >= 0 && on_floor < on_shelf,
+          std::to_string(on_floor));
+}
+
 // --- the fixture half: the launch check, as assertions ---
 
 void test_shipped_fixture() {
@@ -298,6 +336,17 @@ void test_shipped_fixture() {
     }
     check("fixture: every prop sprite the list names exists and reads",
           every_sprite_read);
+
+    // The player sheet's fallback, which is what the game draws when sprites.txt
+    // is deleted or ignored. A fallback naming a file that is not shipped turns the
+    // player into a white rectangle with nothing failing but a stderr line.
+    {
+        bmp::Image img;
+        std::string img_error;
+        const std::string sheet = std::string("assets/") + PLAYER_SHEET_FILE;
+        check("fixture: the player sheet's fallback file is shipped and reads",
+              bmp::read(sheet.c_str(), img, &img_error), img_error);
+    }
 
     const boot::PlantingReport r = boot::plant_props(run.grid, defs, widths);
     check("fixture: every prop in the shipped list finds ground",
@@ -447,6 +496,7 @@ int main() {
     test_plant_props();
     test_stand_player_on_ground();
     test_stand_player_on_floor();
+    test_free_first_landing();
     test_choose_display_mode();
     test_shipped_fixture();
     test_scene_resolve();

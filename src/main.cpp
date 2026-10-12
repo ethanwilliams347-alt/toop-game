@@ -13,6 +13,7 @@
 // game/settings_menu.h and game/debug_view.h, which have suites.
 #include <SDL.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -233,8 +234,7 @@ int main(int argc, char* argv[]) {
     // checking here is that the image fits the layout the code is compiled
     // against -- a sheet with the wrong frame size loads fine and draws fine, it
     // just draws the wrong rectangles.
-    const std::string player_sheet_path =
-        sprites.path_for("player_sheet", "player_sheet_fly.bmp");
+    const std::string player_sheet_path = sprites.path_for(PLAYER_SHEET_KEY, PLAYER_SHEET_FILE);
     SDL_Texture* player_tex = shell::load_art_texture(renderer, player_sheet_path.c_str(), true);
     if (player_tex) {
         int sheet_w = 0, sheet_h = 0;
@@ -509,6 +509,10 @@ int main(int argc, char* argv[]) {
                         mode.viewport_w(view_scale), mode.viewport_h(view_scale));
         }
 
+        // A scene that kept the previous one's scale also kept its cell texture,
+        // and the upload only ever rewrites the part the new grid covers.
+        shell::blank_cells(targets.cells);
+
         // After the size and the scale, and before anything is stamped: the stack
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
@@ -550,8 +554,29 @@ int main(int argc, char* argv[]) {
 
     ElementType current_brush = ElementType::Sand;
     int brush_size = 3;
-    // The one-shot the next step takes (N, T), held until a step runs.
-    Command pending_command;
+    // The one-shots key presses have asked for and no step has taken yet (N, T, B,
+    // F6), oldest first. A queue rather than one slot, because a slot keeps only
+    // the last request: N then T while paused spawned the troll and silently lost
+    // the ghoul. Each step takes at most one -- Input carries one command per step,
+    // which is what the session log records -- so a burst drains over consecutive
+    // steps in the order it was pressed.
+    //
+    // Fixed, for the step loop's no-allocation rule; a press with the queue full is
+    // reported rather than dropped quietly.
+    constexpr int COMMAND_QUEUE_SIZE = 8;
+    std::array<Command, COMMAND_QUEUE_SIZE> command_queue{};
+    int command_head = 0, command_count = 0;
+    auto queue_command = [&](const Command& c) {
+        if (command_count == COMMAND_QUEUE_SIZE) {
+            std::fprintf(stderr,
+                         "WARNING: %d commands are already waiting for a step; "
+                         "this key press is ignored.\n",
+                         COMMAND_QUEUE_SIZE);
+            return;
+        }
+        command_queue[static_cast<size_t>((command_head + command_count) % COMMAND_QUEUE_SIZE)] = c;
+        ++command_count;
+    };
 
     // The settings menu is a state, not an overlay with a flag: while it is open
     // the fixed-step loop below does not run, so the world is frozen rather than
@@ -811,25 +836,23 @@ int main(int argc, char* argv[]) {
                 // --- pause, single-step, the free camera, the inspector ---
                 // An enemy at the cursor. A development key like the brush, and a
                 // request rather than a call on the Run: the spawn changes the world,
-                // so it has to arrive through Input and be in the recording. See the
-                // step loop below for why it is consumed by the first step only.
+                // so it has to arrive through Input and be in the recording. See
+                // command_queue for how it reaches a step.
                 if (e.key.keysym.sym == SDLK_n && !repeat)
-                    pending_command = Command::spawn(species::GHOUL);
+                    queue_command(Command::spawn(species::GHOUL));
                 // A troll at the cursor, standing on it -- point at the ground.
                 if (e.key.keysym.sym == SDLK_t && !repeat)
-                    pending_command = Command::spawn(species::TROLL);
+                    queue_command(Command::spawn(species::TROLL));
                 // A fish -- the bass -- likewise; B for bass, since F is the camera.
                 if (e.key.keysym.sym == SDLK_b && !repeat)
-                    pending_command = Command::spawn(species::FISH);
+                    queue_command(Command::spawn(species::FISH));
                 // Enemies' animation style: continuous turn or held key poses, for
                 // comparing the two. A command for the spawn keys' reason -- the
-                // pose is where arrows hit -- and a function key for F9's.
-                if (e.key.keysym.sym == SDLK_F6 && !repeat) {
-                    pending_command = Command{Command::Kind::TogglePoseSnap, 0};
-                    record_notice =
-                        run.snapped_poses() ? "ENEMY POSES  SMOOTH" : "ENEMY POSES  SNAPPED";
-                    record_notice_timer = 2.0;
-                }
+                // pose is where arrows hit -- and a function key for F9's. The notice
+                // is shown by the step that applies it, not here: while paused the
+                // toggle has not happened yet.
+                if (e.key.keysym.sym == SDLK_F6 && !repeat)
+                    queue_command(Command{Command::Kind::TogglePoseSnap, 0});
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
@@ -1022,7 +1045,6 @@ int main(int argc, char* argv[]) {
         // the left and the brush on the right -- and E sits under the finger that
         // is already on W.
         input.shoot = !debug.free_camera && keys[SDL_SCANCODE_E];
-        input.command = pending_command;
 
         // The camera is centred and stays centred; nothing per-frame is left to do to
         // it besides the follow further down.
@@ -1044,35 +1066,42 @@ int main(int argc, char* argv[]) {
         const int steps = frame_pacer.steps(
             frame_time,
             pacer::world_advances(screen == Screen::Settings, run_over, debug.paused));
-        // A command is a one-shot carried on a per-frame sample, so the first step
-        // that runs takes it and the rest of this frame's steps run without it. A
-        // frame that runs no steps -- paused, or in the menu -- keeps it for the
-        // next frame that does, rather than losing the keypress.
-        auto consume_spawn = [&]() {
+        // Commands are one-shots carried on a per-frame sample, so each step that
+        // runs takes the oldest waiting one and the rest run without. A frame that
+        // runs no steps -- paused, or in the menu -- leaves them queued for the next
+        // frame that does, rather than losing the keypresses.
+        auto step_taking_command = [&]() {
             input.command = Command{};
-            pending_command = Command{};
-        };
-        for (int i = 0; i < steps; ++i) {
+            if (command_count > 0) {
+                input.command = command_queue[static_cast<size_t>(command_head)];
+                command_head = (command_head + 1) % COMMAND_QUEUE_SIZE;
+                --command_count;
+            }
             advance_one_step(input);
-            consume_spawn();
-        }
+            if (input.command.kind == Command::Kind::TogglePoseSnap) {
+                record_notice =
+                    run.snapped_poses() ? "ENEMY POSES  SNAPPED" : "ENEMY POSES  SMOOTH";
+                record_notice_timer = 2.0;
+            }
+            input.command = Command{};
+        };
+        for (int i = 0; i < steps; ++i) step_taking_command();
 
         // The single-step. Outside the pacer's loop and spending none of its time,
         // which is what makes it advance the world by exactly one step and leave the
         // accumulator where the pause left it.
-        while (debug.consume_single_step()) {
-            advance_one_step(input);
-            consume_spawn();
-        }
+        while (debug.consume_single_step()) step_taking_command();
 
-        // Where between the last two simulated states this frame falls, and the
-        // teleport clamp that stops resolve_overlap's several-cell shove being eased
-        // across. Both are game/pacer.h. prev_* still lives outside the loop, which is
-        // what lets alpha keep climbing on the frames that buy no step at all.
+        // Where between the last two simulated states this frame falls, snapped
+        // instead on a step the body reports it was relocated rather than moved
+        // (Player::teleported -- resolve_overlap's several-cell shove). Both are
+        // game/pacer.h. prev_* still lives outside the loop, which is what lets
+        // alpha keep climbing on the frames that buy no step at all; the flag is the
+        // last step's, which is the step prev_* was taken from.
         const float alpha = frame_pacer.alpha(debug.paused);
         const pacer::Interpolated draw_player =
-            pacer::interpolate(prev_player_x, prev_player_y,
-                               run.player.visual_x(), run.player.visual_y(), alpha);
+            pacer::interpolate(prev_player_x, prev_player_y, run.player.visual_x(),
+                               run.player.visual_y(), alpha, run.player.teleported());
         float draw_player_x = draw_player.x;
         float draw_player_y = draw_player.y;
 

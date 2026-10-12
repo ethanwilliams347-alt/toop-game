@@ -18,14 +18,26 @@ bool Quiver::update_bow(bool held, int from_x, int from_y, int aim_x, int aim_y)
                                           static_cast<long long>(dy) * dy);
     const long long speed = LAUNCH_SPEED;
 
-    // The oldest arrow is recycled when the pool is full, and "oldest" is the stuck
-    // one with the least life left. A flying arrow is never taken: it is the shot
-    // the player is watching.
+    // A free slot if there is one; otherwise the stuck arrow with the least life
+    // left; otherwise the flying arrow loosed longest ago. A flying arrow is the
+    // last resort because it is a shot the player may be watching, but refusing
+    // the shot instead is a bow that stops working -- see the class comment for
+    // how the pool fills with arrows in flight.
     Arrow* slot = nullptr;
+    Arrow* stuck = nullptr;
+    Arrow* oldest = nullptr;
     for (Arrow& a : pool) {
-        if (!a.live) { slot = &a; break; }
-        if (a.stuck && (!slot || a.life < slot->life)) slot = &a;
+        if (!a.live) {
+            slot = &a;
+            break;
+        }
+        if (a.stuck && (!stuck || a.life < stuck->life)) stuck = &a;
+        if (!a.stuck && (!oldest || a.serial < oldest->serial)) oldest = &a;
     }
+    if (!slot) slot = stuck ? stuck : oldest;
+    // Unreachable: a pool with no free slot holds live arrows, each stuck or
+    // flying, so one of the two above is set. Stated so the refusal is explicit
+    // rather than a null write, and so the analyzer can see it.
     if (!slot) return false;
 
     Arrow a;
@@ -34,6 +46,7 @@ bool Quiver::update_bow(bool held, int from_x, int from_y, int aim_x, int aim_y)
     a.y = a.prev_y = from_y;
     a.vel_x = static_cast<fx::v>(int_math::div_round(speed * dx, len > 0 ? len : 1));
     a.vel_y = static_cast<fx::v>(int_math::div_round(speed * dy, len > 0 ? len : 1));
+    a.serial = loosed++;
     *slot = a;
     draw = DRAW_STEPS;
     return true;

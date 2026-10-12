@@ -56,14 +56,15 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
             }
         }
 
-        // Interpolated between the last two steps like the body is, and with the
-        // same teleport clamp -- climbing out of its own dust can lift one a few
-        // cells in a step.
+        // Interpolated between the last two steps like the player is, and snapped
+        // the same way on a step the body says it was lifted rather than moved --
+        // climbing out of its own dust can lift one several cells in a step.
         const pacer::Interpolated at = pacer::interpolate(
             static_cast<float>(en.prev_cell_x()) + fx::to_float(en.prev_remainder_x()),
             static_cast<float>(en.prev_cell_y()) + fx::to_float(en.prev_remainder_y()),
             static_cast<float>(en.cell_x()) + fx::to_float(en.remainder_x()),
-            static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha);
+            static_cast<float>(en.cell_y()) + fx::to_float(en.remainder_y()), alpha,
+            en.teleported());
         // The rectangle's own anchor. Posed column x lands on frame column x
         // facing right and on (w-1-x) facing left, and SDL's flip mirrors the
         // rectangle about its own middle -- so facing left, the rectangle's left

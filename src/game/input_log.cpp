@@ -68,6 +68,8 @@ uint64_t fingerprint(const Grid& grid) {
             mix(e.color);
             mix(e.updated_tag);
             mix(e.ticks);
+            mix(e.temperature);
+            mix(e.piece_tag);
         }
     }
     return h;

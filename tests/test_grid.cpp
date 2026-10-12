@@ -1,6 +1,7 @@
 #include "physics/grid.h"
 #include "physics/random.h"
 #include "test_util.h"
+#include "world_match.h"
 #include <cstdint>
 #include <cstdlib>
 #include <set>
@@ -46,23 +47,6 @@ static void build_mixed(Grid& g) {
     // support marks and ticks - into the comparison as well.
     g.set_element(50, 30, ElementType::Wall);
     g.set_element(50, 30, ElementType::Empty);
-}
-
-// Compared field by field rather than with memcmp: Element carries padding, and
-// a difference in padding bytes is not a difference in the world.
-static bool worlds_match(const Grid& a, const Grid& b) {
-    if (a.get_pixels() != b.get_pixels()) return false;
-    for (int y = 0; y < a.get_height(); ++y) {
-        for (int x = 0; x < a.get_width(); ++x) {
-            const Element ea = a.get_element(x, y);
-            const Element eb = b.get_element(x, y);
-            if (ea.type != eb.type || ea.color != eb.color ||
-                ea.updated_tag != eb.updated_tag || ea.ticks != eb.ticks ||
-                ea.temperature != eb.temperature || ea.piece_tag != eb.piece_tag)
-                return false;
-        }
-    }
-    return true;
 }
 
 // A small Wall-sealed box holding exactly two touching cells, `a` at (1,1) and
@@ -1029,8 +1013,11 @@ int main() {
         using namespace sim_random;
         const uint64_t seed = 0xC0FFEEull;
 
-        check("the hash is a function of its inputs",
-              bits(seed, 7, 99, Stream::Reaction) == bits(seed, 7, 99, Stream::Reaction));
+        // Two separate calls on purpose: the claim is that asking again gives the
+        // same answer, which one call compared with itself would not test.
+        const uint64_t first = bits(seed, 7, 99, Stream::Reaction);
+        const uint64_t again = bits(seed, 7, 99, Stream::Reaction);
+        check("the hash is a function of its inputs", first == again);
 
         // Balance across neighbouring cells on one step, and across consecutive
         // steps for one cell. Both matter and they fail differently: the first

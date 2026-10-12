@@ -170,6 +170,16 @@ public:
 
     Player(int start_x, int start_y);
 
+    // Asks the grid whether the body, where it now stands, is on the ground, and
+    // records the answer. For whoever places a body directly on terrain.
+    //
+    // A freshly constructed body believes it is in the air -- it has never asked --
+    // so without this its first update() sees on_ground go from false to true and
+    // counts a landing that never happened. That spends has_landed on step 1 and
+    // takes away the free first landing a placed-on-the-ground spawn is meant to
+    // keep for its first real fall (see game/boot.h).
+    void settle(const Grid& grid) { body.on_ground = body.overlaps(grid, BOX, body.x, body.y + 1); }
+
     // Advances the player by one fixed step. Call this at the same fixed rate as
     // Grid::update(), and after it, so collision is tested against the world as it
     // now is rather than as it was.
@@ -225,6 +235,15 @@ public:
     // read of flight at this size is the rhythm of discrete downstrokes. Same shape
     // as DigTool reporting the step a dig connected.
     bool flapped() const { return did_flap; }
+
+    // True on the step resolve_overlap relocated the body out of terrain, rather
+    // than the body travelling there. The same one-step event shape as flapped().
+    //
+    // For the renderer's interpolation: a relocation must be drawn as a jump, not
+    // eased across, and only the simulation knows which of the two a move was --
+    // a fall at terminal velocity covers more cells per step than a short
+    // relocation does, so distance cannot tell them apart (see pacer.h).
+    bool teleported() const { return did_teleport; }
 
     // Read-only, and for the animation selector rather than for anything in here.
     // It distinguishes "the walk key is held" from "the body is actually
@@ -292,6 +311,7 @@ private:
     // DigTool's cooldown is: the beat rate has to be identical on every machine.
     int flap_timer = 0;
     bool did_flap = false;
+    bool did_teleport = false;
 
     // burn_timer is steps until the next burn tick, and is cleared rather than
     // decremented when the body is not in anything hot, so leaving a fire and
@@ -320,6 +340,11 @@ private:
     // Whether the body can actually travel `dx, dy` to reach an open position,
     // rather than only fit once it is there. See resolve_overlap().
     bool escape_is_reachable(const Grid& grid, int dx, int dy) const;
+
+    // Whether moving the box up one cell would push it into static matter that its
+    // top row is not already inside -- what stops the deep-burial climb in
+    // resolve_overlap from grinding up through a ceiling.
+    bool would_enter_static(const Grid& grid) const;
 
     // Returns true if the body was overlapping terrain this step, in which case the
     // caller should skip normal physics.

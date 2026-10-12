@@ -153,8 +153,8 @@ bool Enemy::has_feet() const {
     return false;
 }
 
-void Enemy::crumble(Grid& grid, int index) {
-    if (!pixel(index)) return;
+bool Enemy::crumble(Grid& grid, int index, int* gx, int* gy) {
+    if (!pixel(index)) return false;
     set_pixel(index, 0);
     --remaining;
 
@@ -196,9 +196,14 @@ void Enemy::crumble(Grid& grid, int index) {
         // cell of it; the paint after it only recolours the grain displace wrote.
         grid.displace(wx, wy, ElementType::Sand);
         grid.paint(wx, wy, ElementType::Sand, color);
+    } else {
+        // Solid: a foot inside the step it is climbing. The pixel goes and leaves
+        // no grain, for the reason at the declaration.
+        return false;
     }
-    // Solid: a foot inside the step it is climbing. The pixel goes and leaves no
-    // grain, for the reason at the declaration.
+    if (gx) *gx = wx;
+    if (gy) *gy = wy;
+    return true;
 }
 
 void Enemy::settle_after_loss(Grid& grid) {
@@ -296,6 +301,7 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     prev_y = body.y;
     prev_rem_x = body.rem_x;
     prev_rem_y = body.rem_y;
+    did_teleport = false;
     if (flinch > 0) --flinch;
     breath = (breath + 1) % kind->rig.breathe_steps;
 
@@ -322,15 +328,16 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
             int wx = 0, wy = 0;
             world_of(i % frame_w, i / frame_w, wx, wy);
             if (grid.get_element(wx, wy).temperature < BURN_TEMPERATURE) continue;
-            crumble(grid, i);
-            // Darkened after the fact, on the grain crumble just wrote. Only if it is
-            // the grain crumble wrote -- a solid cell got no grain and must not be
-            // recoloured.
-            const Element e = grid.get_element(wx, wy);
-            if (e.type == ElementType::Sand) {
-                const uint32_t c = e.color;
+            // Darkened after the fact, on the grain crumble just wrote, wherever it
+            // wrote it. That is not the pixel's own cell when that cell held loose
+            // powder -- often the hot sand the body is standing in -- because the
+            // grain goes on top of the powder; recolouring (wx, wy) instead would
+            // scorch whatever was already there, a little darker every tick.
+            int gx = 0, gy = 0;
+            if (crumble(grid, i, &gx, &gy)) {
+                const uint32_t c = grid.get_element(gx, gy).color;
                 const uint32_t scorched = 0xFF000000u | ((c >> 1) & 0x007F7F7Fu);
-                grid.paint(wx, wy, ElementType::Sand, scorched);
+                grid.paint(gx, gy, ElementType::Sand, scorched);
             }
             ++burned;
         }
@@ -358,6 +365,7 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         for (int up = 1; up <= kind->max_step_height; ++up) {
             if (!overlaps_solid(grid, body.x, body.y - up)) {
                 body.y -= up;
+                did_teleport = true;
                 break;
             }
         }

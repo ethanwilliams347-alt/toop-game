@@ -8,6 +8,7 @@
 #include "game/run.h"
 #include "game/input_log.h"
 #include "test_util.h"
+#include "world_match.h"
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -39,22 +40,6 @@ int count_of(const Grid& g, ElementType t) {
 
 void step(Run& run, const Input& input, int n) {
     for (int i = 0; i < n; ++i) run.step(input);
-}
-
-// Same shape as test_grid.cpp's worlds_match, duplicated rather than shared:
-// each test file owns its own small helpers, and this is three lines.
-bool worlds_match(const Grid& a, const Grid& b) {
-    if (a.get_pixels() != b.get_pixels()) return false;
-    for (int y = 0; y < a.get_height(); ++y) {
-        for (int x = 0; x < a.get_width(); ++x) {
-            const Element ea = a.get_element(x, y);
-            const Element eb = b.get_element(x, y);
-            if (ea.type != eb.type || ea.color != eb.color ||
-                ea.updated_tag != eb.updated_tag || ea.ticks != eb.ticks)
-                return false;
-        }
-    }
-    return true;
 }
 
 } // namespace

@@ -46,6 +46,10 @@ struct Arrow {
 
     // Steps left before a stuck arrow is cleared away.
     int life = 0;
+
+    // When it was loosed, as a count of arrows the quiver has loosed: lower is
+    // older. What picks the flying arrow to recycle when the pool is full.
+    uint32_t serial = 0;
 };
 
 // The bow and every arrow in the air. The player's second verb, after DigTool,
@@ -54,9 +58,13 @@ struct Arrow {
 // Player free of any write.
 //
 // The arrows are a fixed pool, not a vector, because they are created on the step
-// path and the step path allocates nothing. When every slot is taken the oldest
-// arrow is recycled -- which in practice is one sticking out of a wall -- rather
-// than the shot being refused: a bow that silently stops firing reads as broken.
+// path and the step path allocates nothing. When every slot is taken an arrow is
+// recycled rather than the shot being refused: a bow that silently stops firing
+// reads as broken. A stuck arrow goes first, the one with the least life left,
+// which is nearly always where the slot comes from. Only with none stuck does a
+// flying arrow go, the one that has flown longest -- which is reachable: the
+// fluid drag slows an arrow in a deep pool to a crawl, so a bow held over a lake
+// fills the pool with arrows still sinking.
 class Quiver {
 public:
     static constexpr int CAPACITY = 48;
@@ -120,6 +128,7 @@ private:
     std::array<ArrowImpact, CAPACITY> impacts{};
     int impacts_n = 0;
     int draw = 0;
+    uint32_t loosed = 0;  // arrows loosed so far; the next one's serial
 
     // Whether the arrow should stop in the cell it has just entered, and why.
     // Out of bounds reads as Wall through Grid::get_element, so the world's edge

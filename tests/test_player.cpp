@@ -284,6 +284,28 @@ int main() {
               !p.overlaps_solid(g, p.cell_x(), p.cell_y()), feet_detail(p));
     }
 
+    // --- the grind stops at a ceiling the body was not inside ---
+    // Buried in sand deeper than the search reaches, under a wall slab. Grinding up
+    // through the sand is the escape; grinding on up through the slab would be a
+    // way through terrain, the same crossing the ring search refuses below. The
+    // body stops under the slab, where the dig tool can open the way.
+    {
+        constexpr int CEILING_Y = 10;
+        constexpr int SAND_TOP = CEILING_Y + 1;
+        Grid g(WORLD_W, WORLD_H);
+        for (int x = 0; x < WORLD_W; ++x) {
+            for (int y = 0; y <= CEILING_Y; ++y) g.set_element(x, y, ElementType::Wall);
+            for (int y = SAND_TOP; y < WORLD_H; ++y) g.set_element(x, y, ElementType::Sand);
+        }
+        const int start_y = SAND_TOP + 2 * Player::MAX_UNSTUCK_RADIUS + Player::HEIGHT;
+        Player p(10, start_y);
+        step(g, p, NOTHING, start_y + 60);
+        check("a body buried in sand grinds up through the sand", p.cell_y() < start_y,
+              feet_detail(p));
+        check("...and stops at a ceiling rather than grinding through it", p.cell_y() >= SAND_TOP,
+              feet_detail(p));
+    }
+
     // --- the escape must be reachable, not merely empty ---
     // The ring search tests the destination box and never the path to it, so a body
     // buried against a wall can be relocated to the far side of that wall: being

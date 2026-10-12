@@ -69,9 +69,9 @@ struct Reaction {
 // Bounded below rather than above, which is the opposite of what it looks like.
 // Because the jitter is one-sided no cell is ever harder to light than the
 // stated point, so nothing can become a permanent hole; the binding constraint
-// is instead the lowest ignition point in the table, which is what
-// lowest_ignition_point() promises nothing may spawn above. Widen this far
-// enough and a puff of steam could light a wall.
+// is instead the hottest thing that spawns without being a heat source, which
+// the softest cell must stay above. Widen this far enough and a puff of steam
+// could light a beam.
 inline constexpr uint8_t WOOD_IGNITION_JITTER = 40;
 
 // Heat, not luck, spreads fire. Wood and Oil ignite when they get hot enough;
@@ -117,21 +117,48 @@ inline constexpr Reaction REACTIONS[] = {
     // dice roll has no age to read.
 };
 
+// Whether a row is an ignition: its product is a heat source. That is what
+// catching fire means in this table -- Oil flashes to Fire, Wood catches into
+// Charred, and both products hold themselves hot and heat their neighbours.
+//
+// Decided by the product's heat_source rather than by naming Fire, because a
+// product named here goes stale silently. The check below used to ask for
+// `result == Fire`, and the day Wood started catching into Charred instead, the
+// commonest ignition in the game dropped out of it with every assertion still
+// passing.
+inline constexpr bool is_ignition(const Reaction& r) {
+    return material_of(r.result).heat_source != 0;
+}
+
 // The coldest temperature at which anything in the table catches fire.
 //
 // Exists to be asserted against rather than read: a material that spawns hotter
 // than this is an ignition source whether or not anything calls it one, because
 // heat_flow has a floor of one unit per step, so any difference of two or more
 // eventually transfers in full. Conductivity only changes how long that takes.
+//
+// The stated min_temp, not the jittered one: the softest cell's threshold is
+// checked separately below.
 inline constexpr uint8_t lowest_ignition_point() {
     uint8_t lowest = 255;
     for (const Reaction& r : REACTIONS)
-        if (r.result == ElementType::Fire && r.min_temp < lowest) lowest = r.min_temp;
+        if (is_ignition(r) && r.min_temp < lowest) lowest = r.min_temp;
     return lowest;
 }
 
+// The hottest any material spawns without being a declared heat source -- the
+// warmest thing in the world that is not meant to start fires.
+inline constexpr uint8_t hottest_ordinary_spawn() {
+    uint8_t hottest = 0;
+    for (int i = 0; i < static_cast<int>(ElementType::Count); ++i) {
+        const Material& m = material_of(static_cast<ElementType>(i));
+        if (m.heat_source == 0 && m.spawn_temperature > hottest) hottest = m.spawn_temperature;
+    }
+    return hottest;
+}
+
 // Nothing may spawn hot enough to light something unless it is declared a heat
-// source. Fire is the one row allowed to, and says so with a non-zero
+// source. Fire and Charred are the rows allowed to, and say so with a non-zero
 // heat_source; everything else has to arrive cool enough that it can only warm
 // its surroundings.
 //
@@ -163,17 +190,22 @@ static_assert(detail::spawn_temperatures_cannot_ignite(),
 // reads min_temp and knows nothing about temp_jitter, so a jitter widened past
 // the margin would slip under the ignition floor without disturbing a single
 // assertion.
+//
+// Compared against what actually spawns rather than against
+// lowest_ignition_point(). The question is whether something hot-but-harmless
+// can light the softest cell, and that is a fact about spawn temperatures; the
+// lowest stated ignition point was only ever a stand-in for it.
 namespace detail {
 constexpr bool jittered_thresholds_stay_above_spawn_temperatures() {
     for (const Reaction& r : REACTIONS) {
-        if (r.temp_jitter == 0) continue;
-        if (static_cast<int>(r.min_temp) - static_cast<int>(r.temp_jitter) <
-            static_cast<int>(lowest_ignition_point()))
-            return false;
+        if (!is_ignition(r)) continue;
+        const int softest = static_cast<int>(r.min_temp) - static_cast<int>(r.temp_jitter);
+        if (softest <= static_cast<int>(hottest_ordinary_spawn())) return false;
     }
     return true;
 }
 } // namespace detail
 
 static_assert(detail::jittered_thresholds_stay_above_spawn_temperatures(),
-              "a jittered ignition threshold reaches below the coldest ignition point in the table");
+              "an ignition threshold, at the soft end of its jitter, is no hotter than something "
+              "that spawns without being a heat source - that spawn would start fires");

@@ -44,7 +44,8 @@ void Player::hurt(int amount) {
 // player is frozen for good. So: look outward for the nearest position the body
 // does fit in and take it, preferring straight up. If nothing is open within the
 // search radius the body is deeply buried, and it grinds upward one cell a step
-// until the search can reach open air.
+// until the search can reach open air -- but never up into static matter it was
+// not already inside, which it has to dig through instead.
 //
 // A position the body fits in is not on its own a position the body may go to.
 // Testing only the destination relocates a body buried against a wall to the
@@ -89,6 +90,19 @@ bool Player::escape_is_reachable(const Grid& grid, int dx, int dy) const {
     return true;
 }
 
+bool Player::would_enter_static(const Grid& grid) const {
+    const auto is_static = [&](int x, int y) {
+        const ElementType t = grid.get_element(x, y).type;
+        return t != ElementType::Empty && material_of(t).move == MoveKind::Static;
+    };
+    // Column by column: a static cell above a column whose top cell is not static
+    // is the edge of a mass the body would be pushing into. Above a column that is
+    // already static, the body is inside that mass and rising through it.
+    for (int cx = body.x; cx < body.x + WIDTH; ++cx)
+        if (is_static(cx, body.y - 1) && !is_static(cx, body.y)) return true;
+    return false;
+}
+
 bool Player::resolve_overlap(const Grid& grid) {
     if (!overlaps_solid(grid, body.x, body.y)) return false;
 
@@ -111,14 +125,22 @@ bool Player::resolve_overlap(const Grid& grid) {
                 body.rem_x = 0;
                 body.rem_y = 0;
                 body.vel_y = 0;
+                did_teleport = true;
                 return true;
             }
         }
     }
 
-    // Buried deeper than the search reaches. Climb, unless doing so would push the
-    // body out through the top of the world.
-    if (body.y > 0) body.y -= 1;
+    // Buried deeper than the search reaches. Grind upward a cell a step -- through
+    // whatever the body is already buried in, but never up into static matter it
+    // was not inside. A body entombed in rubble grinds up through the rubble,
+    // which is the case this exists for: a collapse dropping a hillside on the
+    // player. A body buried in sand under a ceiling stops at the ceiling, because
+    // rising through it is walking through a wall by another name -- the same
+    // crossing escape_is_reachable refuses the ring search above. Stopped there,
+    // the dig tool still works from inside the burial, so the player digs out. The
+    // top of the world stops it too.
+    if (body.y > 0 && !would_enter_static(grid)) body.y -= 1;
     return true;
 }
 
@@ -128,6 +150,7 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // leaving the reset down there would latch the last beat true for every step
     // the body spent buried.
     did_flap = false;
+    did_teleport = false;
     hurt_this_step = 0;
 
     // The burn rule, deliberately above the overlap early return rather than below
@@ -209,11 +232,13 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // integers rather than fixed-point ones.
     //
     // The first landing of a run is free, and that is about the spawn rather than
-    // mercy. Run puts the body high up in open air on purpose, so every run opens
-    // with a fall that reaches terminal velocity -- priced by the rule above, most
-    // of the health bar for doing nothing. It is a property of how the world is set
-    // up, so it is spent here rather than worked around by moving the spawn, which
-    // Run cannot place on terrain it does not know about.
+    // mercy. Run builds the body in open air because it is constructed before any
+    // terrain exists. A scene then normally stands it on the ground
+    // (boot::stand_player_on_ground, which calls settle() so this step does not
+    // mistake the placement for a landing), and the free landing is kept for the
+    // first real fall. When there is no ground under the spawn column the body
+    // is left in the air and falls the rest of the world's height, and this is
+    // what keeps that fall from costing most of the health bar.
     if (!was_on_ground && body.on_ground) {
         if (has_landed && impact_speed > SAFE_FALL_SPEED) {
             hurt(fx::trunc(impact_speed - SAFE_FALL_SPEED) / FALL_DAMAGE_DIVISOR);

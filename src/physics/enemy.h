@@ -524,6 +524,12 @@ public:
     fx::v prev_remainder_x() const { return prev_rem_x; }
     fx::v prev_remainder_y() const { return prev_rem_y; }
 
+    // True on the step the stuck-lift in update() moved the box up out of its own
+    // dust rather than the body walking or falling there -- Player::teleported's
+    // counterpart, for the same reason: the renderer must snap across it, and only
+    // the simulation knows it was not travel.
+    bool teleported() const { return did_teleport; }
+
     bool facing_left() const { return face_left; }
     bool is_chasing() const { return chasing; }
 
@@ -577,6 +583,7 @@ private:
     }
     bool face_left = false;
     bool chasing = false;
+    bool did_teleport = false;
 
     int prev_x = 0;
     int prev_y = 0;
@@ -643,7 +650,12 @@ private:
     // Removes one pixel and writes its grain. A pixel whose cell is already solid --
     // a foot buried in the step it is climbing -- just goes: there is nowhere for the
     // grain to be, and conjuring room would push the world around.
-    void crumble(Grid& grid, int index);
+    //
+    // Returns whether a grain was written, and if so where, in (gx, gy). That is
+    // not always the pixel's own cell: a grain landing on loose powder is put on
+    // top of it, further up the column, so a caller that wants to do something to
+    // the grain it just made has to ask here rather than look at the pixel's cell.
+    bool crumble(Grid& grid, int index, int* gx = nullptr, int* gy = nullptr);
 
     // Everything no longer connected to the heart comes off, and then the death
     // rules are applied. Called after anything that removes pixels.
