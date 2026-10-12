@@ -59,6 +59,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     chunks_y = (height + CHUNK_SIZE - 1) / CHUNK_SIZE;
     chunk_current.resize(chunks_x * chunks_y);
     chunk_next.resize(chunks_x * chunks_y);
+    chunk_warm.assign(static_cast<size_t>(chunks_x) * chunks_y, 0);
     // Both start empty: a world of nothing but Empty has nothing to simulate.
 
     support_visit.resize(width * height, 0);
@@ -126,6 +127,9 @@ void Grid::reset(uint64_t seed) {
     // members for why there are two rather than one.
     std::fill(chunk_current.begin(), chunk_current.end(), DirtyRect{});
     std::fill(chunk_next.begin(), chunk_next.end(), DirtyRect{});
+    std::fill(chunk_warm.begin(), chunk_warm.end(), uint8_t{0});
+    sweep_chunk = -1;
+    sweep_warm = true;
 
     pending_support.clear();
     support_stack.clear();
@@ -222,6 +226,23 @@ void Grid::mark_dirty(int x, int y) {
             const int bx0 = std::max(x0, cx * CHUNK_SIZE);
             const int bx1 = std::min(x1, cx * CHUNK_SIZE + CHUNK_SIZE - 1);
             chunk_next[cy * chunks_x + cx].include_box(bx0, by0, bx1, by1);
+        }
+    }
+}
+
+void Grid::note_warm(int x, int y) {
+    const int x0 = x - 1 > 0 ? x - 1 : 0;
+    const int y0 = y - 1 > 0 ? y - 1 : 0;
+    const int x1 = x + 1 < width - 1 ? x + 1 : width - 1;
+    const int y1 = y + 1 < height - 1 ? y + 1 : height - 1;
+    if (x0 > x1 || y0 > y1) return;
+    for (int cy = y0 / CHUNK_SIZE; cy <= y1 / CHUNK_SIZE; ++cy) {
+        for (int cx = x0 / CHUNK_SIZE; cx <= x1 / CHUNK_SIZE; ++cx) {
+            const int c = cy * chunks_x + cx;
+            chunk_warm[static_cast<size_t>(c)] = 1;
+            // Keeps the sweep's cached flag true to the array when the chunk it is
+            // walking turns warm partway through.
+            if (c == sweep_chunk) sweep_warm = true;
         }
     }
 }
@@ -362,6 +383,7 @@ void Grid::place(int x, int y, ElementType type, uint32_t color) {
     cells[idx] = el;
     pixels[idx] = el.color;
     mark_dirty(x, y);
+    note_warm_if(x, y, el.temperature);
 
     // Structure was removed here, so anything leaning on it has to be re-examined.
     // Removal only: placing a new structure cell does not trigger a check, which is
@@ -390,6 +412,11 @@ void Grid::swap_elements(int x1, int y1, int x2, int y2) {
     // pulls the cells above it into motion behind it.
     mark_dirty(x1, y1);
     mark_dirty(x2, y2);
+
+    // Temperature travels with the cell, so a warm cell arriving somewhere new
+    // makes that somewhere warm.
+    note_warm_if(x1, y1, cells[idx1].temperature);
+    note_warm_if(x2, y2, cells[idx2].temperature);
 
     // The other way structure loses its footing: nothing was removed, but the sand
     // that was holding a slab up just slid out from under it. Only the cell directly
@@ -1281,17 +1308,30 @@ bool Grid::has_neighbor(int x, int y, ElementType t) const {
 bool Grid::step_thermal(int x, int y, const Material& mat) {
     const int idx = get_index(x, y);
 
-    // A cell that is exactly at ambient does no thermal work at all, and this one
-    // line is the difference between heat costing a fifth of the frame in the worst
-    // case and costing nothing measurable. Without it, a scenario containing no fire
-    // that never gets warm still pays eight neighbour probes a cell a step to
-    // confirm that nothing changed.
+    // Each pair of neighbours exchanges heat once per step, and the pair belongs to
+    // one of its two cells: a cell owns the exchanges with its four "forward"
+    // neighbours -- east, and the three below -- and the cell on the far side of
+    // each of the other four owns that one. Every one of the eight pairings is
+    // then reached exactly once.
     //
-    // It is exact rather than an approximation, because conduction is symmetric.
-    // Every exchange writes both ends by the same amount, so it does not matter
-    // which of the pair initiates it: a neighbour more than a degree from ambient
-    // is not skipped here and will do the exchange itself when the sweep reaches
-    // it, and one within a degree had nothing to do either way.
+    // It used to be every cell with all eight, writing both ends, so a pair whose
+    // cells were both visited exchanged twice and a pair with one end asleep or
+    // skipped exchanged once. How fast heat moved then depended on which chunks
+    // were awake and on the order the sweep met the two cells, and the
+    // conduction rate below was tuned against that mixture.
+    static constexpr int FX[4] = {1, -1, 0, 1};  // E, SW, S, SE
+    static constexpr int FY[4] = {0, 1, 1, 1};
+
+    // A cell at ambient whose forward neighbours are within a degree of ambient
+    // has no exchange to make and nothing to bleed, so it does no thermal work at
+    // all. That check is the difference between heat costing a fifth of the frame
+    // in the worst case and costing nothing measurable. Without it, a scenario
+    // containing no fire that never gets warm still pays the neighbour probes and
+    // the arithmetic a cell a step to confirm that nothing changed.
+    //
+    // The forward neighbours have to be looked at, not only this cell: this cell
+    // owns those pairs, and a hot neighbour on its forward side has nobody else to
+    // exchange with it. Four temperature reads, from cells beside this one.
     //
     // Note this does not rest on the stronger claim that nothing can be off ambient
     // and asleep. The dead band makes that false -- a cell one degree off ambient
@@ -1302,7 +1342,23 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
     //
     // Heat sources are excluded: Fire is at ambient for exactly one moment, the
     // step it is placed, and skipping it then would leave it cold forever.
-    if (cells[idx].temperature == AMBIENT_TEMPERATURE && mat.heat_source == 0) return false;
+    if (cells[idx].temperature == AMBIENT_TEMPERATURE && mat.heat_source == 0) {
+        // Nothing near here has been warm since the last reset: no neighbour can
+        // be off ambient, and the reads below would find that out the slow way.
+        // sweep_warm is this cell's chunk's flag; step_thermal runs only from the
+        // sweep, which sets it.
+        if (!sweep_warm) return false;
+        bool quiet = true;
+        for (int k = 0; k < 4 && quiet; ++k) {
+            const int nx = x + FX[k];
+            const int ny = y + FY[k];
+            if (!is_within_bounds(nx, ny)) continue;
+            const int d =
+                static_cast<int>(cells[get_index(nx, ny)].temperature) - AMBIENT_TEMPERATURE;
+            if (d >= 2 || d <= -2) quiet = false;  // outside the dead band
+        }
+        if (quiet) return false;
+    }
 
     bool changed = false;
 
@@ -1310,14 +1366,15 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
     // upwards: a flame in a furnace is not cooled by being in a furnace.
     if (mat.heat_source > cells[idx].temperature) {
         cells[idx].temperature = mat.heat_source;
+        note_warm(x, y);
         changed = true;
     }
 
-    // All eight neighbours, not the four orthogonal ones, and deliberately not the
-    // same call the pressure search makes. There, a diagonal step would let two
-    // pools that merely touch at a corner equalise into each other, which moves
-    // matter through a seam with no area. Heat through a corner is harmless, and
-    // refusing it is what breaks:
+    // All eight neighbours between them, diagonals included, and deliberately not
+    // the four orthogonal ones the pressure search uses. There, a diagonal step
+    // would let two pools that merely touch at a corner equalise into each other,
+    // which moves matter through a seam with no area. Heat through a corner is
+    // harmless, and refusing it is what breaks:
     //
     // an ignited Wood cell becomes Fire, which is a gas, so it rises out of the
     // beam on the next step. The flame that should light the next cell along is
@@ -1326,13 +1383,12 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
     // cross a gap the rule says does not exist.
     //
     // It also puts heat on the same 8-neighbourhood as has_neighbor and mark_dirty,
-    // so contact means one thing throughout the engine.
+    // so contact means one thing throughout the engine. This cell's four forward
+    // neighbours are its half of that neighbourhood; see the ownership note above.
     if (mat.conductivity > 0) {
-        static constexpr int DX[8] = { 0,  0, -1, 1, -1,  1, -1, 1 };
-        static constexpr int DY[8] = {-1,  1,  0, 0, -1, -1,  1, 1 };
-        for (int k = 0; k < 8; ++k) {
-            const int nx = x + DX[k];
-            const int ny = y + DY[k];
+        for (int k = 0; k < 4; ++k) {
+            const int nx = x + FX[k];
+            const int ny = y + FY[k];
             // The world's border is an insulator. get_element() would read it as Wall,
             // which conducts, and every edge of the world would then act as an
             // infinite heat sink -- the same trap has_neighbor() documents.
@@ -1355,6 +1411,8 @@ bool Grid::step_thermal(int x, int y, const Material& mat) {
             // updated_tag, because it is not a move.
             cells[idx].temperature = static_cast<uint8_t>(cells[idx].temperature - flow);
             cells[nidx].temperature = static_cast<uint8_t>(cells[nidx].temperature + flow);
+            note_warm_if(x, y, cells[idx].temperature);
+            note_warm_if(nx, ny, cells[nidx].temperature);
             changed = true;
         }
     }
@@ -1740,6 +1798,10 @@ void Grid::update() {
                 const int end_x = leftward ? r.min_x - 1 : r.max_x + 1;
                 const int step = leftward ? -1 : 1;
 
+                // The chunk's warm flag, looked up once for the run of cells rather
+                // than once per cell -- see sweep_warm.
+                sweep_chunk = cy * chunks_x + cx;
+                sweep_warm = chunk_warm[static_cast<size_t>(sweep_chunk)] != 0;
                 for (int x = start_x; x != end_x; x += step) {
                     step_cell(x, y);
                 }

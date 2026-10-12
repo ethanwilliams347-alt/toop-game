@@ -5,7 +5,11 @@
 #include <vector>
 #include <cstdint>
 
-class Grid {
+// Members are grouped by subsystem, each beside the comment that argues for it,
+// not ordered for packing. One Grid exists per world and owns megabytes of cell
+// and scratch storage, so the tens of bytes of padding the order costs are not
+// worth scattering the groups for.
+class Grid {  // NOLINT(clang-analyzer-optin.performance.Padding)
 public:
     // Side length of one simulation chunk, in cells. Each chunk tracks the bounds
     // of the cells inside it that might still move, and a chunk with nothing moving
@@ -241,6 +245,35 @@ private:
     // Wakes the cell at (x, y) and its neighbours for the next step.
     void mark_dirty(int x, int y);
 
+    // Whether any cell whose 3x3 reaches into the chunk has ever been off ambient
+    // since the last reset. Sticky: set by note_warm, cleared only by reset().
+    //
+    // What it buys is step_thermal's early exit for free. A cell at ambient may
+    // skip heat only if its forward neighbours are within a degree of ambient too
+    // (it owns those exchanges), and reading them costs every awake cell four
+    // loads -- about a fifth of `cascading`, a scenario with no heat in it at all.
+    // In a chunk that has never been warm, no cell and no neighbour of a cell is
+    // off ambient, so the skip needs no reads. Conservative by construction: it
+    // can only ever say "maybe warm" of a chunk that has cooled down again.
+    std::vector<uint8_t> chunk_warm;
+
+    // Marks every chunk the 3x3 around (x, y) touches as warm -- the same box
+    // mark_dirty wakes, for the same reason: a warm cell's neighbours are the
+    // cells whose skip it would otherwise fool. Called wherever a cell's
+    // temperature can become something other than ambient: place(), a swap
+    // carrying a warm cell somewhere new, a tipping body's write, and conduction.
+    void note_warm(int x, int y);
+    void note_warm_if(int x, int y, uint8_t temperature) {
+        if (temperature != AMBIENT_TEMPERATURE) note_warm(x, y);
+    }
+
+    // chunk_warm for the chunk the sweep is walking, read once per run of cells
+    // instead of once per cell: the per-cell lookup alone was a few percent of
+    // `cascading`. note_warm keeps it current when that chunk turns warm mid-run,
+    // so it is never stale. -1 outside the sweep.
+    int sweep_chunk = -1;
+    bool sweep_warm = true;
+
     // Two arrays in step: one for the physics logic (elements) and one raw colour
     // buffer (pixels) that SDL reads directly.
     std::vector<Element> cells;
@@ -434,11 +467,20 @@ private:
     // nondeterminism back into Grid.
 
     // The two rates, as reciprocals: heat moved per step is
-    // (difference * conductivity) / divisor. Conduction between neighbours is eight
-    // times faster than the bleed back to ambient, which is what lets a flame push
-    // heat into a wall faster than the wall can shed it -- the other way round and
-    // nothing would ever get hot enough to ignite.
-    static constexpr int CONDUCTION_DIVISOR = 1024;
+    // (difference * conductivity) / divisor. Conduction between neighbours is
+    // sixteen times faster than the bleed back to ambient, which is what lets a
+    // flame push heat into a wall faster than the wall can shed it -- the other way
+    // round and nothing would ever get hot enough to ignite.
+    //
+    // 512, not the 1024 it was, because each pair now exchanges once a step (see
+    // step_thermal) where it used to exchange twice whenever both cells were
+    // visited. At 1024 a burning plank stops spreading. burn_probe at seed 4242:
+    // the old rule burnt the `front` plank at 1.98 steps a cell, this one at 1.77,
+    // with consumption unchanged (1480 steps). Fire here sits close to the point
+    // where it stops spreading at all -- 576 and 640 each stall a plank -- so the
+    // number was chosen for reliability as well as speed: across six seeds the old
+    // rule left a plank partly unburnt in 7 of 12 probe runs, this one in 3.
+    static constexpr int CONDUCTION_DIVISOR = 512;
     static constexpr int AMBIENT_DIVISOR = 8192;
 
     // Runs conduction, the ambient bleed and the heat-source clamp for one cell,

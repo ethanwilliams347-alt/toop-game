@@ -325,6 +325,7 @@ bool Grid::tip_move(TipBody& b) {
         pixels[idx] = e.color;
         const int cy = idx / width;
         mark_dirty(idx - cy * width, cy);
+        note_warm_if(idx - cy * width, cy, e.temperature);
     };
 
     // The cells the body is leaving. Because the pose is a permutation there are
