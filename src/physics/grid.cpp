@@ -561,6 +561,13 @@ void Grid::fall_if_unsupported(int x, int y) {
     const bool was_falling = cells[seed].ticks >= FRACTURE_MIN_TICKS;
     const bool was_moving = cells[seed].ticks > 0;
 
+    // Whether everything this fill has reached is the seed's own material. Kept
+    // per push rather than per cell visited, so it covers the stack as well as the
+    // trail -- a superset, which only ever errs towards asking the balance
+    // question. See the landing below for what it buys.
+    const ElementType seed_family = material_family(cells[seed].type);
+    bool one_family = true;
+
     support_stack.push_back(seed);
     support_visit[seed] = support_epoch;
     support_state[seed] = static_cast<uint8_t>(SupportState::Pending);
@@ -601,15 +608,19 @@ void Grid::fall_if_unsupported(int x, int y) {
             // of a break are re-queued and get asked about balance on their own
             // next time round.
             //
-            // A piece at rest on the bottom of the world -- terrain, mostly -- is
-            // cheap to ask about, and topple_if_unbalanced says why: its walk
-            // goes downhill through the seed's own material first and gives up
-            // the moment that material reaches the world floor. That is the one
-            // place the shortcut lives. A second copy used to sit here, keyed on
-            // where this fill happened to end rather than on the seed's material,
-            // so it also skipped a wooden post standing on stone that itself
-            // stood on the floor.
-            const bool tipped = topple_if_unbalanced(x, y, was_moving);
+            // At rest, one case is not asked at all: this fill came down to the
+            // bottom of the world through nothing but the seed's own material.
+            // topple_if_unbalanced would answer "standing" there anyway -- its
+            // walk follows the same material downhill and gives up the moment it
+            // reaches the world floor -- so asking would only repeat that walk,
+            // which on a wide burning slab is a seed every few cells, every step.
+            // This is that rule's cheap pre-check, not a second rule: it is
+            // keyed on every cell the fill reached, so a wooden post standing on
+            // stone that stands on the floor is still weighed. (An earlier copy
+            // looked only at the cell the fill ended on, and skipped that post.)
+            const bool down_own_material_to_floor = !was_moving && cy + 1 >= height && one_family;
+            const bool tipped =
+                !down_own_material_to_floor && topple_if_unbalanced(x, y, was_moving);
             if (!tipped && was_falling) fracture_landing(x, y);
 
             settle_marks(SupportState::Supported, idx);
@@ -674,6 +685,7 @@ void Grid::fall_if_unsupported(int x, int y) {
                 support_visit[nidx] = support_epoch;
                 support_state[nidx] = static_cast<uint8_t>(SupportState::Pending);
                 support_stack.push_back(nidx);
+                if (material_family(cells[nidx].type) != seed_family) one_family = false;
             }
         }
     }
