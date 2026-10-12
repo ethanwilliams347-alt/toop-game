@@ -70,8 +70,8 @@ public:
     // of the things this clears for "reset run == fresh run with the same seed" to
     // mean anything.
     //
-    // One exception: vent_radius survives a reset, because it is configuration
-    // rather than world state. See the end of reset()'s definition.
+    // One exception: the make_room_above switch survives a reset, because it is
+    // configuration rather than world state. See the end of reset()'s definition.
     void reset(uint64_t seed);
 
     // Advances the simulation by exactly one fixed step. The caller is responsible
@@ -148,52 +148,32 @@ public:
     // the diagnostic for the same reason active_chunk_count() is.
     int tipping_count() const { return tip_count; }
 
-    // How far vent_fluid searches for somewhere to put displaced fluid. See
-    // vent_radius in the private section for what the number means; this trio
-    // exists so the sweep that priced it can be re-run.
+    // --- liquids ---
     //
-    // Settable at runtime because the only other way to price it is a rebuild, and
-    // a rebuild moves the compiler's layout of the hot loop along with the value
-    // under test. One binary, one sitting, the same input stream, with the radius
-    // moved between runs is the only reading this project accepts for a cost knob.
+    // A full cell's worth of liquid, in Element::mass units. Every amount of liquid
+    // in the engine is counted in these, and a cell placed by the brush or a scene
+    // starts with exactly this much.
     //
-    // This is configuration, not world state, which is why reset() leaves it alone
-    // and nothing derives it from the seed. A grid at a non-default radius is still
-    // fully deterministic, but two grids at different radii are different
-    // simulations that diverge from identical inputs -- so a replay at a
-    // non-default radius reports a different end state, and that is not evidence of
-    // a stale log.
-    //
-    // Public so a test and the bench can name the shipped value rather than writing
-    // the number and quietly disagreeing with this header later.
-    static constexpr int DEFAULT_VENT_RADIUS = 3;
+    // Fine-grained on purpose. Every transfer is a whole number of units, and a
+    // difference smaller than the rounding can move is a difference that stays:
+    // at 4096 to a cell, the dead band that lets a surface sleep is under half a
+    // percent of a cell, and a partial top row levels to a few hundredths of one.
+    static constexpr int LIQUID_FULL = 4096;
 
-    int get_vent_radius() const { return vent_radius; }
+    // Element::flow is one signed byte, so it stores velocity in steps of this many
+    // units a step: up to a quarter of a cell a step either way. Finer than that
+    // matters more than range: on a gentle slope a step's acceleration is a few
+    // tens of units, and a coarser byte truncated every one of them to zero, so
+    // momentum never built and the slope crept level by diffusion alone.
+    static constexpr int LIQUID_FLOW_SCALE = 8;
 
-    // Negatives clamp to zero, and zero is a real setting: at r=0 the search box is
-    // the fluid's own cell, which is never Empty, so vent_fluid always returns false
-    // and every caller falls back to the plain swap. That is venting off, on the
-    // same instrument as every other row of the sweep.
-    void set_vent_radius(int r) { vent_radius = r > 0 ? r : 0; }
-
-    // The other two displacement rules, switchable by the same argument as the
-    // radius above: pricing a rule needs it turned off as well as on.
+    // Whether the brush's make_room_above runs. Switchable so its cost can be
+    // priced turned off as well as on: an ablation, without a rebuild per data
+    // point. Turning it off does not merely remove its cost, it changes the
+    // simulation, so every later step does different work and the world diverges.
     //
-    // Venting, seek_level and the brush's make_room_above are the displacement
-    // machinery, and a whole-step timing cannot say how much of itself is any one
-    // of them. Ablation can, without a rebuild per data point.
-    //
-    // Gated at the call site rather than inside the function, so an ablated rule
-    // costs a predictable branch and not a call. Both default on, so a Grid nobody
-    // configures runs the shipped simulation.
-    //
-    // Turning one off does not merely remove its cost, it changes the simulation,
-    // so every later step does different work and the world diverges. That is
-    // unavoidable in an ablation and is why these numbers are a share of a scenario
-    // rather than a subtraction.
-    bool seek_level_enabled() const { return seek_level_on; }
-    void set_seek_level_enabled(bool on) { seek_level_on = on; }
-
+    // Configuration rather than world state, so reset() leaves it alone. Defaults
+    // on, so a Grid nobody configures runs the shipped simulation.
     bool room_above_enabled() const { return room_above_on; }
     void set_room_above_enabled(bool on) { room_above_on = on; }
 
@@ -288,35 +268,7 @@ private:
     // this is one function rather than two copies.
     void place(int x, int y, ElementType type, uint32_t color);
 
-    // Moves the fluid at (fx, fy) to the nearest free surface of its own kind, so a
-    // powder sinking into it does not have to hand it upwards. Returns false when
-    // no such surface is within vent_radius, in which case the caller keeps the
-    // plain swap.
-    bool vent_fluid(int fx, int fy);
-
-    // How far vent_fluid will look for a surface. This is the expensive part of the
-    // powder step and it runs on every powder/fluid contact, so the radius is a
-    // direct cost knob and was swept rather than picked.
-    //
-    // Measured one radius per run of a single binary, the cost is dead linear in
-    // the area of the search box -- about 0.063 ms per extra cell scanned at every
-    // radius, with no knee. The value is therefore chosen on quality: the gap
-    // between r=3 and r=4 in fluid_probe is a transient that drains on brush
-    // release, which is not worth 27% more scan.
-    //
-    // Runtime rather than constexpr so the sweep can be re-run without a rebuild;
-    // the default is the whole of the behaviour, so a Grid nobody configures runs
-    // the shipped simulation. The conversion is not free: churning, the only bench
-    // scenario containing water, costs about a third more at both world sizes while
-    // every control moves by under 2%. On a played session that lands inside the
-    // noise, because the cost falls entirely on powder-into-fluid exchange and a
-    // played world has little. Anything that makes powder livelier would put that
-    // share back on the hot path.
-    int vent_radius = DEFAULT_VENT_RADIUS;
-
-    // The other two ablation switches. Configuration like vent_radius, and
-    // surviving reset() for the same reason. Accessors are in the public section.
-    bool seek_level_on = true;
+    // The make_room_above switch; see room_above_enabled().
     bool room_above_on = true;
 
     // Lifts the movable cell at (x, y) to the first Empty cell above it, so the
@@ -369,92 +321,146 @@ private:
 
     // Per-behaviour steps. Each returns true if the cell moved.
     bool step_powder(int x, int y, const Material& mat);
-    bool step_fluid(int x, int y, const Material& mat, int dy);
+    bool step_gas(int x, int y, const Material& mat);
+    bool step_liquid(int x, int y, const Material& mat);
 
-    // --- liquids find their level ---
+    // --- liquids ---
     //
-    // can_displace refuses every upward move unless the mover is lighter than its
-    // target, and Empty has density 0, so a liquid can never rise. It falls and
-    // spreads sideways into Empty, which is a powder that happens to flow: a U-bend
-    // cannot equalise, because the short arm has no way to gain a cell.
+    // A liquid is an amount, not a set of cells. Each liquid cell holds some of
+    // it (Element::mass) and a sideways velocity (Element::flow), and a step
+    // moves amounts between neighbouring cells rather than moving cells:
     //
-    // The rule below moves the tall arm's surface cell down onto the short arm's
-    // surface rather than making the short arm rise. Rising is a swap, so it leaves
-    // a bubble of Empty inside the body, and the transfer is only finished once the
-    // ordinary fall and spread rules have walked that bubble back down the arm and
-    // up the far side. During those steps the bubble cuts the body in two, the
-    // search transiently answers "no head", the cells stop marking themselves dirty,
-    // and the chunk sleeps with the tube parked out of level. Every fix for that
-    // keeps a body awake while it is unlevel, which is a standing cost paid by every
-    // pool in the world.
+    //   down      as much as the cell below will hold;
+    //   sideways  some of the difference to each lower neighbour, and in the
+    //             direction it is already flowing, by the momentum it carries;
+    //   up        whatever it holds past full, while the cell above has room;
+    //   level     if none of those moved anything: see below.
     //
-    // Moving the tall cell makes each transfer a single atomic swap, so there is no
-    // journey to stay awake for and the wake-up is local: the vacated cell's 3x3
-    // mark is exactly the cell below it, which is the next one to transfer. A body
-    // equalises at one cell per step and then sleeps.
+    // Every transfer moves an exact amount between exactly two cells, so liquid is
+    // conserved by construction; a cell left with none becomes Empty, and Empty
+    // that receives some becomes liquid.
     //
-    // The visible cost is that a cell can travel further in one step than a cell
-    // should. It is bounded by the search below, happens only between two points of
-    // one connected body of the same liquid, and looks like one side dropping while
-    // the other rises. Conservation is what keeps it honest: the obvious way to make
-    // water level is to invent some.
+    // Liquid does not compress: a full cell holds LIQUID_FULL whatever is above
+    // it. Pressure is a rule instead (level_liquid): an idle surface cell looks
+    // through its own body for a lower surface and sends it half the difference,
+    // which is what levels a U-tube -- through a tunnel whose cells are all full
+    // and so have no difference to flow down.
+    //
+    // Pressure as compression was tried first, and at this engine's depths it
+    // cannot work. A U-tube levels only as fast as the compression difference
+    // across its tunnel can push, so it has to be stiff; a body hides its
+    // compression as missing volume, so it has to be soft. At 3% a cell a U-tube
+    // took a thousand steps to level and a lake painted 339 cells deep settled to
+    // 118. The only overfull cells now are the ones a sinking grain presses its
+    // water into, and they pass the excess up until it reaches the surface.
+    //
+    // Momentum is what makes released water run rather than slump: without it a
+    // dam break spread by diffusion alone, which the dead band stops while the
+    // water still stands ten cells uneven. The velocity is pushed by the
+    // difference in amount to either side and decays by LIQUID_DAMP each step, so
+    // a pool at rest has none, sleeps, and stays asleep.
+    //
+    // This replaces three separate rules that each covered an artefact of the one
+    // before: venting a sinking grain's water to a nearby surface, draining films
+    // off a pile, and moving whole cells between the arms of a body to level it.
+    // The last survives as level_liquid, moving amounts rather than cells, so it
+    // needs no hysteresis: half a difference cannot overshoot.
 
-    // How far the connected-liquid search may look before giving up. Bounded
-    // because a settled pool's every surface cell asks this question on every step
-    // it is awake, so the cost has to be a constant rather than the size of the
-    // pool. Giving up early is the harmless direction: a body wider than this
-    // equalises in several hops instead of one.
+    // A cell this light does not spread onto dry ground, so a puddle stops thinning
+    // at a quarter of a cell rather than smearing across the whole floor.
+    static constexpr int LIQUID_MIN_SPREAD = LIQUID_FULL / 4;
+
+    // How much a sinking grain may press into the liquid around it, as a ceiling on
+    // the neighbours' amount. Twice full, so the grain's water goes sideways and
+    // down first and then rises out of them through the up flow -- which is the
+    // pool's surface rising. Also the ceiling on what the up flow piles into a
+    // cell under sand, which keeps every amount well inside 16 bits.
+    static constexpr int LIQUID_PUSH_CAP = 2 * LIQUID_FULL;
+
+    // Momentum: velocity gains the difference in amount either side times
+    // LIQUID_ACCEL/256 each step, and keeps LIQUID_DAMP/256 of itself. Two
+    // differences closer than LIQUID_DEAD push nothing, so a level surface is
+    // still. The ceiling on speed is a material's `spread` times
+    // LIQUID_SPEED_PER_SPREAD, in mass per step, which is what makes oil slower
+    // than water.
     //
-    // The number reads shorter than it is. The search is breadth-first through the
-    // body, not along its surface, and spends its budget in both directions at
-    // once, so in a pool five cells deep it buys roughly six columns of reach
-    // either way.
-    //
-    // It has to carry level transport on its own. The old lateral spread rule let a
-    // surface cell walk sideways into any Empty at all, which jittered forever on a
-    // flat surface but also carried cells off the top of a mound out to the thin
-    // edges of a pool for free. Refusing the pointless half refused the useful half
-    // too, and a poured column settled into a permanent heap.
-    static constexpr int MAX_PRESSURE_CELLS = 512;
+    // As strong as it can be and stay stable. The velocity is a cell's, pushed by
+    // its two neighbours' difference, so nothing stops alternate cells drifting
+    // apart once the push outruns the spreading that evens them: at ACCEL 96, or
+    // DAMP 244, pools stopped sleeping, and by 128 a still surface heaped into a
+    // standing checkerboard. A flux on each face between cells would not have
+    // that weakness, but needs every face's push taken from one consistent state,
+    // and the sweep changes cells as it goes.
+    static constexpr int LIQUID_ACCEL = 64;
+    static constexpr int LIQUID_DAMP = 224;
+    static constexpr int LIQUID_DEAD = 16;
+    static constexpr int LIQUID_SPEED_PER_SPREAD = 256;
 
-    // How much lower the receiving surface has to be before a cell will move to it,
-    // in cells. Two, not one, and that is hysteresis rather than a tuning
-    // preference: each transfer moves the two surfaces one cell towards each other,
-    // so at a threshold of one a body one cell out of level would swap which side
-    // was high, forever. Two settles, at the cost of level meaning level to within
-    // a cell.
-    static constexpr int MIN_PRESSURE_HEAD = 2;
+    // Momentum may carry liquid uphill -- into a neighbour holding more -- only
+    // while it is moving at least this fast. That is the surge that runs a wave up
+    // the far wall. Below it, sideways flow is downhill only, and downhill flow
+    // that never overshoots is what guarantees a body of liquid comes to rest:
+    // without the floor, a unit nudged uphill by a dying velocity and sent back by
+    // the difference it made cycled forever and the pool never slept.
+    static constexpr int LIQUID_MIN_SURGE = LIQUID_FULL / 64;
 
-    // Searches the body of `type` connected to (x, y) for a surface cell -- one
-    // with Empty directly above it -- at least MIN_PRESSURE_HEAD rows lower.
-    // Returns its index, or -1. Breadth-first and orthogonally connected:
-    // nearest-first makes the cap bite evenly in every direction rather than all
-    // down one arm, and a diagonal step would let two pools that merely touch at a
-    // corner equalise into each other.
-    int find_lower_surface(int x, int y, ElementType type);
+    // How far a sinking grain looks for its own liquid to press water into. The
+    // cells beside it are often sand on the flank of a cone, so the neighbours
+    // alone leave the water nowhere but up the grain's column; three cells reaches
+    // past a flank into the pool.
+    static constexpr int LIQUID_DISPERSE_RADIUS = 3;
 
-    // The move itself: one cell from (x, y) onto whatever lower surface the search
-    // found. Returns true if the cell moved.
-    bool seek_level(int x, int y);
+    // Levelling (level_liquid). The search gives up after LIQUID_LEVEL_CELLS cells
+    // of the body -- breadth-first, so in every direction at once -- and a wider
+    // body levels in several hops instead of one. It moves nothing for a
+    // difference under LIQUID_LEVEL_HEAD, which is what lets a level body sleep:
+    // the last of a ripple is the ordinary sideways flow's. And it moves at most
+    // LIQUID_LEVEL_RATE a step from any one cell, so a U-tube is seen to flow
+    // rather than jump.
+    static constexpr int LIQUID_LEVEL_CELLS = 512;
+    static constexpr int LIQUID_LEVEL_HEAD = LIQUID_FULL / 4;
+    static constexpr int LIQUID_LEVEL_RATE = LIQUID_FULL / 4;
 
-    std::vector<int> pressure_queue;     // scratch, reused across searches
+    // How much of two stacked cells' combined amount the lower one holds: all of it
+    // up to full, and never more. The only definition of the vertical
+    // equilibrium; both the downward and the upward flow are computed from it, so
+    // a column at rest moves nothing either way, and anything a sinking grain has
+    // pressed into a cell past full is upward flow until it reaches the surface.
+    static int stable_lower(int total);
 
-    // A per-cell "seen this pass" marker, on the same epoch trick as support_visit,
-    // and shared by two unrelated searches -- which is why it is named for what it
-    // is rather than for either of them.
-    //
-    // The two never overlap, for an ordering reason rather than a local one:
-    // fracture_landing() runs only inside resolve_support(), find_lower_surface()
-    // only inside the cell sweep, and support resolves in full before the sweep
-    // starts. They also advance the epoch on different schedules -- once per
-    // support pass, so one landing costs one fill, and once per call, because two
-    // adjacent surface cells are asking genuinely different questions.
-    //
-    // Nothing enforces that invariant, so a third user is not free. Anything
-    // wanting these marks from inside both the sweep and support resolution, or
-    // adding a pass between the two, needs its own array.
-    std::vector<uint8_t> scratch_visit;
-    uint8_t scratch_epoch = 0;
+    // Moves `amount` of liquid from cell `from` to cell `to`, carrying momentum
+    // and heat with it, turning an emptied source into Empty and an Empty
+    // destination into liquid. Wakes both.
+    void transfer_liquid(int from, int to, int amount);
+
+    // A sinking grain is about to swap into the liquid cell at (x, y): presses
+    // that cell's amount into the same liquid nearby -- level with it or below,
+    // within LIQUID_DISPERSE_RADIUS, nearest first -- up to LIQUID_PUSH_CAP, so
+    // what the swap carries up is only what had nowhere else to go.
+    void disperse_liquid(int x, int y);
+
+    // What a cell looks like, from what it holds: a liquid is drawn more
+    // transparent as it thins below full. Everything else is its colour.
+    static uint32_t pixel_of(const Element& e);
+
+    // Pressure: a surface cell of liquid at (x, y) that had nothing else to do
+    // searches its body for a lower surface with room and sends it half the
+    // difference in height, up to LIQUID_LEVEL_RATE. Any path through the body
+    // counts, since liquid that does not compress carries pressure through any
+    // path. Returns true if anything moved.
+    bool level_liquid(int x, int y);
+
+    // level_liquid's search. The marks are cleared after every search by walking
+    // the queue, which is at most LIQUID_LEVEL_CELLS long, rather than by an epoch:
+    // there can be a search for every surface cell every step, and an epoch byte
+    // would wrap -- and need the whole array cleared -- every 255 of them.
+    std::vector<int> level_queue;
+    std::vector<uint8_t> level_visit;
+
+    // A per-cell "seen this pass" marker for fracture_landing's fill, on the same
+    // epoch trick as support_visit.
+    std::vector<uint8_t> fracture_visit;
+    uint8_t fracture_epoch = 0;
 
     // --- heat ---
     //
@@ -931,7 +937,7 @@ private:
     uint8_t tip_epoch = 0;
 
     // Stamps for topple_if_unbalanced, so a piece with hundreds of seeds queued is
-    // judged once per pass. Separate from scratch_visit because fracture_landing
+    // judged once per pass. Separate from fracture_visit because fracture_landing
     // runs immediately before on the same piece and has already stamped it there.
     //
     // A fresh epoch per check, not per pass, and balance_pass_start marks the

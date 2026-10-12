@@ -17,14 +17,11 @@
 // conserving only when the two are added up.
 namespace liquid {
 
-inline constexpr int64_t UNITS_PER_CELL = 1;
+inline constexpr int64_t UNITS_PER_CELL = Grid::LIQUID_FULL;
 
 // The units of liquid (or steam) cell `e` holds, 0 for anything else. The type is
 // checked by the caller; this is only "how much".
-inline int64_t units_of(const Element& e) {
-    (void)e;
-    return 1;
-}
+inline int64_t units_of(const Element& e) { return e.mass; }
 
 inline int64_t total(const Grid& g, ElementType t) {
     int64_t n = 0;

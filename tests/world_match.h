@@ -24,7 +24,7 @@ inline bool worlds_match(const Grid& a, const Grid& b) {
             const Element eb = b.get_element(x, y);
             if (ea.type != eb.type || ea.color != eb.color || ea.updated_tag != eb.updated_tag ||
                 ea.ticks != eb.ticks || ea.temperature != eb.temperature ||
-                ea.piece_tag != eb.piece_tag)
+                ea.piece_tag != eb.piece_tag || ea.mass != eb.mass || ea.flow != eb.flow)
                 return false;
         }
     }

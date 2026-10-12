@@ -186,8 +186,9 @@ int main() {
               "placed=" + std::to_string(placed) +
                   " after=" + std::to_string(liquid::total(g, ElementType::Water)));
         // Level is only half of it: a rule that equalises and then keeps trading
-        // cells back and forth across the join is level on average and costs full
-        // price forever. MIN_PRESSURE_HEAD is what this checks.
+        // water back and forth across the join is level on average and costs full
+        // price forever. That level_liquid sends half a difference, never more,
+        // and nothing under LIQUID_LEVEL_HEAD, is what this checks.
         check("a U-tube stops once it is level", g.active_chunk_count() == 0,
               "awake=" + std::to_string(g.active_chunk_count()));
     }
@@ -257,9 +258,10 @@ int main() {
                   " after=" + std::to_string(liquid::total(g, ElementType::Water)));
 
         // Level to within one cell: every column is the same depth give or take the
-        // single leftover row. Exactly the tolerance MIN_PRESSURE_HEAD documents --
-        // what is new is that the surface is still at that tolerance rather than
-        // merely level on average.
+        // single leftover row. A loose bound for a model that does better -- a row
+        // holds part-cells, so the leftover spreads across it -- but the claim
+        // worth pinning is that the surface stays inside it rather than being
+        // level only on average.
         double min_depth = 41.0, max_depth = 0.0;
         for (int x = 0; x < 40; ++x) {
             const double d = liquid::depth(g, x, ElementType::Water);
@@ -1224,95 +1226,13 @@ int main() {
         check("a reset run matches a fresh run built with the same seed", worlds_match(a, b));
     }
 
-    // --- Grid::vent_radius ---
+    // --- the make_room_above switch ---
     //
-    // A compile-time constant can only be priced across separate builds, which is
-    // the method that gets a confident number out of the compiler rather than the
-    // code. These pin the three things the conversion has to get right for a sweep
-    // to mean anything.
+    // A switch that reaches only a field would make every row of an ablation table
+    // an identical number, so it has to be shown reaching the rule it names.
+    // make_room_above fires only on a brush write over something movable, so the
+    // scene is water with sand painted into the middle of it.
     {
-        Grid g(20, 20, 42);
-        check("a fresh grid vents at the shipped radius",
-              g.get_vent_radius() == Grid::DEFAULT_VENT_RADIUS,
-              "got " + std::to_string(g.get_vent_radius()));
-
-        // Deliberate, and the opposite of what reset()'s own header promises: the
-        // radius is configuration, not world state, and a world-reset hotkey that
-        // silently undid a setting the caller made would be the defect. Asserted
-        // rather than commented so that whoever changes their mind has to change a
-        // test and read the argument at Grid::reset.
-        g.set_vent_radius(1);
-        g.reset(42);
-        check("a reset keeps the configured vent radius", g.get_vent_radius() == 1,
-              "got " + std::to_string(g.get_vent_radius()));
-
-        // Zero is a real setting -- the search box collapses to the fluid's own
-        // cell, which is never Empty, so venting is off. Below zero is not a
-        // setting, and a negative bound would make the loop body run zero times in
-        // a way that reads as the same thing while meaning nothing.
-        g.set_vent_radius(-4);
-        check("a negative vent radius clamps to venting off", g.get_vent_radius() == 0,
-              "got " + std::to_string(g.get_vent_radius()));
-    }
-    {
-        // The check that the knob is wired to the loop and not just to a field. A
-        // getter test passes perfectly well against a vent_fluid that still reads a
-        // constant, which would make every row of a sweep an identical number. So:
-        // the same seed, the same scene, the same steps, venting off in one of them.
-        //
-        // build_mixed drops a sand slab into a water band, which is exactly the
-        // powder-into-fluid contact vent_fluid exists for. The assertion is
-        // divergence, not a direction: which world ends up tidier is a quality
-        // question fluid_probe answers, and this one only has to prove the radius
-        // reaches the physics.
-        Grid vented(80, 60, 9090);
-        build_mixed(vented);
-        step(vented, 100);
-
-        Grid unvented(80, 60, 9090);
-        unvented.set_vent_radius(0);
-        build_mixed(unvented);
-        step(unvented, 100);
-
-        check("the vent radius reaches the powder/fluid path",
-              !worlds_match(vented, unvented));
-
-        // And the shipped path is untouched by the conversion: a grid nobody
-        // configures is the grid that was there before. The strong version of this
-        // claim is grid_bench replaying both recorded sessions to their recorded end
-        // states byte for byte, which is a cross-build check this suite cannot make.
-        Grid explicit_default(80, 60, 9090);
-        explicit_default.set_vent_radius(Grid::DEFAULT_VENT_RADIUS);
-        build_mixed(explicit_default);
-        step(explicit_default, 100);
-
-        check("setting the radius to the default is the default path",
-              worlds_match(vented, explicit_default));
-    }
-
-    // --- the other two displacement switches ---
-    //
-    // Same shape and same reason as the vent check above: a switch that reaches
-    // only a field would make every row of an ablation table an identical number.
-    // Each has to be shown reaching the rule it names.
-    {
-        Grid on(80, 60, 9090);
-        build_mixed(on);
-        step(on, 100);
-
-        // seek_level is what a liquid falls back on when it has no ordinary move
-        // left, so build_mixed's water band exercises it directly.
-        Grid no_seek(80, 60, 9090);
-        no_seek.set_seek_level_enabled(false);
-        build_mixed(no_seek);
-        step(no_seek, 100);
-        check("the seek_level switch reaches the fluid path", !worlds_match(on, no_seek));
-
-        // make_room_above fires only on a brush write over something movable, which
-        // build_mixed does not do -- so this one needs a scene built for it: water,
-        // then paint sand into the middle of it. Testing it on build_mixed would
-        // pass for the wrong reason, since the two worlds would differ anyway once
-        // anything else diverged.
         auto paint_into_water = [](Grid& g) {
             for (int y = 30; y < 50; ++y)
                 for (int x = 10; x < 70; ++x) g.set_element(x, y, ElementType::Water);
@@ -1330,14 +1250,13 @@ int main() {
         check("the make_room_above switch reaches the brush path",
               !worlds_match(lift, no_lift));
 
-        // Both survive a reset for the same reason the radius does, and this is
-        // asserted rather than commented for the same reason too.
+        // It survives a reset: configuration, not world state. Asserted rather than
+        // commented, so whoever changes their mind has to change a test and read
+        // the argument at Grid::reset.
         Grid g(20, 20, 42);
-        g.set_seek_level_enabled(false);
         g.set_room_above_enabled(false);
         g.reset(42);
-        check("a reset keeps the configured displacement switches",
-              !g.seek_level_enabled() && !g.room_above_enabled());
+        check("a reset keeps the configured make_room_above switch", !g.room_above_enabled());
     }
 
     // --- Grid::paint ---
@@ -1496,11 +1415,11 @@ int main() {
 
     // The last of the water elevator, as a property rather than a rate.
     //
-    // fluid_probe's residue line is a handful of water cells left standing one row
-    // proud of the pool once the pour stops. What it is is vent_fluid's
-    // straight-swap fallback: when no surface and no downhill drain is within
-    // vent_radius, step_powder still trades the grain with the fluid and the fluid
-    // goes up one cell.
+    // A grain sinking into water trades places with it, so whatever water the
+    // grain cannot press aside goes up the grain's own column. Under the old
+    // whole-cell rules that left a handful of water cells standing a row proud of
+    // the pool once the pour stopped. disperse_liquid presses a sinking grain's
+    // water into the pool around it first; this checks nothing is left up there.
     //
     // The assertion is about rest, not about height. Water climbing a cell mid-pour
     // is a splash and is allowed -- the pool's surface is genuinely disturbed while

@@ -47,10 +47,12 @@ enum class Stream : uint64_t {
     // How long one steam cell lasts before it condenses. Its own stream for the
     // same reason FlameLifetime has one.
     SteamLifetime = 0xA3B195354A39B70Dull,
-    // Which way vent_fluid mirrors its scan for a grain sinking into fluid. Its
-    // own stream rather than FluidDirection, which the same fluid cell draws
-    // from for its own sideways move.
-    VentMirror = 0xC13FA9A902A6328Full,
+    // Which side a grain sinking into liquid presses that liquid into first
+    // (Grid::disperse_liquid).
+    LiquidDisperse = 0xC13FA9A902A6328Full,
+    // Which way a liquid cell's velocity rounds when it is stored in its byte
+    // (Grid::step_liquid).
+    LiquidFlowRound = 0x9B1D3C2E7F4A6853ull,
 };
 
 // splitmix64's finalizer. Not cryptographic, and does not need to be: the
@@ -112,10 +114,11 @@ inline constexpr int spread(int range, uint64_t seed, uint64_t step, uint64_t in
 // Every simulation stream, listed once so the check below can see them all. A
 // new tag has to be added here as well as to the enum.
 inline constexpr Stream SIM_STREAMS[] = {
-    Stream::ColorJitter, Stream::SweepDirection, Stream::PowderDirection, Stream::FluidDirection,
-    Stream::Reaction,    Stream::Fracture,       Stream::Emission,        Stream::FlameLifetime,
-    Stream::FlameRise,   Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
-    Stream::VentMirror,
+    Stream::ColorJitter,    Stream::SweepDirection,  Stream::PowderDirection,
+    Stream::FluidDirection, Stream::Reaction,        Stream::Fracture,
+    Stream::Emission,       Stream::FlameLifetime,   Stream::FlameRise,
+    Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
+    Stream::LiquidDisperse, Stream::LiquidFlowRound,
 };
 
 // Two streams sharing a value are one stream, silently, with no assertion that

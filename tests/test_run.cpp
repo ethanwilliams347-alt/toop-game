@@ -485,7 +485,7 @@ int main() {
     // --- reset restarts the run and keeps the objective ---
     // The objective surviving reset() is the second documented exception to "reset
     // gives you a fresh Run" and it is asserted rather than written down, for the
-    // same reason test_grid.cpp asserts vent_radius survives: a hand-written wipe
+    // same reason test_grid.cpp asserts the make_room_above switch survives: a hand-written wipe
     // can forget a field, and this one silently produces an unwinnable run when it
     // does.
     {
@@ -555,7 +555,7 @@ int main() {
     // reset(seed) is what every existing caller and every recorded session goes
     // through, and the size arguments default to 0 meaning keep it; a defaulted
     // resize would silently reallocate the grid on every restart and drop
-    // Grid::reset's documented vent_radius exception with it.
+    // Grid::reset's documented make_room_above exception with it.
     {
         Run r(120, 80, 909);
         r.reset(909);

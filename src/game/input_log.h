@@ -64,7 +64,12 @@ namespace input_log {
 //    included. The record layout is unchanged, but a version-5 header's
 //    fingerprints were taken over fewer fields and can never match one taken
 //    now, so an old log would report a stale world it does not have.
-constexpr uint32_t FORMAT_VERSION = 6;
+//
+// 7: liquids hold an amount and a velocity (Element::mass and flow), and the
+//    fingerprints hash both. A version-6 log was recorded against water that moved
+//    as whole cells, so it replays into a different simulation from its first
+//    step that touches water.
+constexpr uint32_t FORMAT_VERSION = 7;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt

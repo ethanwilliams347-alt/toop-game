@@ -138,9 +138,8 @@ build. The benchmark is a separate executable, run it by hand:
 .\build\Release\grid_bench.exe
 ```
 
-It runs seven scenarios at two world sizes, then a light-field measurement, a
-`VENT_RADIUS` sweep, a fluid-rule breakdown, and a replayed recording of a real
-session — about three minutes in all. The replayed row needs a `session.rec`
+It runs seven scenarios at two world sizes, then a light-field measurement and a
+replayed recording of a real session — a few minutes in all. The replayed row needs a `session.rec`
 in the working directory; press `F9` in the game to write one. Absent, that row
 prints "not run", which is not the same as zero.
 

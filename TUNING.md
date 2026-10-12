@@ -7,7 +7,7 @@ History section at the bottom.
 Scope is deliberately narrow. This lists constants you change to make the game
 *feel* different — weight, speed, timing, animation. It is not an index of every
 constant in the codebase. Simulation-correctness numbers (`MAX_SUPPORT_CELLS`,
-`MIN_PRESSURE_HEAD`, reaction thresholds) are documented at their point of use.
+`LIQUID_LEVEL_HEAD`, reaction thresholds) are documented at their point of use.
 
 The movement values below represent an initial baseline for feel tuning.
 
@@ -112,6 +112,23 @@ cooldown, governed by three constants:
 | `STEAM_LIFETIME_SPREAD` | [grid.h](src/physics/grid.h) | 40 | Random jitter range (mean ± spread) for steam lifespan. |
 | `FLAME_LIFETIME_MEAN` | [grid.h](src/physics/grid.h) | 13 | Average lifetime in steps for an emitted flame particle. |
 | `FLAME_RISE_SKIP_PERCENT` | [grid.h](src/physics/grid.h) | 10 | Percentage chance per step that a flame cell skips rising (produces ragged top edge). |
+
+---
+
+## Liquids
+
+[src/physics/grid.h](src/physics/grid.h). Amounts are in `LIQUID_FULL` units:
+4096 is one full cell.
+
+| Knob | File | Now | What it does |
+|---|---|---|---|
+| `LIQUID_ACCEL` | [grid.h](src/physics/grid.h) | 64 | How hard a difference in amount pushes a cell's sideways velocity, /256 per step. Higher runs faster, but 96 or more stops pools sleeping. |
+| `LIQUID_DAMP` | [grid.h](src/physics/grid.h) | 224 | Velocity kept per step, /256. Higher carries a surge further; 244 or more stops pools sleeping. |
+| `LIQUID_DEAD` | [grid.h](src/physics/grid.h) | 16 | A difference smaller than this moves nothing sideways, so a level surface sleeps. Lower levels flatter and settles slower. |
+| `LIQUID_MIN_SPREAD` | [grid.h](src/physics/grid.h) | 1024 | A cell holding less than this does not spread onto dry ground: how thin a puddle gets before it stops. |
+| `LIQUID_LEVEL_HEAD` | [grid.h](src/physics/grid.h) | 1024 | The smallest difference between two surfaces of one body that pressure moves water across. |
+| `LIQUID_LEVEL_RATE` | [grid.h](src/physics/grid.h) | 1024 | The most pressure moves from one surface cell per step: how fast a U-tube is seen to flow. |
+| `LIQUID_DISPERSE_RADIUS` | [grid.h](src/physics/grid.h) | 3 | How far a sinking grain reaches to press its water into the pool. Smaller lets a pour lift water out of the pool. |
 
 ---
 
@@ -336,3 +353,15 @@ Record adjustments to tuning parameters and their rationale here.
   with no crater (`crush_radius` 0) because it is a hand. The cast's `raise`
   went from -80 to -130 after the first preview: at -80 the arm only lifted
   over the snout, which read as a wave, not a wind-up.
+- **2026-10-12 -- liquids hold amounts.** A liquid cell holds an amount and a
+  sideways velocity, and water moves by amounts flowing between cells rather
+  than by cells moving. The old rules -- venting a sinking grain's water to a
+  nearby surface (`vent_radius` 3), moving whole cells between the arms of a
+  body (`MAX_PRESSURE_CELLS` 512, `MIN_PRESSURE_HEAD` 2) -- are gone; the last
+  survives as `LIQUID_LEVEL_*`, moving half a difference instead of a cell. A
+  compressible model was tried first and dropped: at 3% a cell a U-tube took a
+  thousand steps to level and a lake painted 339 cells deep settled to 118.
+  `LIQUID_ACCEL` and `LIQUID_DAMP` are the strongest pair that stayed stable in
+  `fluid_probe` and grid_test. The cost is the `churning` bench row, 21.7 ->
+  35.0 ms: a grain sinking into water presses it into the pool around it, which
+  is what stops a pour lifting water out of the pool.

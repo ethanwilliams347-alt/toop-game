@@ -55,12 +55,17 @@ void u_tube() {
     for (int x = 10; x <= 20; ++x) g.set_element(x, 38, ElementType::Water);
     for (int y = 24; y <= 37; ++y) g.set_element(10, y, ElementType::Water);
     const int64_t placed = liquid::total(g, ElementType::Water);
+    // How far apart the arms still are a few seconds in: the pace of the levelling,
+    // where the settle time is mostly its last fraction of a cell.
+    for (int s = 0; s < 200; ++s) g.update();
+    const double apart =
+        liquid::depth(g, 10, ElementType::Water) - liquid::depth(g, 20, ElementType::Water);
     const int steps = settle(g, 4000);
-    std::printf(
-        "u-tube:      settled in %5d steps; arms %.2f and %.2f cells deep; water %lld -> %lld\n",
-        steps, liquid::depth(g, 10, ElementType::Water), liquid::depth(g, 20, ElementType::Water),
-        static_cast<long long>(placed),
-        static_cast<long long>(liquid::total(g, ElementType::Water)));
+    std::printf("u-tube:      %.2f cells apart at step 200; settled in %5d steps; arms %.2f and "
+                "%.2f cells deep; water %lld -> %lld\n",
+                apart, steps < 0 ? steps : steps + 200, liquid::depth(g, 10, ElementType::Water),
+                liquid::depth(g, 20, ElementType::Water), static_cast<long long>(placed),
+                static_cast<long long>(liquid::total(g, ElementType::Water)));
 }
 
 // A wall of water held at one end of a tank, released all at once. The swing of
