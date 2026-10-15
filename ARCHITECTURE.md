@@ -241,12 +241,13 @@ Each set with more than one user is compiled once, as an OBJECT library, and
 every target names each library it uses -- CMake does not pass an object
 library's code on through another library, so a missing one is a link error on
 that target. `sdl_boundary_test` checks that `slop_engine`'s include path cannot
-find `SDL.h`.
+find `SDL.h`, by running the compiler on a one-line probe with that path.
 
 | Set | Library | Contents | SDL |
 |---|---|---|---|
 | `ENGINE_SOURCES` | `slop_engine` | `physics/*.cpp`, `game/run`, `game/level`, `game/input_log`, `scene/scene` | no |
-| `RENDER_SOURCES` | `slop_render` | `render/light`, `render/player_anim`, `render/backdrop_set` | no |
+| `RENDER_SOURCES` | `slop_render` | `render/light`, `render/player_anim` (both need the engine) | no |
+| `BACKDROP_SOURCES` | `slop_backdrop` | `render/backdrop_set` (needs no engine) | no |
 | `SCENE_PROP_SOURCES` | `slop_scene_props` | the rest of `scene/` | no |
 | `PRESENT_SOURCES` | `slop_present` | `present/present` | headers only |
 | `FRAME_SOURCES` | `slop_frame` | `render/frame`, `render/overlay`, `ui/*` | yes |
