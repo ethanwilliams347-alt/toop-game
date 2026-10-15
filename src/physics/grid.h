@@ -69,9 +69,6 @@ public:
     // Takes a seed rather than keeping the old one, because the seed has to be one
     // of the things this clears for "reset run == fresh run with the same seed" to
     // mean anything.
-    //
-    // One exception: the make_room_above switch survives a reset, because it is
-    // configuration rather than world state. See the end of reset()'s definition.
     void reset(uint64_t seed);
 
     // Advances the simulation by exactly one fixed step. The caller is responsible
@@ -167,16 +164,6 @@ public:
     // momentum never built and the slope crept level by diffusion alone.
     static constexpr int LIQUID_FLOW_SCALE = 8;
 
-    // Whether the brush's make_room_above runs. Switchable so its cost can be
-    // priced turned off as well as on: an ablation, without a rebuild per data
-    // point. Turning it off does not merely remove its cost, it changes the
-    // simulation, so every later step does different work and the world diverges.
-    //
-    // Configuration rather than world state, so reset() leaves it alone. Defaults
-    // on, so a Grid nobody configures runs the shipped simulation.
-    bool room_above_enabled() const { return room_above_on; }
-    void set_room_above_enabled(bool on) { room_above_on = on; }
-
 private:
     // Bounds of the cells within one chunk that may still move, in world
     // coordinates, inclusive at both ends. max < min means the chunk is asleep.
@@ -267,9 +254,6 @@ private:
     // colour and confirmed the write is in bounds. See the definition for why
     // this is one function rather than two copies.
     void place(int x, int y, ElementType type, uint32_t color);
-
-    // The make_room_above switch; see room_above_enabled().
-    bool room_above_on = true;
 
     // Lifts the movable cell at (x, y) to the first Empty cell above it, so the
     // caller can write into (x, y) without deleting what was there. Returns false
@@ -428,15 +412,17 @@ private:
     // pressed into a cell past full is upward flow until it reaches the surface.
     static int stable_lower(int total);
 
-    // Moves `amount` of liquid from cell `from` to cell `to`, carrying momentum
-    // and heat with it, turning an emptied source into Empty and an Empty
-    // destination into liquid. Wakes both.
-    void transfer_liquid(int from, int to, int amount);
+    // Moves `amount` of liquid from cell (fx, fy) to cell (tx, ty), carrying
+    // momentum and heat with it, turning an emptied source into Empty and an
+    // Empty destination into liquid. Wakes the destination; waking the source is
+    // the caller's, once however many transfers it makes from it.
+    void transfer_liquid(int fx, int fy, int tx, int ty, int amount);
 
     // A sinking grain is about to swap into the liquid cell at (x, y): presses
     // that cell's amount into the same liquid nearby -- level with it or below,
     // within LIQUID_DISPERSE_RADIUS, nearest first -- up to LIQUID_PUSH_CAP, so
-    // what the swap carries up is only what had nowhere else to go.
+    // what the swap carries up is only what had nowhere else to go. Leaves
+    // waking (x, y) to that swap.
     void disperse_liquid(int x, int y);
 
     // What a cell looks like, from what it holds: a liquid is drawn more

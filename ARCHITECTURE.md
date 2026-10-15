@@ -176,6 +176,49 @@ lists what has been moved out of it and where.
 Steps 4-6 read the `Run` const. In the frame loop, only `Run::step` changes the
 world.
 
+## Liquids
+
+Water and oil are the one part of the grid that does not move as whole cells. A
+liquid cell holds an amount, `Element::mass` (`Grid::LIQUID_FULL`, 4096, to a
+full cell), and a sideways velocity, `Element::flow`. Liquid moves by amounts
+passing between two cells (`Grid::transfer_liquid`), so it is conserved by
+construction: a cell left with none becomes Empty, and Empty that receives some
+becomes liquid. Moves between unlike materials -- water sinking through oil, a
+grain through water -- are still whole-cell swaps.
+
+Each step, `Grid::step_liquid` moves a cell's liquid in this order:
+
+1. **Down**, as much as the cell below will hold.
+2. **Sideways**, a share of the difference to each lower side (the share set by
+   the material's `spread`), plus its momentum in the direction it is flowing.
+   `flow` is pushed by the difference either side and damped every step, so a
+   pool at rest has none and sleeps. It is what makes a dam break run and slosh
+   rather than slump.
+3. **Up**, whatever it holds past full. Rows sweep bottom to top, so pressed
+   water reaches the surface in one sweep.
+4. **Level**, only if none of the above moved anything: `Grid::level_liquid`
+   searches the body breadth-first for a lower surface with room and sends it
+   half the height difference. This is pressure. It levels a U-tube through a
+   tunnel of full cells, which have no difference to flow down.
+
+A grain sinking into liquid first presses that cell's amount into the same
+liquid level with it or below, within three cells (`Grid::disperse_liquid`), up
+to twice full; only what has nowhere to go rides up with the swap, and the
+excess rises through the up flow. That is what makes pouring sand raise a pool
+rather than carry its water up the stream. Steam carries the amount across
+boiling and condensing.
+
+Water does not compress: a full cell holds `LIQUID_FULL` whatever is above it.
+A compressible model was built first and dropped, because at this engine's
+depths no stiffness works. A U-tube levels only as fast as the compression
+difference across its tunnel pushes, so it must be stiff, and a body hides its
+compression as lost volume, so it must be soft. At 3% a cell a U-tube took about
+1000 steps and a lake painted 339 deep settled to 118. The constants, and the
+reasons for their values, are in the liquid section of `grid.h`.
+
+A cell short of full draws translucent (`Grid::pixel_of`), so a film or a part
+row reads as thin water rather than a full cell.
+
 ## Build targets
 
 `CMakeLists.txt` groups sources into sets that mirror the layers above. A
