@@ -17,24 +17,18 @@ visual style of assets/ to a 688x288 canvas:
 
 import math
 import os
-import shutil
 import sys
 
 # Derived REPO_ROOT from the current file's directory.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
 from pixel_art import (
-    LEGEND_EMPTY,
+    COLOR_KEY,
     LEGEND_WALL,
-    assert_legend_matches_header,
     color_of,
     dither_mix,
-    write_bmp,
-    write_png,
+    write_layered_backdrop,
 )
-
-DST_DIR = os.path.join(REPO_ROOT, "assets", "bg_forest")
-BUILD_DST_DIR = os.path.join(REPO_ROOT, "build", "Release", "assets", "bg_forest")
 
 TARGET_W = 688
 TARGET_H = 288
@@ -42,8 +36,8 @@ TARGET_H = 288
 # Floor row for material map: scaled to row 264
 FLOOR_ROW = 264
 
-# Only literal tuple permitted for color keying
-MAGENTA = (0xFF, 0x00, 0xFF)
+# pixel_art's colour key: a layer is transparent wherever it is left this.
+MAGENTA = COLOR_KEY
 
 
 def make_empty():
@@ -499,47 +493,26 @@ def generate_fg_rocks():
     return img
 
 
-LAYER_DEFS = [
-    ("09_sky",          "bg_forest_09_sky.bmp",          generate_sky),
-    ("08_ground",       "bg_forest_08_ground.bmp",       generate_ground),
-    ("07_mountains",    "bg_forest_07_mountains.bmp",    generate_mountains),
-    ("06_hills_far",    "bg_forest_06_hills_far.bmp",    generate_hills_far),
-    ("05_hills_midfar", "bg_forest_05_hills_midfar.bmp", generate_hills_midfar),
-    ("04_hills_mid",    "bg_forest_04_hills_mid.bmp",    generate_hills_mid),
-    ("03_hills_midnear","bg_forest_03_hills_midnear.bmp",generate_hills_midnear),
-    ("02_hills_near",   "bg_forest_02_hills_near.bmp",   generate_hills_near),
-    ("01_fg_rocks",     "bg_forest_01_fg_rocks.bmp",     generate_fg_rocks),
+# Back to front, the order the engine composites them in.
+LAYERS = [
+    ("09_sky", generate_sky),
+    ("08_ground", generate_ground),
+    ("07_mountains", generate_mountains),
+    ("06_hills_far", generate_hills_far),
+    ("05_hills_midfar", generate_hills_midfar),
+    ("04_hills_mid", generate_hills_mid),
+    ("03_hills_midnear", generate_hills_midnear),
+    ("02_hills_near", generate_hills_near),
+    ("01_fg_rocks", generate_fg_rocks),
 ]
 
 
-def write_scene_maps(composite_rgb):
-    """Generates and writes out the material and albedo map pairs."""
-    assert_legend_matches_header()
-    root_mat = os.path.join(REPO_ROOT, "assets", "bg_forest_material.bmp")
-    root_alb = os.path.join(REPO_ROOT, "assets", "bg_forest_albedo.bmp")
-
-    mat_pixels = []
-    alb_pixels = []
-    solid = 0
-    for y in range(TARGET_H):
-        for x in range(TARGET_W):
-            if y >= FLOOR_ROW:
-                mat_pixels.append(LEGEND_WALL)
-                solid += 1
-            else:
-                mat_pixels.append(LEGEND_EMPTY)
-            alb_pixels.append(composite_rgb[y * TARGET_W + x])
-
-    write_bmp(root_mat, TARGET_W, TARGET_H, mat_pixels)
-    write_bmp(root_alb, TARGET_W, TARGET_H, alb_pixels)
-
-    print(f"Scene maps written: floor at row {FLOOR_ROW}, {solid} solid cells.")
+def scene_cell(_x, y):
+    """Wall from FLOOR_ROW down, albedo the painted ground; air above it."""
+    return (LEGEND_WALL, None) if y >= FLOOR_ROW else None
 
 
-def write_readme():
-    """Generates the descriptive asset documentation file."""
-    readme_path = os.path.join(DST_DIR, "README.md")
-    content = """# Forest trail (bg_forest) multi-layer set
+README = """# Forest trail (bg_forest) multi-layer set
 
 Native resolution: 688 x 288 px. One art pixel is one world cell, so this is a
 world 688 cells wide and 288 tall, loaded at scale 10 by the `bg_forest` row in
@@ -604,47 +577,7 @@ not move - only what stands at them did.
 - **Albedo map**: the finished composite, exactly as `art_src/previews/bg_forest.png`
   shows it.
 """
-    with open(readme_path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-
-def main():
-    os.makedirs(DST_DIR, exist_ok=True)
-
-    print("Generating standard 688x288 backdrop layers for bg_forest...")
-    composite_rgb = [MAGENTA] * (TARGET_H * TARGET_W)
-
-    for _tag, fname, gen_fn in LAYER_DEFS:
-        layer_arr = gen_fn()
-
-        dst_path = os.path.join(DST_DIR, fname)
-        pixels = [layer_arr[y][x] for y in range(TARGET_H) for x in range(TARGET_W)]
-        write_bmp(dst_path, TARGET_W, TARGET_H, pixels)
-
-        if os.path.exists(BUILD_DST_DIR):
-            shutil.copyfile(dst_path, os.path.join(BUILD_DST_DIR, fname))
-
-        # Composite back-to-front
-        for y in range(TARGET_H):
-            for x in range(TARGET_W):
-                color = layer_arr[y][x]
-                if color != MAGENTA:
-                    composite_rgb[y * TARGET_W + x] = color
-
-        print(f"Generated {fname}")
-
-    # The preview is for people, not the game, so it lives with the source art
-    # rather than in assets/, which is staged next to the exe.
-    preview_path = os.path.join(REPO_ROOT, "art_src", "previews", "bg_forest.png")
-    os.makedirs(os.path.dirname(preview_path), exist_ok=True)
-    write_png(preview_path, TARGET_W, TARGET_H, composite_rgb)
-    print("Composite preview saved.")
-
-
-    write_scene_maps(composite_rgb)
-    write_readme()
-    print("Done! All assets in assets/bg_forest/ successfully generated.")
 
 
 if __name__ == "__main__":
-    main()
+    write_layered_backdrop("bg_forest", TARGET_W, TARGET_H, LAYERS, scene_cell, README)

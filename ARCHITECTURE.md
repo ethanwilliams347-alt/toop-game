@@ -266,9 +266,13 @@ fewest sets it can; see the comment on each target in `CMakeLists.txt`.
   session. Not a test.
 - `tests/*_probe.cpp`, `tests/preview_*.cpp` -- instruments that print numbers or
   dump frames for judging by eye; they assert nothing.
-- `tools/` -- Python for assets (backdrop and prop generators, palette
-  snapping and validation, player sheet building, `load_sprite.py` for binding a
-  sprite) plus `code_cleanup.py`, the pre-PR pass behind `just code_cleanup`.
+- `tools/` -- Python for assets (backdrop and prop generators, the fixture
+  scene's `generate_test_scene.py`, palette snapping and validation, player
+  sheet building, `load_sprite.py` for binding a sprite) plus `code_cleanup.py`,
+  the pre-PR pass behind `just code_cleanup`. `pixel_art.py` is what they share:
+  the palette, the BMP/PNG codecs, the periodic primitives (`wsin`, `wnoise`,
+  `rnd`), and `write_layered_backdrop`, the skeleton of a backdrop set whose
+  layers are one size (bg_forest, bg_gemini, bg_tarn).
 
 ## Assets
 

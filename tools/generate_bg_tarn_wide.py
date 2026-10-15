@@ -59,7 +59,6 @@ colour is a PALETTE name (the wt_ entries in tools/pixel_art.py).
 
 import math
 import os
-import shutil
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,17 +67,19 @@ from pixel_art import (  # noqa: E402
     COLOR_KEY,
     LEGEND_EMPTY,
     LEGEND_WALL,
-    assert_legend_matches_header,
     color_of,
+    rgb,
+    rnd,
+    stage,
+    wnoise,
     write_bmp,
-    write_png,
+    write_preview,
+    write_scene,
+    wsin,
 )
 
 NAME = 'bg_tarn_wide'
 DST_DIR = os.path.join(REPO_ROOT, 'assets', NAME)
-BUILD_DST_DIRS = [
-    os.path.join(REPO_ROOT, 'build', cfg, 'assets', NAME) for cfg in ('Release', 'Debug', '')
-]
 
 W = 2752  # the world, and the near layers
 H = 288
@@ -137,31 +138,9 @@ def place(wx, f, w):
 
 
 # --- periodic primitives -----------------------------------------------------
-
-
-def wsin(x, cycles, w, phase=0.0):
-    return math.sin(2.0 * math.pi * (cycles * x / w) + phase)
-
-
-def _hash(i, seed):
-    h = (i * 374761393 + seed * 668265263) & 0xFFFFFFFF
-    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
-    return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0
-
-
-def rnd(i, seed):
-    return _hash(i, seed)
-
-
-def wnoise(x, cells, w, seed):
-    """Value noise in 0..1 with `cells` lattice points across w, wrapping."""
-    u = (x % w) * cells / float(w)
-    i = int(math.floor(u))
-    f = u - i
-    a = _hash(i % cells, seed)
-    b = _hash((i + 1) % cells, seed)
-    t = f * f * (3.0 - 2.0 * f)
-    return a + (b - a) * t
+#
+# wsin, wnoise and rnd are tools/pixel_art.py's, shared with bg_tarn. Each takes
+# the width it wraps at, because the layers here are not all one width.
 
 
 class Img:
@@ -1287,10 +1266,6 @@ SANDBANKS = [(900, 1080, 5)]  # a beach to dig
 ROCKS = [(1330, 1430, 9)]  # the knoll's stone cap
 
 
-def rgb(v):
-    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
-
-
 def bump(x, left, right, height):
     if not left <= x <= right:
         return 0
@@ -1356,30 +1331,6 @@ def scene_cell(x, y):
     return LEGEND_WALL, alb
 
 
-def write_scene():
-    assert_legend_matches_header()
-    mat, alb = [], []
-    for y in range(H):
-        for x in range(W):
-            cell = scene_cell(x, y)
-            if cell is None:
-                mat.append(LEGEND_EMPTY)
-                alb.append(LEGEND_EMPTY)
-            else:
-                mat.append(cell[0])
-                alb.append(cell[1])
-    write_bmp(os.path.join(REPO_ROOT, 'assets', f'{NAME}_material.bmp'), W, H, mat)
-    write_bmp(os.path.join(REPO_ROOT, 'assets', f'{NAME}_albedo.bmp'), W, H, alb)
-    return alb
-
-
-def stage(path):
-    for d in BUILD_DST_DIRS:
-        if os.path.isdir(os.path.dirname(d)):
-            os.makedirs(d, exist_ok=True)
-            shutil.copyfile(path, os.path.join(d, os.path.basename(path)))
-
-
 def composite_standing(layers, scene_alb):
     """A flat preview of the whole world as the standing camera sees it, every
     layer at its own factor -- each column is what is behind that world column
@@ -1428,18 +1379,16 @@ def main():
     for tag, img in layers:
         path = os.path.join(DST_DIR, f'{NAME}_{tag}.bmp')
         write_bmp(path, img.w, H, img.flat())
-        stage(path)
+        stage(path, NAME)
         feet = max((y for y in range(H) for x in range(img.w) if img.px[y][x] != KEY), default=-1)
         print(
             f'wrote {os.path.basename(path):<34} {img.w:4d} wide, lowest painted row {feet:3d} '
             f'(factor {factor_at(feet):.3f})'
         )
-    alb = write_scene()
-    # The preview is for people, not the game, so it lives with the source art
-    # rather than in assets/, which is staged next to the exe.
-    preview = os.path.join(REPO_ROOT, 'art_src', 'previews', f'{NAME}.png')
-    os.makedirs(os.path.dirname(preview), exist_ok=True)
-    write_png(preview, W, H, composite_standing(layers, alb))
+    # Air is LEGEND_EMPTY in the albedo too, not a backdrop: no one picture
+    # stands behind a world this wide (composite_standing is a map, not a frame).
+    alb = write_scene(NAME, W, H, scene_cell)
+    write_preview(NAME, W, H, composite_standing(layers, alb))
     print(f'wrote {NAME}_material.bmp, {NAME}_albedo.bmp, art_src/previews/{NAME}.png')
 
 

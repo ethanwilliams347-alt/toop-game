@@ -1,11 +1,10 @@
-import os
 import random
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools'))
-from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, write_bmp  # noqa: E402
+from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, asset_path, write_bmp
 
-# Generates the fixture scene (assets/test_material.bmp, test_albedo.bmp).
+# Generates the fixture scene (assets/test_material.bmp, test_albedo.bmp):
+#
+#     python tools/generate_test_scene.py
 #
 # It is a test fixture wearing art: each region below exists to exercise one
 # named system, not to look good, and anything that exercises no system belongs
@@ -107,8 +106,9 @@ x = s(20)
 while x < s(145):
     tread = s(rng.randint(6, 10))
     slope_top -= s(rng.randint(1, 3))
-    fill_rect(x, min(x + tread, s(145)), max(slope_top, FLOOR_TOP - s(60)), FLOOR_TOP,
-              SAND, SAND_ALB)
+    fill_rect(
+        x, min(x + tread, s(145)), max(slope_top, FLOOR_TOP - s(60)), FLOOR_TOP, SAND, SAND_ALB
+    )
     x += tread
 
 # --- Fence posts: standalone Wood columns for dig-the-base collapse ---
@@ -154,6 +154,7 @@ while sleeper_x + s(8) <= WIDTH - s(4):
     fill_rect(sleeper_x, sleeper_x + s(8), FLOOR_TOP - s(3), FLOOR_TOP, WOOD, WOOD_ALB)
     sleeper_x += s(14)
 
+
 # --- depth ramp ---
 #
 # Gives the terrain layer the far-to-near ramp the receding ground plane already
@@ -192,8 +193,8 @@ def ramp_for(x, y):
 # PLANE_TEXEL_SCALE makes: a fraction would put the same ramp on screen at two
 # depths at 1080 and 1440. A taller window sees further down into the deep tone,
 # which is what looking further down should do.
-alb = apply_depth_ramp(mat, alb, WIDTH, HEIGHT, EMPTY, ramp_for,
-                       lit_depth=4, fade_depth=24)
+alb = apply_depth_ramp(mat, alb, WIDTH, HEIGHT, EMPTY, ramp_for, lit_depth=4, fade_depth=24)
+
 
 # --- rim light ---
 # Every top-facing surface gets a bright edge; water gets its own cooler rim
@@ -215,5 +216,5 @@ def rim_for(x, y):
 # proportion, not as a pixel count.
 alb = apply_rim_light(mat, alb, WIDTH, HEIGHT, EMPTY, rim_for, rim_depth=s(2))
 
-write_bmp('assets/test_material.bmp', WIDTH, HEIGHT, mat)
-write_bmp('assets/test_albedo.bmp', WIDTH, HEIGHT, alb)
+write_bmp(asset_path('test_material.bmp'), WIDTH, HEIGHT, mat)
+write_bmp(asset_path('test_albedo.bmp'), WIDTH, HEIGHT, alb)

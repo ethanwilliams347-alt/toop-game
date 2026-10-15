@@ -31,7 +31,9 @@ from it, the same way changing a scene/legend.h value invalidates every material
 map -- treat those with that weight.
 """
 
+import math
 import os
+import shutil
 import struct
 import zlib
 
@@ -884,3 +886,134 @@ def write_png(filename, width, height, pixels_rgb):
     png += _png_chunk(b'IEND', b'')
     with open(filename, 'wb') as f:
         f.write(png)
+
+
+# --- periodic primitives -----------------------------------------------------
+#
+# What the bg_tarn generators build every horizontal shape from, which is the
+# whole of how their layers tile: a sine with a whole number of cycles across a
+# layer `w` wide, and a value-noise lattice whose last cell interpolates back
+# into its first. `w` is an argument rather than a module constant because one
+# scene's layers are not all one width (bg_tarn_wide's far layers are narrower
+# tiles than its world).
+
+
+def _hash(i, seed):
+    """0..1 from an integer, the usual xorshift-multiply mix. Stated here rather
+    than taken from `random` so the stream cannot change under a Python upgrade
+    -- every BMP drawn from it is committed."""
+    h = (i * 374761393 + seed * 668265263) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0
+
+
+def rnd(i, seed):
+    """A per-index coin in 0..1: the same `i` and `seed` always land the same."""
+    return _hash(i, seed)
+
+
+def wsin(x, cycles, w, phase=0.0):
+    """A sine with `cycles` whole cycles across a strip `w` wide, so it wraps."""
+    return math.sin(2.0 * math.pi * (cycles * x / w) + phase)
+
+
+def wnoise(x, cells, w, seed):
+    """Value noise in 0..1 with `cells` lattice points across `w`, wrapping."""
+    u = (x % w) * cells / float(w)
+    i = int(math.floor(u))
+    f = u - i
+    a = _hash(i % cells, seed)
+    b = _hash((i + 1) % cells, seed)
+    t = f * f * (3.0 - 2.0 * f)
+    return a + (b - a) * t
+
+
+def rgb(v):
+    """0xRRGGBB, as src/scene/legend.h writes a legend colour, to an (r, g, b)."""
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+
+
+# --- writing a backdrop set ----------------------------------------------------
+#
+# A backdrop set is assets/<name>/<name>_<tag>.bmp per layer, plus the scene
+# pair assets/<name>_material.bmp and _albedo.bmp, plus a preview for people in
+# art_src/previews/ (not assets/, which is staged next to the exe).
+
+
+def stage(path, name):
+    """Copies a freshly written layer into every configured build's staged
+    assets/<name>/, so a running game picks it up without a rebuild. A build
+    tree that does not exist is left alone rather than created."""
+    for cfg in ('Release', 'Debug', ''):
+        d = os.path.join(ROOT, 'build', cfg, 'assets', name)
+        if os.path.isdir(os.path.dirname(d)):
+            os.makedirs(d, exist_ok=True)
+            shutil.copyfile(path, os.path.join(d, os.path.basename(path)))
+
+
+def write_scene(name, width, height, scene_cell, background=None):
+    """Writes assets/<name>_material.bmp and _albedo.bmp and returns the albedo.
+
+    scene_cell(x, y) gives (legend colour, albedo colour) for a cell of the
+    playable world, or None for air. Air is LEGEND_EMPTY in the material map.
+    An albedo of None -- air's, or a cell's that returns None for it -- is the
+    backdrop composite behind it when one is passed (`background`, row-major),
+    else LEGEND_EMPTY: a floor that is the painted ground itself, as bg_forest's
+    and bg_gemini's are, says so with (LEGEND_WALL, None)."""
+    assert_legend_matches_header()
+    mat, alb = [], []
+    for y in range(height):
+        for x in range(width):
+            m, a = scene_cell(x, y) or (LEGEND_EMPTY, None)
+            if a is None:
+                a = LEGEND_EMPTY if background is None else background[y * width + x]
+            mat.append(m)
+            alb.append(a)
+    write_bmp(asset_path(f'{name}_material.bmp'), width, height, mat)
+    write_bmp(asset_path(f'{name}_albedo.bmp'), width, height, alb)
+    return alb
+
+
+def write_preview(name, width, height, pixels_rgb):
+    """art_src/previews/<name>.png: the finished picture, for the README."""
+    path = os.path.join(ROOT, 'art_src', 'previews', f'{name}.png')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_png(path, width, height, pixels_rgb)
+
+
+def write_layered_backdrop(name, width, height, layers, scene_cell, readme=None, factor_at=None):
+    """The whole of a backdrop set whose layers are all one size.
+
+    `layers` is [(tag, paint)], back to front; paint() returns `height` rows of
+    `width` colours with COLOR_KEY where the layer is transparent. Each is
+    written to assets/<name>/<name>_<tag>.bmp and staged, and composited over
+    the ones before it. The composite is the albedo behind every air cell of
+    the scene (see write_scene) and the scene's albedo is the preview. `readme`,
+    if given, is written to assets/<name>/README.md. `factor_at(row)`, if given,
+    is printed beside each layer's lowest painted row, so the depth ladder can
+    be read off the run."""
+    dst = asset_path(name)
+    os.makedirs(dst, exist_ok=True)
+    composite = [COLOR_KEY] * (width * height)
+    for tag, paint in layers:
+        img = paint()
+        flat = [img[y][x] for y in range(height) for x in range(width)]
+        path = os.path.join(dst, f'{name}_{tag}.bmp')
+        write_bmp(path, width, height, flat)
+        stage(path, name)
+        feet = -1
+        for i, c in enumerate(flat):
+            if c != COLOR_KEY:
+                composite[i] = c
+                feet = i // width
+        note = f' (factor {factor_at(feet):.3f})' if factor_at else ''
+        print(f'wrote {os.path.basename(path):<34} lowest painted row {feet:3d}{note}')
+    alb = write_scene(name, width, height, scene_cell, composite)
+    write_preview(name, width, height, alb)
+    if readme is not None:
+        # Text mode, so the platform's line endings: what a checkout with
+        # core.autocrlf leaves in the tree, so a rerun shows no diff.
+        with open(os.path.join(dst, 'README.md'), 'w', encoding='utf-8') as f:
+            f.write(readme)
+    print(f'wrote {name}_material.bmp, {name}_albedo.bmp, art_src/previews/{name}.png')
+    return alb
