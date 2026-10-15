@@ -2,19 +2,7 @@
 
 #include <fstream>
 #include <sstream>
-
-bool sprite_file_name_ok(const std::string& file) {
-    if (file.empty()) return false;
-    if (file.find('/') != std::string::npos) return false;
-    if (file.find('\\') != std::string::npos) return false;
-    if (file.find("..") != std::string::npos) return false;
-    for (char c : file) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
-        if (!ok) return false;
-    }
-    return true;
-}
+#include "util/text_record.h"
 
 const SpriteBinding* SpriteManifest::find(const std::string& key) const {
     for (const auto& b : bindings_)
@@ -40,11 +28,7 @@ SpriteManifest load_sprite_manifest(const std::string& path, std::string* error)
     int line_no = 0;
 
     auto fail = [&](const std::string& why) {
-        if (error) {
-            std::ostringstream msg;
-            msg << path << ":" << line_no << ": " << why;
-            *error = msg.str();
-        }
+        if (error) *error = text_record::at(path, line_no, why);
         manifest.bindings_.clear();
         return manifest;
     };
@@ -52,8 +36,7 @@ SpriteManifest load_sprite_manifest(const std::string& path, std::string* error)
     while (std::getline(in, line)) {
         ++line_no;
 
-        const size_t hash = line.find('#');
-        if (hash != std::string::npos) line.erase(hash);
+        text_record::strip_comment(line);
 
         std::istringstream fields(line);
         SpriteBinding b;
@@ -63,20 +46,43 @@ SpriteManifest load_sprite_manifest(const std::string& path, std::string* error)
             return fail("'" + b.key + "' names no file - a record is "
                         "<key> <file.bmp> [<frame_w> <frame_h>]");
 
-        if (!sprite_file_name_ok(b.file))
+        // A whole filename, so the dot is allowed; `..` and separators are not.
+        if (!text_record::name_ok(b.file, true))
             return fail("'" + b.file + "' is not a usable file name (letters, digits, "
                         "_ - . only; no path separators - the file must sit in assets/)");
 
         // The frame size is optional, but half of it is not: a record carrying a
         // width and no height is a typo, and reading it as "not a sheet" would
         // silently discard the check the author was asking for.
-        if (fields >> b.frame_w) {
-            if (!(fields >> b.frame_h))
+        //
+        // Read as whole fields, like every other number in assets/. A stream read
+        // into the int used to take "14px" as 14 and then blame the "px" for being
+        // a missing height, and took "abc" as no frame size at all -- a sheet
+        // silently unchecked.
+        std::string w_raw, h_raw;
+        if (fields >> w_raw) {
+            if (!(fields >> h_raw))
                 return fail("'" + b.key + "' gives a frame width but no height - "
                             "write both or neither");
+            if (!text_record::integer(w_raw, b.frame_w) ||
+                !text_record::integer(h_raw, b.frame_h)) {
+                std::string why = "'" + b.key + "' has a frame size of '";
+                why += w_raw;
+                why += ' ';
+                why += h_raw;
+                why += "', which is not two whole numbers";
+                return fail(why);
+            }
             if (b.frame_w <= 0 || b.frame_h <= 0)
                 return fail("'" + b.key + "' has a non-positive frame size");
         }
+
+        // Anything after the frame size is a typo or a field someone expected to
+        // be read; ignored, it would be one that gets tuned for nothing.
+        std::string extra;
+        if (fields >> extra)
+            return fail("unexpected '" + extra + "' after '" + b.key +
+                        "' - a record is <key> <file.bmp> [<frame_w> <frame_h>]");
 
         if (manifest.find(b.key))
             return fail("'" + b.key + "' is bound twice - the second would win "

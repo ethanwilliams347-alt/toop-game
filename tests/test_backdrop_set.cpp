@@ -15,10 +15,10 @@
 #include "scene/bmp.h"
 #include "scene/scene_list.h"
 #include "test_util.h"
+#include "util/text_record.h"
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <set>
 #include <string>
@@ -113,6 +113,12 @@ void test_parser() {
         {"a stray field after a record", "size 10 10 4\n", 1},
         {"a width of no cells", "size 10 10\nlayer a.bmp factor=0 width=0\n", 2},
         {"a width with a unit on it", "size 10 10\nlayer a.bmp factor=0 width=5px\n", 2},
+        // A stream read took each of these as a number (text_record::decimal).
+        {"a factor in exponent notation", "size 10 10\nlayer a.bmp factor=1e0\n", 2},
+        {"a factor with a plus sign", "size 10 10\nlayer a.bmp factor=+0.3\n", 2},
+        {"a rig strength in exponent notation", "size 10 10\nrig 2 8 5e-1\n", 2},
+        {"a negative foot row, named as out of the art",
+         "size 10 10\nrig 2 8 0\nlayer a.bmp foot=-1\n", 3},
     };
     for (const Bad& b : bad) {
         const backdrop_set::Set s = parse(b.text, &err);
@@ -213,7 +219,11 @@ void test_every_set(const Shipped& sh) {
             descending = false;
             break;
         }
-        const int index = std::atoi(l.file.substr(prefix.size(), 2).c_str());
+        int index = 0;
+        if (!text_record::whole(l.file.substr(prefix.size(), 2), index)) {
+            descending = false;
+            break;
+        }
         descending = descending && index > 0 && index < previous;
         previous = index;
     }

@@ -77,7 +77,7 @@ namespace input_log {
 constexpr uint32_t FORMAT_VERSION = 8;
 
 // The longest scene name a log stores. Scene names are short identifiers
-// (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt
+// (text_record::name_ok); the cap is what lets read() refuse a corrupt
 // length rather than allocate whatever it says.
 constexpr uint32_t MAX_SCENE_NAME = 64;
 

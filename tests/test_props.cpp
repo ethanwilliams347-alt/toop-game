@@ -9,6 +9,7 @@
 
 #include "scene/props.h"
 #include "test_util.h"
+#include "util/text_record.h"
 
 #include <cstdio>
 #include <fstream>
@@ -83,7 +84,7 @@ int main() {
     }
 
     // The x is read whole, by the same strict reader as a level file's columns
-    // (scene/number.h). Each of these is a number with something wrong attached,
+    // (text_record::decimal). Each of these is a number with something wrong attached,
     // and a stream read takes the number and leaves the rest: "120px" was read as
     // 120 plus a stray field misreported as an authored y, and "1e3", "0x10" and
     // "+12" loaded as positions.
@@ -113,12 +114,23 @@ int main() {
         auto props = parse("../../secrets 100\n", &err);
         check("a traversing sprite name is rejected", !err.empty() && props.empty(), err);
     }
-    check("path separators are rejected", !prop_sprite_name_ok("sub/tree"));
-    check("backslashes are rejected too", !prop_sprite_name_ok("sub\\tree"));
-    check("dot-dot is rejected", !prop_sprite_name_ok("a..b"));
-    check("an empty name is rejected", !prop_sprite_name_ok(""));
-    check("an ordinary name is accepted", prop_sprite_name_ok("tree_a"));
-    check("digits and dashes are accepted", prop_sprite_name_ok("rock-2"));
+    // Through the parser rather than at the name check, because the check is
+    // shared (text_record::name_ok, pinned in scene_list_test) and what this file
+    // owns is that the prop list uses its stem form: no dot, so no extension.
+    {
+        const char* bad[] = {"sub/tree", "sub\\tree", "a..b", "tree_a.bmp"};
+        for (const char* name : bad) {
+            std::string err;
+            auto props = parse(std::string(name) + " 100\n", &err);
+            check((std::string("a sprite name is refused: ") + name).c_str(),
+                  props.empty() && err.find("not a usable sprite name") != std::string::npos, err);
+        }
+    }
+    {
+        std::string err;
+        auto props = parse("tree_a 100\nrock-2 120\n", &err);
+        check("letters, digits, _ and - are accepted", err.empty() && props.size() == 2, err);
+    }
 
     // --- absent vs. broken --------------------------------------------------
     //
@@ -153,7 +165,7 @@ int main() {
               "got " + std::to_string(props.size()));
         bool names_ok = true;
         for (const PropDef& p : props)
-            if (!prop_sprite_name_ok(p.sprite)) names_ok = false;
+            if (!text_record::name_ok(p.sprite)) names_ok = false;
         check("...all with usable sprite names", names_ok);
     }
 

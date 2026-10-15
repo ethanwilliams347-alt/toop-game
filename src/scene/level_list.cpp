@@ -2,7 +2,7 @@
 
 #include <fstream>
 #include <sstream>
-#include "scene/number.h"
+#include "util/text_record.h"
 
 namespace level_list {
 
@@ -16,15 +16,11 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), st
     int player_line = 0, objective_line = 0;
 
     auto fail = [&](const std::string& why) {
-        if (error) {
-            std::ostringstream msg;
-            msg << path << ":" << line_no << ": " << why;
-            *error = msg.str();
-        }
+        if (error) *error = text_record::at(path, line_no, why);
         return LevelDef{};
     };
 
-    // A column is a whole number of cells and nothing else (scene/number.h), and
+    // A column is a whole number of cells and nothing else (text_record::whole), and
     // every record reads its column through this one call. It used to be a float
     // that level.cpp rounded for the player and an enemy, while the objective was
     // truncated here, so "player 120.6" and "objective 120.6" were a cell apart.
@@ -32,13 +28,12 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), st
     // typo, and a typo is refused rather than rounded one of two ways.
     auto column = [](std::istringstream& fields, int& out) -> bool {
         std::string raw;
-        return (fields >> raw) && number::whole(raw, out);
+        return (fields >> raw) && text_record::whole(raw, out);
     };
 
     while (std::getline(in, line)) {
         ++line_no;
-        const size_t hash = line.find('#');
-        if (hash != std::string::npos) line.erase(hash);
+        text_record::strip_comment(line);
 
         std::istringstream fields(line);
         std::string kind;

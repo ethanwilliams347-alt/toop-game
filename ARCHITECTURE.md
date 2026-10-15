@@ -45,7 +45,9 @@ the edge: the window, the event pump, textures and draw calls.
 ```
 
 Arrows point from includer to included. Nothing under `src/physics/` includes
-anything outside it.
+anything outside it. `src/util/` is below all of it: header-only, standard
+library only, and includable from anywhere but `src/physics/` (it reads
+floats).
 
 ## Code map
 
@@ -110,6 +112,8 @@ header-only.
 Parsers for what is in `assets/`. No SDL. Each rejects a malformed file whole.
 
 - `scene_list.h` -- `assets/scenes.txt`: which scenes exist and what each names.
+  Five positional fields, then named ones (`mode=`, `size=WxH`, `scale=`,
+  `level=`, `backdrop=`).
 - `bmp.h` -- reads a scene's material and albedo BMPs without SDL; `legend.h` is
   the frozen colour -> material table those maps are authored in.
 - `scene.h` -- `Scene` and `load_scene`, which stamps one into a `Grid`.
@@ -118,6 +122,14 @@ Parsers for what is in `assets/`. No SDL. Each rejects a malformed file whole.
   the game and the replay bench.
 - `props.h`, `sprites.h` -- non-simulated props and the sprite manifest
   (`assets/sprites.txt`).
+
+### `src/util/` -- shared by the parsers
+
+- `text_record.h` -- what every line-per-record file in `assets/` reads the same
+  way: `#` comments, the name check that keeps a path inside `assets/`, the
+  strict number readers (the whole field or an error), and the `path:line: why`
+  error line. Used by the `scene/` parsers and `render/backdrop_set`, which is
+  why it is not under `scene/`. Header-only, so it is in no source set.
 
 ### `src/present/` -- simulation state into frame records
 
@@ -262,7 +274,7 @@ fewest sets it can; see the comment on each target in `CMakeLists.txt`.
 
 `assets/` is copied next to the exe at build time (minus `assets/wip/`).
 `scenes.txt` lists the scenes; each names a material BMP, an albedo BMP, and
-optionally a backdrop directory (`bg_*/backdrop.txt`), a level file and a prop
-list. `sprites.txt` maps sprite keys to BMPs. Source art lives in `art_src/`.
+optionally a prop list, then named fields for its mode, size and scale, a
+backdrop directory (`bg_*/backdrop.txt`) and a level file. `sprites.txt` maps sprite keys to BMPs. Source art lives in `art_src/`.
 The formats are documented at the top of each file and in the parser that reads
 it.

@@ -114,13 +114,13 @@ void test_scene_list_level_field() {
     };
     std::string err;
     std::vector<scene_list::SceneDef> s =
-        load("a m.bmp a.bmp - terrain fixed 10 10 4 level=a_level.txt\n", &err);
-    check("scene list: level= after the positional tail",
+        load("a m.bmp a.bmp - terrain mode=fixed size=10x10 scale=4 level=a_level.txt\n", &err);
+    check("scene list: level= after the other named fields",
           s.size() == 1 && s[0].level == "a_level.txt" && s[0].custom_width == 10 &&
               s[0].scale == 4,
           err);
-    s = load("a m.bmp a.bmp - terrain level=a_level.txt fixed 10 10\n", &err);
-    check("scene list: ...or in the middle of it, which reads the same",
+    s = load("a m.bmp a.bmp - terrain level=a_level.txt mode=fixed size=10x10\n", &err);
+    check("scene list: ...or before them, which reads the same",
           s.size() == 1 && s[0].level == "a_level.txt" && s[0].custom_width == 10, err);
     s = load("a m.bmp a.bmp - terrain\n", &err);
     check("scene list: no level= is no level file", s.size() == 1 && s[0].level.empty(), err);

@@ -26,8 +26,10 @@
 //     tree_a     145
 //     tree_b     187.5
 //
-// `sprite` names assets/<sprite>.bmp. `x` is a world cell column, the sprite's
-// bottom-centre, in plain decimal (scene/number.h): "120px", "1e3" and the like
+// `sprite` names assets/<sprite>.bmp, and is a bare stem (text_record::name_ok:
+// letters, digits, `_` and `-`), so a prop list can never reach outside assets/.
+// `x` is a world cell column, the sprite's bottom-centre, in plain decimal
+// (text_record::decimal, util/text_record.h): "120px", "1e3" and the like
 // are errors, not 120 and 1000. Fractional where a level file's columns are
 // whole, because a prop is only drawn, and a sprite can sit between two cells
 // where a body cannot. Blank lines are fine. Anything else is an error with a
@@ -51,9 +53,3 @@ struct PropDef {
 // is a legitimate scene, and it is distinguishable from a broken one by `error`
 // being left untouched.
 std::vector<PropDef> load_prop_list(const std::string& path, std::string* error = nullptr);
-
-// True if `sprite` is a name this loader will turn into a path. Rejects empty
-// names, path separators and `..`, so a prop list can never reach outside
-// assets/ -- data that names a path is data that can name any path. Exposed for
-// the test, which is the only reason it is not static.
-bool prop_sprite_name_ok(const std::string& sprite);
