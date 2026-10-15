@@ -24,6 +24,7 @@
 #include "test_util.h"
 
 #include <cmath>
+#include <memory>
 #include <string>
 
 namespace {
@@ -44,7 +45,8 @@ void drawn_cell(const Enemy& en, const frame::EnemySprite& es, int sx, int sy, i
 }
 
 void test_drawn_is_hit() {
-    Run run(240, 120, 3);
+    const auto run_owner = std::make_unique<Run>(240, 120, 3);
+    Run& run = *run_owner;
     build_floor(run.grid, 100);
     run.player = Player(116, 100 - Player::HEIGHT);
     const Species* kinds[] = {&species::GHOUL, &species::TROLL, &species::GHOUL, &species::FISH};
@@ -104,7 +106,8 @@ void test_drawn_is_hit() {
 }
 
 void test_arrows_and_words() {
-    Run run(240, 120, 3);
+    const auto run_owner = std::make_unique<Run>(240, 120, 3);
+    Run& run = *run_owner;
     build_floor(run.grid, 100);
     run.player = Player(116, 100 - Player::HEIGHT);
     const int y = boot::standing_y(run.grid, 200, species::GHOUL);

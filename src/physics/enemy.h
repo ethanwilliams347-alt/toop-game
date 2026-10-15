@@ -434,6 +434,17 @@ constexpr bool names_are_unique() {
 static_assert(names_are_unique(), "two species share a name, so a level file "
                                   "naming one could mean either");
 
+// The largest `of(s)` over every species. Enemy's pool sizes come from this
+// rather than from a number typed beside them, so a new species with a bigger
+// frame or a pose that reaches further grows every slot with it rather than
+// overrunning one.
+template <class Of> constexpr int most(Of of) {
+    int m = 0;
+    for (const Species* s : ALL)
+        if (of(*s) > m) m = of(*s);
+    return m;
+}
+
 }  // namespace species
 
 class Enemy {
@@ -441,13 +452,13 @@ public:
     // The largest frame any species has. Every pool slot carries a pixel mask
     // this big, whichever species is in it, so a slot can hold any species and
     // the pool stays one fixed, allocation-free block.
-    static constexpr int MAX_FRAME_W = troll_art::W > fish_art::W ? troll_art::W : fish_art::W;
-    static constexpr int MAX_FRAME_H = troll_art::H > fish_art::H ? troll_art::H : fish_art::H;
+    static constexpr int MAX_FRAME_W = species::most([](const Species& s) { return s.frame_w(); });
+    static constexpr int MAX_FRAME_H = species::most([](const Species& s) { return s.frame_h(); });
     static constexpr int MAX_FRAME_PIXELS = MAX_FRAME_W * MAX_FRAME_H;
 
     // The most any species' pose reaches outside its frame (Rig::pad). The
     // renderer sizes an atlas slot as the largest frame plus this all round.
-    static constexpr int MAX_POSE_PAD = 56;
+    static constexpr int MAX_POSE_PAD = species::most([](const Species& s) { return s.rig.pad; });
 
     // Shared by every species: the same gravity as the player, so bodies fall
     // alike and a shove of sand drops them all the same way; and the player's
@@ -606,9 +617,9 @@ private:
     //
     // Two pixels a byte rather than one because every slot is sized for the
     // largest frame, and the fish's 94x84 doubled it: at a byte a pixel a Run
-    // grew from about 110 KB to 210 KB, and the tests that keep several Runs on
-    // the stack are the ones that already overflowed Windows' 1 MB default once
-    // (see test_enemy.cpp). A part index fits in a nibble with room to spare.
+    // grew from about 110 KB to 210 KB, nearly all of it masks that a ghoul's
+    // 14x26 or an empty slot never reads. A part index fits in a nibble with
+    // room to spare, so the second half of each byte was waste.
     std::array<uint8_t, (MAX_FRAME_PIXELS + 1) / 2> pixels{};
     static_assert(rig::PART_COUNT < 16, "a pixel's part, plus one, has to fit in four bits");
     uint8_t pixel(int i) const { return (pixels[i >> 1] >> ((i & 1) * 4)) & 0xF; }
@@ -674,29 +685,62 @@ private:
 // Speeds are lengths per unit time and the ghoul's body is the player's, so the
 // relationships the comments above lean on are checked rather than trusted --
 // for every species, since a new one is a new row of numbers that can break them.
-constexpr bool species_is_sound(const Species& s) {
-    return s.chase_speed < Player::MOVE_SPEED && s.patrol_speed < s.chase_speed &&
-           s.offset_x() >= 0 && s.offset_y() >= 0 && s.offset_x() == s.art->box_left &&
-           s.art->w <= Enemy::MAX_FRAME_W && s.art->h <= Enemy::MAX_FRAME_H &&
-           s.footing_rows() <= s.height && s.rig.pad <= Enemy::MAX_POSE_PAD &&
-           s.rig.hip_row > s.art->arm_top && s.rig.hip_row < s.art->h &&
-           s.rig.leg_split > s.art->box_left && s.rig.leg_split < s.art->box_right() &&
-           s.rig.neck_row <= s.art->arm_top && s.rig.stride > 0 && s.rig.breathe_steps > 1 &&
-           s.rig.strike_steps > 0 && s.rig.flinch_steps > 0 &&
-           (s.attack != Attack::Slam || s.rig.strike_steps < s.windup_steps) &&
-           s.rig.strike_steps < s.attack_interval;
+// One assert a rule, so a failure names the rule; the message cannot name the
+// species, but the rule narrows it to a field or two of each.
+//
+// A frame that fits Enemy::MAX_FRAME_* and a pad that fits MAX_POSE_PAD are not
+// checked here: those maxima are computed from species::ALL, so they hold by
+// construction.
+template <class Rule> constexpr bool every_species(Rule rule) {
+    for (const Species* s : species::ALL)
+        if (!rule(*s)) return false;
+    return true;
 }
-static_assert(species_is_sound(species::GHOUL) && species_is_sound(species::TROLL) &&
-                  species_is_sound(species::FISH),
-              "a species breaks one of: chasing slower than the player walks (the "
-              "escape is the whole counterplay to being noticed), wandering slower "
-              "than it chases, a frame at least as big as its box, the art's "
-              "box_left matching the box it is anchored to (or has_arms counts the "
-              "wrong columns), a frame that fits Enemy::MAX_FRAME_*, or a rig whose "
-              "parts are where the art's are (hips below the shoulders, the leg "
-              "split inside the box, the head above the arms), whose pad fits "
-              "Enemy::MAX_POSE_PAD, and whose strike fits inside its wind-up and "
-              "its recovery");
+static_assert(every_species([](const Species& s) { return s.chase_speed < Player::MOVE_SPEED; }),
+              "a species chases at least as fast as the player walks, and walking away is "
+              "the whole counterplay to being noticed");
+static_assert(every_species([](const Species& s) { return s.patrol_speed < s.chase_speed; }),
+              "a species wanders at least as fast as it chases, so noticing the player "
+              "does not show");
+static_assert(every_species([](const Species& s) {
+                  return s.offset_x() >= 0 && s.offset_y() >= 0;
+              }),
+              "a species' frame is smaller than its box, so the box cannot be anchored "
+              "inside the art");
+static_assert(every_species([](const Species& s) { return s.offset_x() == s.art->box_left; }),
+              "a species' art has a box_left that is not where its box is anchored, so "
+              "has_arms counts the wrong columns");
+static_assert(every_species([](const Species& s) { return s.footing_rows() <= s.height; }),
+              "a species' footing rows (max_step_height + 1) are more than its box is "
+              "tall: the band where powder collides has to be the bottom of the box");
+static_assert(every_species([](const Species& s) {
+                  return s.rig.hip_row > s.art->arm_top && s.rig.hip_row < s.art->h;
+              }),
+              "a species' rig puts the hips above the arms' top row or off the bottom of "
+              "the frame");
+static_assert(every_species([](const Species& s) {
+                  return s.rig.leg_split > s.art->box_left && s.rig.leg_split < s.art->box_right();
+              }),
+              "a species' rig splits the legs outside its box, so one leg has no pixels");
+static_assert(every_species([](const Species& s) { return s.rig.neck_row <= s.art->arm_top; }),
+              "a species' rig puts the neck below the top of the arms, so the head's rows "
+              "overlap the arms'");
+static_assert(every_species([](const Species& s) {
+                  return s.rig.stride > 0 && s.rig.breathe_steps > 1 && s.rig.strike_steps > 0 &&
+                         s.rig.flinch_steps > 0;
+              }),
+              "a species' rig has a stride, strike or flinch of zero steps, which the pose "
+              "divides by, or a breath of one step, which never moves");
+static_assert(every_species([](const Species& s) {
+                  return s.attack != Attack::Slam || s.rig.strike_steps < s.windup_steps;
+              }),
+              "a slamming species' strike is longer than its wind-up, so the club comes "
+              "down before it has gone up");
+static_assert(every_species([](const Species& s) {
+                  return s.rig.strike_steps < s.attack_interval;
+              }),
+              "a species' strike outlasts its attack_interval, so the arm is still "
+              "striking when the next attack can start");
 
 // The troll is meant to be imposing, and "imposing" is a ratio: well over twice
 // the player's height, or it is a big ghoul.

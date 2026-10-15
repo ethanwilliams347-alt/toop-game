@@ -12,6 +12,7 @@
 #include "world_match.h"
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,10 @@ void step(Run& run, const Input& input, int n) {
 } // namespace
 
 int main() {
+    // Every Run is on the heap, behind a `Run&`, for test_enemy.cpp's reason: a
+    // Run is about 120 KB, this function holds fourteen in sibling blocks, and
+    // under ASan each gets its own stack slot -- over Windows' 1 MB stack.
+
     // --- a scripted sequence: land, walk, jump, dig ---
     // Nothing here freezes the grid or calls a subsystem directly -- every effect
     // happens by handing run.step() an Input, the same as a real session would.
@@ -57,7 +62,8 @@ int main() {
         // what was actually dug -- so the "dig target is actually solid" guard
         // would go on passing against the border while the dig assertion under it
         // failed.
-        Run run(400, 60, 7);
+        const auto run_owner = std::make_unique<Run>(400, 60, 7);
+        Run& run = *run_owner;
         build_floor(run, 50);
 
         // The player spawns mid-air; let it land before asserting anything about
@@ -119,7 +125,8 @@ int main() {
     // Painted through run.step() rather than applied outside the loop: nothing about
     // placing a cell happens anywhere but inside a fixed step.
     {
-        Run run(40, 40, 11);
+        const auto run_owner = std::make_unique<Run>(40, 40, 11);
+        Run& run = *run_owner;
         Input paint;
         paint.brush_active = true;
         paint.brush_type = ElementType::Sand;
@@ -143,7 +150,8 @@ int main() {
     // count again. A cell of water may be anywhere afterwards -- that is the pool
     // finding its level -- but there must still be as much of it.
     {
-        Run run(60, 60, 77);
+        const auto run_owner = std::make_unique<Run>(60, 60, 77);
+        Run& run = *run_owner;
         for (int x = 0; x < 60; ++x) run.grid.set_element(x, 50, ElementType::Wall);
         for (int y = 30; y < 50; ++y)
             for (int x = 5; x < 55; ++x) run.grid.set_element(x, y, ElementType::Water);
@@ -175,7 +183,8 @@ int main() {
     // them is then deleted for want of anywhere to go -- invisible to the Sand case
     // above, because sand is movable and a displacement climbs straight through it.
     {
-        Run run(60, 60, 78);
+        const auto run_owner = std::make_unique<Run>(60, 60, 78);
+        Run& run = *run_owner;
         for (int x = 0; x < 60; ++x) run.grid.set_element(x, 50, ElementType::Wall);
         for (int y = 30; y < 50; ++y)
             for (int x = 5; x < 55; ++x) run.grid.set_element(x, y, ElementType::Water);
@@ -203,7 +212,8 @@ int main() {
     // not paint where the player clicked is a worse defect than a lost cell of
     // water, and this is the line between the two.
     {
-        Run run(40, 40, 79);
+        const auto run_owner = std::make_unique<Run>(40, 40, 79);
+        Run& run = *run_owner;
         for (int x = 10; x < 30; ++x) {
             run.grid.set_element(x, 20, ElementType::Wall);  // lid
             run.grid.set_element(x, 26, ElementType::Wall);  // floor
@@ -269,7 +279,8 @@ int main() {
             sequence.push_back(spawn);
         }
 
-        Run a(90, 50, 4040);
+        const auto a_owner = std::make_unique<Run>(90, 50, 4040);
+        Run& a = *a_owner;
         build_floor(a, 45);
         for (const Input& in : sequence) a.step(in);
 
@@ -278,7 +289,8 @@ int main() {
         // main.cpp does every rendered frame between groups of fixed steps. If
         // pacing or an intervening read could perturb the result, this is the run
         // that shows it.
-        Run b(90, 50, 4040);
+        const auto b_owner = std::make_unique<Run>(90, 50, 4040);
+        Run& b = *b_owner;
         build_floor(b, 45);
         size_t i = 0;
         while (i < sequence.size()) {
@@ -349,7 +361,8 @@ int main() {
             // fingerprint rather than by comparing grids, because the fingerprint is
             // what grid_bench checks and a test that checked something else would
             // leave the thing being trusted untested.
-            Run c(90, 50, 4040);
+            const auto c_owner = std::make_unique<Run>(90, 50, 4040);
+            Run& c = *c_owner;
             build_floor(c, 45);
             for (const Input& in_step : in.steps) c.step(in_step);
             check("a log read from disk replays into the recorded world",
@@ -403,7 +416,8 @@ int main() {
     // an outcome that latched to Won on construction would pass a "reaching the
     // objective wins" test perfectly.
     {
-        Run run(200, 120, 5150);
+        const auto run_owner = std::make_unique<Run>(200, 120, 5150);
+        Run& run = *run_owner;
         build_floor(run, 100);
         check("S0: a fresh run is Playing", run.outcome() == Run::Outcome::Playing);
         check("S0: ...and has no objective until one is placed", !run.has_objective());
@@ -419,7 +433,8 @@ int main() {
     // test_player.cpp are one: the claim is about the boundary, and a rule that
     // fired everywhere would pass the second half alone.
     {
-        Run run(400, 120, 5151);
+        const auto run_owner = std::make_unique<Run>(400, 120, 5151);
+        Run& run = *run_owner;
         build_floor(run, 100);
         step(run, NOTHING, 120);  // land first
         check("the player lands before the objective is placed", run.player.is_on_ground());
@@ -454,7 +469,8 @@ int main() {
     // point is that the loss arrives through the simulation rather than through a
     // test reaching into the body.
     {
-        Run run(200, 120, 5152);
+        const auto run_owner = std::make_unique<Run>(200, 120, 5152);
+        Run& run = *run_owner;
         build_floor(run, 100);
         step(run, NOTHING, 120);
 
@@ -488,7 +504,8 @@ int main() {
     // hand-written wipe can forget a field, and this one silently produces an
     // unwinnable run when it does.
     {
-        Run run(200, 120, 5153);
+        const auto run_owner = std::make_unique<Run>(200, 120, 5153);
+        Run& run = *run_owner;
         build_floor(run, 100);
         step(run, NOTHING, 120);
         run.set_objective(run.player.center_x(), run.player.center_y());
@@ -525,7 +542,8 @@ int main() {
     // sound is asserted here: reset with the same seed, re-stamped with the same
     // terrain, is the same world the first recording started in.
     {
-        Run a(120, 80, 5154);
+        const auto a_owner = std::make_unique<Run>(120, 80, 5154);
+        Run& a = *a_owner;
         build_floor(a, 60);
         const uint64_t before = input_log::fingerprint(a.grid);
 
@@ -555,7 +573,8 @@ int main() {
     // through, and the size arguments default to 0 meaning keep it; a defaulted
     // resize would silently reallocate the grid on every restart.
     {
-        Run r(120, 80, 909);
+        const auto r_owner = std::make_unique<Run>(120, 80, 909);
+        Run& r = *r_owner;
         r.reset(909);
         check("a reset with no size stated keeps the size",
               r.grid.get_width() == 120 && r.grid.get_height() == 80);

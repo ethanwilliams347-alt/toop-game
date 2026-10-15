@@ -16,6 +16,7 @@
 // SDL_QueryTexture gives the game.
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 #include "game/boot.h"
@@ -77,7 +78,8 @@ void test_lowest_surface_under() {
 
 void test_place_objective() {
     {
-        Run run(64, 64);
+        const auto run_owner = std::make_unique<Run>(64, 64);
+        Run& run = *run_owner;
         build_floor(run.grid, 30, 40, 25);
         const boot::Objective obj = boot::place_objective(run, 35);
         check("place_objective: places on the terrain actually at that column",
@@ -92,7 +94,8 @@ void test_place_objective() {
         // the world, and an objective hanging in the sky is exactly as wrong as one
         // buried -- so a column with no ground leaves the run without an objective,
         // and the caller says so.
-        Run run(64, 64);
+        const auto run_owner = std::make_unique<Run>(64, 64);
+        Run& run = *run_owner;
         const boot::Objective obj = boot::place_objective(run, 35);
         check("place_objective: a column with no ground places nothing", !obj.placed);
         check("place_objective: ...and does not leave the run holding one",
@@ -171,7 +174,9 @@ void test_choose_display_mode() {
 // -- assets/scenes.txt ships one so the backdrop can be looked at with nothing
 // standing in front of it -- and the body has to end up somewhere real in it.
 void test_stand_player_on_floor() {
-    Run run(40, 40);  // no terrain stamped: this world is entirely Empty
+    // No terrain stamped: this world is entirely Empty.
+    const auto run_owner = std::make_unique<Run>(40, 40);
+    Run& run = *run_owner;
     boot::stand_player_on_floor(run);
 
     check("stand_player_on_floor: the body is inside the world",
@@ -214,7 +219,8 @@ void test_stand_player_on_ground() {
 
     {
         // The body ends up standing on the terrain rather than falling to it.
-        Run run(40, 40);
+        const auto run_owner = std::make_unique<Run>(40, 40);
+        Run& run = *run_owner;
         // Deliberately not the row the body already spawns at: a surface there
         // would put the body exactly where it was, and the assertion below would
         // pass on a stand_player_on_ground that does nothing at all.
@@ -231,7 +237,8 @@ void test_stand_player_on_ground() {
     {
         // A world with nothing under the spawn column leaves the body where it was,
         // rather than guessing a row. Same refusal place_objective makes.
-        Run run(40, 40);
+        const auto run_owner = std::make_unique<Run>(40, 40);
+        Run& run = *run_owner;
         const int before = run.player.cell_y();
         const boot::Standing s = boot::stand_player_on_ground(run);
         check("stand_player_on_ground: no ground means no placement", !s.placed);
@@ -251,7 +258,8 @@ void test_stand_player_on_ground() {
 void test_free_first_landing() {
     // Wide, because the body keeps walking while it falls: a 90-cell drop at the
     // walk speed carries it about 70 cells sideways, and the 140-cell one further.
-    Run run(320, 300);
+    const auto run_owner = std::make_unique<Run>(320, 300);
+    Run& run = *run_owner;
     for (int x = 0; x < 20; ++x) run.grid.set_element(x, 60, ElementType::Wall);    // the ledge
     for (int x = 20; x < 130; ++x)
         run.grid.set_element(x, 150, ElementType::Wall); // a shelf below
@@ -287,7 +295,8 @@ void test_shipped_fixture() {
         return;
     }
 
-    Run run(boot::GRID_WIDTH, boot::GRID_HEIGHT);
+    const auto run_owner = std::make_unique<Run>(boot::GRID_WIDTH, boot::GRID_HEIGHT);
+    Run& run = *run_owner;
     const int cells = load_scene(run.grid, scene, 0, 0);
     check("fixture: the shipped scene stamps cells into the world", cells > 0,
           std::to_string(cells));
