@@ -400,6 +400,40 @@ int main() {
                 std::remove(cut_path);
             }
 
+            // The radius is one byte on disk. A step outside BRUSH_MIN..BRUSH_MAX
+            // is refused at write time, whole log and no file, rather than saved as
+            // its low byte: 300 would come back as 44 and 256 as 0. The edges
+            // themselves still write.
+            {
+                const char* edge_path = "test_run_log_brush.rec";
+                for (const int size : {BRUSH_MIN - 1, BRUSH_MAX + 1, 256, 300}) {
+                    std::remove(edge_path);
+                    input_log::Log bad = out;
+                    bad.steps.back().brush_size = size;
+                    std::string why;
+                    const bool wrote = input_log::write(edge_path, bad, &why);
+                    std::FILE* left = std::fopen(edge_path, "rb");
+                    if (left) std::fclose(left);
+                    check(
+                        ("a brush size of " + std::to_string(size) + " is refused by the recorder")
+                            .c_str(),
+                        !wrote && !left && why.find("brush size") != std::string::npos, why);
+                }
+                for (const int size : {BRUSH_MIN, BRUSH_MAX}) {
+                    input_log::Log edge = out;
+                    edge.steps.back().brush_size = size;
+                    std::string why;
+                    input_log::Log back;
+                    check(("a brush size of " + std::to_string(size) + " writes and reads back")
+                              .c_str(),
+                          input_log::write(edge_path, edge, &why) &&
+                              input_log::read(edge_path, back, &why) &&
+                              back.steps.back().brush_size == size,
+                          why);
+                }
+                std::remove(edge_path);
+            }
+
             std::remove(path);
         }
     }

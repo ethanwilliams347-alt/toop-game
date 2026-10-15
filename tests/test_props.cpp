@@ -82,6 +82,29 @@ int main() {
         check("a non-numeric x is an error", !err.empty() && props.empty(), err);
     }
 
+    // The x is read whole, by the same strict reader as a level file's columns
+    // (scene/number.h). Each of these is a number with something wrong attached,
+    // and a stream read takes the number and leaves the rest: "120px" was read as
+    // 120 plus a stray field misreported as an authored y, and "1e3", "0x10" and
+    // "+12" loaded as positions.
+    {
+        const char* bad[] = {"120px", "1e3", "inf", "nan", "0x10", "12.5.5", "+12"};
+        for (const char* x : bad) {
+            std::string err;
+            auto props = parse(std::string("tree_a ") + x + "\n", &err);
+            check((std::string("a malformed x is refused: ") + x).c_str(),
+                  !err.empty() && props.empty(), err);
+            check((std::string("...and named as a bad x, not as an extra field: ") + x).c_str(),
+                  err.find("not a number") != std::string::npos, err);
+        }
+    }
+    {
+        std::string err;
+        auto props = parse("tree_a -12.5\ntree_b 0.25\n", &err);
+        check("a negative or fractional x is still a number",
+              err.empty() && props.size() == 2 && props[0].x == -12.5f && props[1].x == 0.25f, err);
+    }
+
     // A prop list is data, and data that names a path can name any path. The loader
     // turns `sprite` into assets/<sprite>.bmp, so the guard has to be on the name
     // rather than on the path it becomes.

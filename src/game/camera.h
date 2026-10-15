@@ -22,13 +22,14 @@ public:
     // every coordinate conversion in the project.
     void set_scale(int scale) { scale_ = scale > 0 ? scale : DEFAULT_SCALE; }
 
-    // Centres the viewport on (center_x, center_y) -- normally the player --
-    // clamped so it never scrolls past the world's edges. A world no bigger than the
+    // Frames the viewport on (center_x, center_y) -- normally the player --
+    // centred across and VERTICAL_ANCHOR of the way down, clamped so it never
+    // scrolls past the world's edges. A world no bigger than the
     // viewport on an axis clamps to 0 on that axis.
     //
     // Takes a fractional centre. The world is larger than every viewport in
     // DISPLAY_MODES, so the view is unclamped wherever the player usually is, which
-    // pins the player near screen centre and scrolls the world instead. Rounded to
+    // pins the player to one point on screen and scrolls the world instead. Rounded to
     // whole cells, that world moves in scale-sized jerks at the simulation's
     // irregular sub-cell cadence while the eye tracks it smoothly, which reads as
     // ghosting and is not fixed by smoothing the player alone.

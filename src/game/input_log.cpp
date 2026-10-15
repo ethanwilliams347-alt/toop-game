@@ -109,6 +109,19 @@ bool write(const char* path, const Log& log, std::string* error) {
     if (log.header.scene.size() > MAX_SCENE_NAME)
         return fail(error, std::string(path) + ": scene name '" + log.header.scene +
                                "' is longer than a log can hold");
+    // Checked before anything is written, so a refused log leaves no file behind.
+    // The record has one byte for the radius, and a cast would keep its low byte:
+    // a step painted at 300 would be saved as 44 and replay as a session that
+    // never happened. Refusing the whole log is the parsers' rule -- a log with
+    // one wrong step is not a log of what was played.
+    for (size_t i = 0; i < log.steps.size(); ++i) {
+        const int size = log.steps[i].brush_size;
+        if (size < BRUSH_MIN || size > BRUSH_MAX)
+            return fail(error, std::string(path) + ": step " + std::to_string(i) +
+                                   " has a brush size of " + std::to_string(size) + ", outside " +
+                                   std::to_string(BRUSH_MIN) + "-" + std::to_string(BRUSH_MAX));
+    }
+
     std::vector<uint8_t> buf;
     buf.reserve(HEADER_BYTES + log.steps.size() * RECORD_BYTES);
 
@@ -235,10 +248,14 @@ bool read(const char* path, Log& log, std::string* error) {
                                    ", which is not a material");
         in.brush_type = static_cast<ElementType>(type);
 
+        // The range write() refuses to leave, so a log this build could not
+        // have written is not read either.
         in.brush_size = buf[off++];
-        if (in.brush_size < 1)
+        if (in.brush_size < BRUSH_MIN || in.brush_size > BRUSH_MAX)
             return fail(error, std::string(path) + ": step " + std::to_string(i) +
-                                   " has a brush size of 0");
+                                   " has a brush size of " + std::to_string(in.brush_size) +
+                                   ", outside " + std::to_string(BRUSH_MIN) + "-" +
+                                   std::to_string(BRUSH_MAX));
 
         in.cursor_x = static_cast<int32_t>(get32(buf, off));
         in.cursor_y = static_cast<int32_t>(get32(buf, off));

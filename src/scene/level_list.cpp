@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <sstream>
+#include "scene/number.h"
 
 namespace level_list {
 
@@ -23,18 +24,15 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), st
         return LevelDef{};
     };
 
-    // A column is a number and nothing else. Read with >> into a float, then
-    // refused if anything is glued to it ("120px"), which >> would otherwise stop
-    // at and leave for the extra-field check to misreport.
-    auto column = [](std::istringstream& fields, float& out) -> bool {
+    // A column is a whole number of cells and nothing else (scene/number.h), and
+    // every record reads its column through this one call. It used to be a float
+    // that level.cpp rounded for the player and an enemy, while the objective was
+    // truncated here, so "player 120.6" and "objective 120.6" were a cell apart.
+    // Nothing a level places can stand between two cells, so a fraction is a
+    // typo, and a typo is refused rather than rounded one of two ways.
+    auto column = [](std::istringstream& fields, int& out) -> bool {
         std::string raw;
-        if (!(fields >> raw)) return false;
-        std::istringstream num(raw);
-        float v = 0.0f;
-        char trailing = 0;
-        if (!(num >> v) || (num >> trailing) || v < 0.0f) return false;
-        out = v;
-        return true;
+        return (fields >> raw) && number::whole(raw, out);
     };
 
     while (std::getline(in, line)) {
@@ -53,18 +51,16 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), st
                 return fail("a second `player` line; the first is on line " +
                             std::to_string(player_line));
             if (!column(fields, level.player_x))
-                return fail("`player` needs one column, a non-negative number");
+                return fail("`player` needs one column, a whole number of cells");
             level.has_player = true;
             player_line = line_no;
         } else if (kind == "objective") {
             if (objective_line)
                 return fail("a second `objective` line; the first is on line " +
                             std::to_string(objective_line));
-            float x = 0.0f;
-            if (!column(fields, x))
-                return fail("`objective` needs one column, a non-negative number");
+            if (!column(fields, level.objective_x))
+                return fail("`objective` needs one column, a whole number of cells");
             level.has_objective = true;
-            level.objective_x = static_cast<int>(x);
             objective_line = line_no;
         } else if (kind == "enemy") {
             EnemyDef e;
@@ -73,7 +69,7 @@ LevelDef load_level(const std::string& path, bool (*species_ok)(const char*), st
             if (!species_ok || !species_ok(e.species.c_str()))
                 return fail("'" + e.species + "' is not a species");
             if (!column(fields, e.x))
-                return fail("`enemy " + e.species + "` needs a column, a non-negative number");
+                return fail("`enemy " + e.species + "` needs a column, a whole number of cells");
             level.enemies.push_back(e);
         } else {
             return fail("'" + kind + "' is not a record (player, objective or enemy)");

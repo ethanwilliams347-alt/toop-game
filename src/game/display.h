@@ -13,7 +13,7 @@
 // sizes, which destroys the pixel grid everything in assets/ is drawn on.
 //
 // The scale is a default rather than a constant, which is why every method here
-// takes it as an argument instead of reading Camera::SCALE: a scene may state
+// takes it as an argument instead of reading Camera::DEFAULT_SCALE: a scene may state
 // its own, so the pair (window, scale) decides a viewport and neither half
 // decides it alone. The parameter is deliberately not defaulted -- a default
 // would let a call site silently frame a scene at the wrong scale, and there are
@@ -75,6 +75,10 @@ inline int load_display_mode(const char* path = SETTINGS_PATH) {
     char line[128];
     while (std::fgets(line, sizeof(line), f)) {
         int w = 0, h = 0;
+        // The two numbers are only ever compared for equality against
+        // DISPLAY_MODES, so a misread one matches no row and the line counts as
+        // no setting -- the same answer a reported conversion error would give.
+        // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion)
         if (std::sscanf(line, "resolution=%dx%d", &w, &h) == 2) {
             for (int i = 0; i < DISPLAY_MODE_COUNT; ++i) {
                 if (DISPLAY_MODES[i].window_w == w && DISPLAY_MODES[i].window_h == h) found = i;

@@ -7,19 +7,7 @@
 #include "physics/player.h"
 #include "physics/tool.h"
 
-// Everything outside the run that one fixed step needs -- filled from SDL by
-// main.cpp, and filled by hand in tests/test_run.cpp.
-//
-// Sampling the keyboard once per rendered frame and replaying that one sample
-// into every fixed step the frame happened to contain makes the framerate an
-// input to the simulation. One Input drives exactly one fixed step, so a
-// recorded sequence replays to the same result regardless of how the original
-// session was paced across frames.
-//
-// A plain struct of button and cursor state rather than SDL types, for the same
-// reason PlayerInput is: it keeps everything under src/game/ and src/physics/
-// testable without a window.
-// A one-shot action, as against the held buttons above it in Input.
+// A one-shot action, as against the held buttons in Input below.
 //
 // Each held verb is a bit in the log's button byte, and the dev keys used to be
 // bits too: N for a ghoul, T for a troll, the last free bit spent on the troll.
@@ -27,9 +15,10 @@
 // step instead -- a kind and an argument -- so a new one is a new enum value and
 // nothing else, and the log carries two bytes for it whatever the count.
 //
-// One per step is enough: commands come from key presses, and main.cpp queues at
-// most one per rendered frame and clears it after the first step that takes it,
-// so a frame that buys three steps does not spawn three bodies. It is on Input,
+// One per step is enough: commands come from key presses, and main.cpp queues
+// them (a few deep, oldest first) and hands each step at most one, so a frame
+// that buys three steps does not spawn three bodies, and a burst of presses
+// drains over consecutive steps in the order it was pressed. It is on Input,
 // rather than a call main.cpp makes on the Run, because it changes the world, and
 // every change to the world has to be in the recorded stream or a replay of the
 // session is a different session.
@@ -55,6 +44,32 @@ struct Command {
     }
 };
 
+// The brush's radius in cells, as the game lets the mouse wheel set it. Here
+// rather than in main.cpp because the session log stores it too: one byte a
+// step (game/input_log.cpp), so the largest radius the game can produce has to
+// fit in one, and the recorder refuses a step outside this range rather than
+// writing the low byte of it -- a radius of 256 recorded as 0, or 300 as 44,
+// replays as a different session. Zero is refused for a second reason: a disc
+// of radius 0 is one cell, which the wheel never makes.
+inline constexpr int BRUSH_MIN = 1;
+inline constexpr int BRUSH_MAX = 32;
+static_assert(BRUSH_MIN >= 1 && BRUSH_MIN <= BRUSH_MAX,
+              "the brush range is empty, or lets the wheel reach a radius of zero");
+static_assert(BRUSH_MAX <= 255, "the session log stores brush_size in one byte; a larger BRUSH_MAX "
+                                "needs a wider field and a FORMAT_VERSION bump");
+
+// Everything outside the run that one fixed step needs -- filled from SDL by
+// main.cpp, and filled by hand in tests/test_run.cpp.
+//
+// Sampling the keyboard once per rendered frame and replaying that one sample
+// into every fixed step the frame happened to contain makes the framerate an
+// input to the simulation. One Input drives exactly one fixed step, so a
+// recorded sequence replays to the same result regardless of how the original
+// session was paced across frames.
+//
+// A plain struct of button and cursor state rather than SDL types, for the same
+// reason PlayerInput is: it keeps everything under src/game/ and src/physics/
+// testable without a window.
 struct Input {
     bool left = false;
     bool right = false;
@@ -74,7 +89,7 @@ struct Input {
     // painted once per step like everything else.
     bool brush_active = false;
     ElementType brush_type = ElementType::Sand;
-    int brush_size = 1;
+    int brush_size = BRUSH_MIN;  // recorded only within BRUSH_MIN..BRUSH_MAX
 
     // The bow, held: looses an arrow at the cursor every Quiver::DRAW_STEPS.
     bool shoot = false;

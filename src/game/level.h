@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "game/run.h"
+#include "game/scene_activation.h"
 #include "scene/level_list.h"
 #include "scene/scene.h"
 #include "scene/scene_list.h"
@@ -67,10 +68,16 @@ struct Report {
     std::vector<int> enemy_lines_unplaced;
 };
 
-// Builds the level into `run`. The world's size comes from the scene row or its
-// art (scene_activation::resolve); `seed` is the world seed the run is reset to.
-Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
-             const level_list::LevelDef& level, uint64_t seed);
+// Builds the level into `run`, at the size `size` gives; `seed` is the world seed
+// the run is reset to.
+//
+// The size is the caller's, worked out once by scene_activation::resolve, rather
+// than worked out again in here. The game needs the resolved size before this
+// runs -- the scale and the render targets move first -- and two calls to
+// resolve with arguments that only happen to agree are two answers that can
+// stop agreeing. Only world_w, world_h and unclamped are read.
+Report start(Run& run, const scene_activation::Resolved& size, const scene_list::SceneDef& def,
+             const Scene& scene, const level_list::LevelDef& level, uint64_t seed);
 
 // One line of what start() did, ready to print. `warning` lines go to stderr in
 // the game; the rest are the same "Scene: ..., Spawn: ..." lines it always

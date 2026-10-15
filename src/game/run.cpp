@@ -63,6 +63,18 @@ void Run::clear_objective() {
 }
 
 void Run::step(const Input& input) {
+    // The spawn first of all, before the brush and the grid, for the brush's own
+    // reason: what is put into the world on a step should not also move on it.
+    events_.clear();
+
+    if (input.command.kind == Command::Kind::SpawnEnemy) {
+        if (const Species* kind = species::at(input.command.arg))
+            spawn_enemy(input.cursor_x - kind->width / 2, input.cursor_y - kind->height, *kind);
+    } else if (input.command.kind == Command::Kind::TogglePoseSnap) {
+        snap_poses = !snap_poses;
+        for (Enemy& e : enemies) e.set_snapped_poses(snap_poses);
+    }
+
     // A filled circle of radius brush_size, painted before physics runs so a freshly
     // placed cell does not move on the same step it was placed.
     //
@@ -76,18 +88,6 @@ void Run::step(const Input& input) {
     // no room and be deleted. Bottom-up, each row escapes before the row above it
     // exists. No other brush shows it, because everything else the brush paints is
     // movable and a climb walks straight through it.
-    // The spawn first of all, before the brush and the grid, for the brush's own
-    // reason: what is put into the world on a step should not also move on it.
-    events_.clear();
-
-    if (input.command.kind == Command::Kind::SpawnEnemy) {
-        if (const Species* kind = species::at(input.command.arg))
-            spawn_enemy(input.cursor_x - kind->width / 2, input.cursor_y - kind->height, *kind);
-    } else if (input.command.kind == Command::Kind::TogglePoseSnap) {
-        snap_poses = !snap_poses;
-        for (Enemy& e : enemies) e.set_snapped_poses(snap_poses);
-    }
-
     if (input.brush_active) {
         for (int dy = input.brush_size; dy >= -input.brush_size; --dy) {
             for (int dx = -input.brush_size; dx <= input.brush_size; ++dx) {

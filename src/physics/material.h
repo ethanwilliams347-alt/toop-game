@@ -12,8 +12,8 @@ enum class ElementType : uint8_t {
     Steam,
     Fire,
     // Wood that has caught: a state of the fuel, not a kind of fire. This cell
-    // holds the burn duration, stays structural, keeps heating its neighbours and
-    // throws short-lived Fire into the air around it.
+    // stays structural, keeps heating its neighbours and throws short-lived Fire
+    // into the air around it until its decay roll in REACTIONS burns it out.
     Charred,
     Count
 };
@@ -59,10 +59,6 @@ struct Material {
     // stops a flame being quenched by the cold wall it sits against.
     uint8_t heat_source;
 
-    // How many steps of Fire one cell of this material is worth when it burns. Read
-    // at ignition and stored on the resulting flame, so it is a property of the
-    // fuel, not of the fire. Zero for anything not combustible.
-    //
     // What a burning cell of this material throws into the empty space beside it,
     // and how often. `Count` means nothing, which is every row but one. Emission
     // targets Empty neighbours, so a buried cell has nowhere to emit and does not
@@ -84,6 +80,10 @@ struct Material {
 // ordered dithering in the art rather than combining with it. What is left is
 // enough to stop a flat fill looking flat. Fire keeps the widest range, because
 // there the variation is the thing being drawn.
+// Unformatted on purpose. The rows are aligned by hand into the columns named on
+// the table's first line, and clang-format run over any edit inside the table --
+// a comment, even -- collapses every row in it.
+// clang-format off
 inline constexpr Material MATERIALS[] = {
     // name      colour       jitter  move              density  spread  structural  cond  spawn  source  emits                 emit%
     // Empty is the one row whose colour is fully transparent rather than a colour:
@@ -123,9 +123,10 @@ inline constexpr Material MATERIALS[] = {
     // that, only temperature can: heat_flow has a floor of one unit per step, so
     // any gap of two or more transfers in full eventually.
     //
-    // The cost is a shorter puff: steam's life is the span between this number and
-    // its condensing point. The gain beyond the bug is that water boiling into
-    // cooler steam absorbs heat rather than creating it out of nothing.
+    // Steam's life is not set here: it is a countdown on Element::ticks (see
+    // "steam's condensation clock" in grid.h), so a low spawn temperature does not
+    // shorten the puff. The gain beyond the bug is that water boiling into cooler
+    // steam absorbs heat rather than creating it out of nothing.
     {  "Steam",  0xFFC4D2D8,      4,  MoveKind::Gas,        -20,      3,  false,       40,    88,      0,  ElementType::Count,      0 },
     // Denser (less negative) than Steam so flame stays under a steam layer instead
     // of punching through it. The only heat source in the table.
@@ -149,6 +150,7 @@ inline constexpr Material MATERIALS[] = {
     // It stays far enough under the flame it emits to keep the two shapes distinct.
     {  "Charred",0xFF3A3431,     10,  MoveKind::Static,   32000,      0,  true,        90,     0,    200,  ElementType::Fire,      25 },
 };
+// clang-format on
 
 static_assert(sizeof(MATERIALS) / sizeof(MATERIALS[0]) == static_cast<size_t>(ElementType::Count),
               "MATERIALS must have exactly one row per ElementType");

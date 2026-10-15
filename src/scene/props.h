@@ -27,8 +27,11 @@
 //     tree_b     187.5
 //
 // `sprite` names assets/<sprite>.bmp. `x` is a world cell column, the sprite's
-// bottom-centre. Blank lines are fine. Anything else is an error with a line
-// number, never a silently skipped row.
+// bottom-centre, in plain decimal (scene/number.h): "120px", "1e3" and the like
+// are errors, not 120 and 1000. Fractional where a level file's columns are
+// whole, because a prop is only drawn, and a sprite can sit between two cells
+// where a body cannot. Blank lines are fine. Anything else is an error with a
+// line number, never a silently skipped row.
 struct PropDef {
     std::string sprite; // asset stem; resolves to assets/<sprite>.bmp
     float x = 0.0f;     // world cell, the sprite's bottom-centre column
