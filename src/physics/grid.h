@@ -158,11 +158,14 @@ public:
     static constexpr int LIQUID_FULL = 4096;
 
     // Element::flow is one signed byte, so it stores velocity in steps of this many
-    // units a step: up to a quarter of a cell a step either way. Finer than that
-    // matters more than range: on a gentle slope a step's acceleration is a few
-    // tens of units, and a coarser byte truncated every one of them to zero, so
-    // momentum never built and the slope crept level by diffusion alone.
-    static constexpr int LIQUID_FLOW_SCALE = 8;
+    // units a step: up to half a cell a step either way. At 8 the byte topped out at
+    // a quarter of a cell, under water's own ceiling, and a released body ran at
+    // that limit for most of its run, which read as thick. Coarser steps no longer
+    // lose small pushes: step_liquid rounds the stored velocity at random in
+    // proportion to the remainder, so a gentle slope's few tens of units a step
+    // still add up on average. Before that rounding, a coarser byte truncated every
+    // one of them to zero and the slope crept level by diffusion alone.
+    static constexpr int LIQUID_FLOW_SCALE = 16;
 
 private:
     // Bounds of the cells within one chunk that may still move, in world
@@ -366,7 +369,8 @@ private:
     // differences closer than LIQUID_DEAD push nothing, so a level surface is
     // still. The ceiling on speed is a material's `spread` times
     // LIQUID_SPEED_PER_SPREAD, in mass per step, which is what makes oil slower
-    // than water.
+    // than water: three-eighths of a cell a step for water at spread 6, under the
+    // byte's half (LIQUID_FLOW_SCALE), and three-sixteenths for oil at 3.
     //
     // As strong as it can be and stay stable. The velocity is a cell's, pushed by
     // its two neighbours' difference, so nothing stops alternate cells drifting

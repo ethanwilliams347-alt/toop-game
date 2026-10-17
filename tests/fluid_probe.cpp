@@ -88,9 +88,20 @@ void dam_break() {
     double prev_far = 0.0;
     bool rising = false;
     int quiet = 0, settled = -1;
+    // The step the front first reaches the far wall: how fast released water runs.
+    // And how many cell-steps ran at the fastest speed seen, which says whether the
+    // speed ceiling or the spreading is what holds it back.
+    int arrived = -1;
+    int64_t at_speed[128] = {};
     for (int s = 0; s < 6000 && settled < 0; ++s) {
         g.update();
+        for (int y = 0; y < FLOOR; ++y)
+            for (int x = 1; x < W - 1; ++x) {
+                const int f = g.get_element(x, y).flow;
+                ++at_speed[f < 0 ? (f < -127 ? 127 : -f) : f];
+            }
         const double far = liquid::depth(g, W - 3, ElementType::Water);
+        if (arrived < 0 && far > 0.0) arrived = s + 1;
         if (far > far_peak) far_peak = far;
         // Each time the far end turns from falling to rising is one wave arriving.
         if (far > prev_far + 0.25 && !rising) {
@@ -103,10 +114,14 @@ void dam_break() {
         quiet = g.active_chunk_count() == 0 ? quiet + 1 : 0;
         if (quiet >= 30) settled = s + 1 - 30;
     }
-    std::printf("dam break:   settled in %5d steps; far wall peak %.2f cells over %d waves; "
+    int top = 127;
+    while (top > 0 && at_speed[top] == 0) --top;
+    std::printf("dam break:   front at far wall in %4d steps; top speed %.3f cells/step for "
+                "%lld cell-steps; settled in %5d steps; far wall peak %.2f cells over %d waves; "
                 "unevenness %.2f; water %lld -> %lld\n",
-                settled, far_peak, far_rises, unevenness(g, 1, W - 1, ElementType::Water),
-                static_cast<long long>(placed),
+                arrived, top * Grid::LIQUID_FLOW_SCALE / static_cast<double>(Grid::LIQUID_FULL),
+                static_cast<long long>(at_speed[top]), settled, far_peak, far_rises,
+                unevenness(g, 1, W - 1, ElementType::Water), static_cast<long long>(placed),
                 static_cast<long long>(liquid::total(g, ElementType::Water)));
 }
 

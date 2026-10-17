@@ -124,6 +124,8 @@ cooldown, governed by three constants:
 |---|---|---|---|
 | `LIQUID_ACCEL` | [grid.h](src/physics/grid.h) | 64 | How hard a difference in amount pushes a cell's sideways velocity, /256 per step. Higher runs faster, but 96 or more stops pools sleeping. |
 | `LIQUID_DAMP` | [grid.h](src/physics/grid.h) | 224 | Velocity kept per step, /256. Higher carries a surge further; 244 or more stops pools sleeping. |
+| `LIQUID_SPEED_PER_SPREAD` | [grid.h](src/physics/grid.h) | 256 | A liquid's top sideways speed is its `spread` times this, in units a step. Water's spread is 6 ([material.h](src/physics/material.h)), which is 1536, three-eighths of a cell; oil's is 3. A liquid's spread also sets how much of a difference it passes on each step (`2 + 10 / spread`), so a higher spread is runnier both ways. |
+| `LIQUID_FLOW_SCALE` | [grid.h](src/physics/grid.h) | 16 | Units per step of the one-byte velocity, so the byte tops out at 127 times this. That has to stay above water's own ceiling, or the byte caps water instead. |
 | `LIQUID_DEAD` | [grid.h](src/physics/grid.h) | 16 | A difference smaller than this moves nothing sideways, so a level surface sleeps. Lower levels flatter and settles slower. |
 | `LIQUID_MIN_SPREAD` | [grid.h](src/physics/grid.h) | 1024 | A cell holding less than this does not spread onto dry ground: how thin a puddle gets before it stops. |
 | `LIQUID_LEVEL_HEAD` | [grid.h](src/physics/grid.h) | 1024 | The smallest difference between two surfaces of one body that pressure moves water across. |
@@ -365,3 +367,12 @@ Record adjustments to tuning parameters and their rationale here.
   `fluid_probe` and grid_test. The cost is the `churning` bench row, 21.7 ->
   35.0 ms: a grain sinking into water presses it into the pool around it, which
   is what stops a pour lifting water out of the pool.
+- **2026-10-17 -- water slightly less viscous.** A playtest found water too
+  thick. `LIQUID_ACCEL` and `LIQUID_DAMP` were already at their stability limit,
+  and the speed ceiling was not water's but the velocity byte's: at
+  `LIQUID_FLOW_SCALE` 8 it topped out at 1016 units a step, under water's 1280.
+  The scale went to 16 and water's spread from 5 to 6 (ceiling 1536, spreading
+  share 1/4 -> 1/3). In `fluid_probe`'s dam break the front reaches the far wall
+  in 232 steps instead of 265, the tank settles in 778 instead of 1020, and two
+  waves now reach the far wall where none did. Spread 7 and 8 were tried: faster
+  still (223, 217) but sloshier, settling in 885 and 1226. Oil is unchanged.

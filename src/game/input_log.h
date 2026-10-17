@@ -74,7 +74,11 @@ namespace input_log {
 //    A version-7 log was recorded against fire that split every tipped, landed
 //    or broken piece cell by cell as it burned, so it replays into a different
 //    world from the first step a tagged cell ignites.
-constexpr uint32_t FORMAT_VERSION = 8;
+//
+// 9: water runs faster -- Grid::LIQUID_FLOW_SCALE doubled and water's spread
+//    went from 5 to 6. Element::flow means a different velocity, so a version-8
+//    log replays into a different world from the first step water moves.
+constexpr uint32_t FORMAT_VERSION = 9;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt
