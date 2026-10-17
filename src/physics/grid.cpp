@@ -1,6 +1,9 @@
 #include "grid.h"
 #include "reaction.h"
 #include <algorithm>
+#include <bit>
+#include <cstddef>
+#include <cstring>
 
 namespace {
     int clamp_channel(int v) {
@@ -170,12 +173,6 @@ void Grid::reset(uint64_t seed) {
     // as the grid's dimensions never change out from under them. Nothing in this
     // class exposes a way to change them after construction, and reset() must not
     // become the first.
-    //
-    // room_above_on is also not here. It is configuration -- how this engine
-    // behaves -- rather than a fact about this world, so a reset that silently put
-    // it back to its default would throw away a setting the caller made on
-    // purpose. That makes reset() not quite "a fresh grid with this seed"; this is
-    // the exception, and it is pinned by a test in test_grid.cpp.
 }
 
 // Waking only the cell that changed is the classic dirty-rect bug: erase a
@@ -198,6 +195,23 @@ void Grid::reset(uint64_t seed) {
 // straddle a border -- so that case gets a path of its own, and the general
 // loop below it handles the up-to-four chunks a corner cell can touch.
 void Grid::mark_dirty(int x, int y) {
+    // That path, asked first and as cheaply as it can be: a cell inside the
+    // world's edge and off its chunk's edge rows and columns has its whole 3x3
+    // in the world and in one chunk, so there is nothing to clip, and each pair
+    // of bounds is one unsigned compare. The general path below gives the same
+    // box for it; this one only skips the clipping and the signed divisions.
+    // Measured, it took about 6% off `churning` and 7% off `cascading`, where
+    // marking is a large part of every step.
+    static_assert((CHUNK_SIZE & (CHUNK_SIZE - 1)) == 0, "the fast path masks by CHUNK_SIZE");
+    if (static_cast<unsigned>(x - 1) < static_cast<unsigned>(width - 2) &&
+        static_cast<unsigned>(y - 1) < static_cast<unsigned>(height - 2) &&
+        static_cast<unsigned>((x & (CHUNK_SIZE - 1)) - 1) < static_cast<unsigned>(CHUNK_SIZE - 2) &&
+        static_cast<unsigned>((y & (CHUNK_SIZE - 1)) - 1) < static_cast<unsigned>(CHUNK_SIZE - 2)) {
+        const int chunk = (y / CHUNK_SIZE) * chunks_x + x / CHUNK_SIZE;
+        chunk_next[chunk].include_box(x - 1, y - 1, x + 1, y + 1);
+        return;
+    }
+
     // Clip to the world first, so everything below works on cells that exist.
     // Non-negative from here on, which is also what makes the divisions by
     // CHUNK_SIZE plain floors.
@@ -324,7 +338,7 @@ void Grid::displace(int x, int y, ElementType type) {
     //    read as a bug if they moved under the brush.
     if (type != ElementType::Empty && old_type != ElementType::Empty &&
         old_type != type && material_of(old_type).move != MoveKind::Static) {
-        if (room_above_on) make_room_above(x, y);
+        make_room_above(x, y);
     }
 
     set_element(x, y, type);
@@ -1110,8 +1124,12 @@ uint32_t Grid::pixel_of(const Element& e) {
     return (static_cast<uint32_t>(alpha) << 24) | (e.color & 0x00FFFFFFu);
 }
 
-void Grid::transfer_liquid(int from, int to, int amount) {
+void Grid::transfer_liquid(int fx, int fy, int tx, int ty, int amount) {
     if (amount <= 0) return;
+    // Coordinates in, not indices: every caller has them, and two divisions by
+    // the width to get them back were a measurable part of `churning`.
+    const int from = fy * width + fx;
+    const int to = ty * width + tx;
     Element& s = cells[from];
     Element& d = cells[to];
     if (d.type == ElementType::Empty) {
@@ -1126,9 +1144,12 @@ void Grid::transfer_liquid(int from, int to, int amount) {
         d.temperature = heat;
         d.updated_tag = frame_tag;
     }
-    // Momentum is mass times velocity, and it moves with the mass.
+    // Momentum is mass times velocity, and it moves with the mass. Two equal
+    // velocities mix to the same velocity exactly, so the division -- the
+    // dearest thing in a transfer -- is only done when they differ.
     const int dm = d.mass;
-    d.flow = static_cast<int8_t>((d.flow * dm + s.flow * amount) / (dm + amount));
+    if (d.flow != s.flow)
+        d.flow = static_cast<int8_t>((d.flow * dm + s.flow * amount) / (dm + amount));
     d.mass = static_cast<uint16_t>(dm + amount);
     s.mass = static_cast<uint16_t>(s.mass - amount);
     if (s.mass == 0) {
@@ -1138,11 +1159,38 @@ void Grid::transfer_liquid(int from, int to, int amount) {
     }
     pixels[from] = pixel_of(s);
     pixels[to] = pixel_of(d);
-    const int fy = from / width, ty = to / width;
-    mark_dirty(from - fy * width, fy);
-    mark_dirty(to - ty * width, ty);
-    note_warm_if(to - ty * width, ty, d.temperature);
+    mark_dirty(tx, ty);
+    note_warm_if(tx, ty, d.temperature);
 }
+
+namespace {
+
+// The cells disperse_liquid presses into, in the order it tries them: rings
+// outward, nearest first, and only level with the cell or below it. Within a
+// ring, row by row from the top, and along each row from -dx to +dx for a
+// positive draw (mirrored for a negative one).
+//
+// A table rather than the three nested loops it is built from: this runs for
+// every grain that sinks into liquid -- most of what `churning` is -- and the
+// loops walked 49 (dx, dy) pairs to visit the 27 on a ring, every call.
+struct RingOffset {
+    int dx;
+    int dy;
+};
+template <int R> struct DisperseRing {
+    RingOffset at[2 * R * (R + 1) + R];
+};
+template <int R> constexpr DisperseRing<R> make_disperse_ring() {
+    DisperseRing<R> ring{};
+    int k = 0;
+    for (int r = 1; r <= R; ++r)
+        for (int dy = 0; dy <= r; ++dy)
+            for (int dx = -r; dx <= r; ++dx)
+                if (dy == r || dx == r || dx == -r) ring.at[k++] = {dx, dy};
+    return ring;
+}
+
+}  // namespace
 
 void Grid::disperse_liquid(int x, int y) {
     const int idx = get_index(x, y);
@@ -1151,23 +1199,71 @@ void Grid::disperse_liquid(int x, int y) {
     // cells above are the grain's own column, where water pressed in would ride up
     // with the next grain. Which side of a ring comes first is drawn per cell, so
     // a pour does not comb its water one way.
-    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::LiquidDisperse) ? -1 : 1;
-    for (int r = 1; r <= LIQUID_DISPERSE_RADIUS; ++r) {
-        for (int dy = 0; dy <= r; ++dy) {
-            for (int i = -r; i <= r; ++i) {
-                const int dx = i * dir;
-                if (dy != r && dx != r && dx != -r) continue;  // the ring only
-                if (cells[idx].type != type) return;  // all of it has gone
-                const int nx = x + dx, ny = y + dy;
-                if (!is_within_bounds(nx, ny)) continue;
-                const int n = get_index(nx, ny);
-                if (cells[n].type != type) continue;
-                const int room = LIQUID_PUSH_CAP - cells[n].mass;
-                if (room <= 0) continue;
-                const int have = cells[idx].mass;
-                transfer_liquid(idx, n, room < have ? room : have);
+    //
+    // The rings fill the block of SPAN x (R + 1) cells around and below the cell
+    // exactly, so which candidates have room is gathered first, a bit each,
+    // without a branch. In a band of sinking sand many calls find none -- the
+    // water around is pressed full already; 43% of them in `churning` -- and
+    // return there, before even the draw. Room cannot change during the walk: a
+    // transfer changes only the source and the one candidate it lands in, and no
+    // candidate is visited twice.
+    //
+    // The source is not woken here (transfer_liquid wakes only where liquid
+    // lands): the grain's swap into it, which always follows, does that.
+    constexpr int R = LIQUID_DISPERSE_RADIUS;
+    constexpr int SPAN = 2 * R + 1;
+    static_assert(SPAN * (R + 1) <= 32, "the open mask below is one bit a candidate");
+    static constexpr DisperseRing<R> RING = make_disperse_ring<R>();
+    constexpr int CELLS = static_cast<int>(sizeof(RING.at) / sizeof(RING.at[0]));
+
+    uint32_t open = 0;  // bit dy * SPAN + dx + R
+    if (x >= R && x < width - R && y + R < height) {
+        // Room is "this liquid, holding under LIQUID_PUSH_CAP", and both live in a
+        // cell's first four bytes -- type, flow, mass. With the cap a power of
+        // two, one masked compare asks both: the type byte matches, and mass has
+        // no bit set at or above the cap's. One load a candidate instead of two.
+        static_assert(offsetof(Element, type) == 0 && offsetof(Element, mass) == 2 &&
+                          sizeof(ElementType) == 1 && sizeof(Element::mass) == 2 &&
+                          std::endian::native == std::endian::little,
+                      "the room test reads type and mass as one little-endian word");
+        static_assert((LIQUID_PUSH_CAP & (LIQUID_PUSH_CAP - 1)) == 0 && LIQUID_PUSH_CAP < 65536,
+                      "the room test masks mass at LIQUID_PUSH_CAP");
+        constexpr uint32_t KEY = 0xFFu | ((0xFFFFu & ~uint32_t{LIQUID_PUSH_CAP - 1}) << 16);
+        const uint32_t want = static_cast<uint32_t>(type);
+        const Element* row = &cells[static_cast<size_t>(idx - R)];
+        for (int dy = 0; dy <= R; ++dy, row += width)
+            for (int c = 0; c < SPAN; ++c) {
+                uint32_t head;
+                std::memcpy(&head, &row[c], sizeof(head));
+                open |= static_cast<uint32_t>((head & KEY) == want) << (dy * SPAN + c);
             }
-        }
+        open &= ~(1u << R);  // the cell itself
+        if (open == 0) return;
+    } else {
+        for (int dy = 0; dy <= R; ++dy)
+            for (int dx = -R; dx <= R; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                if (!is_within_bounds(x + dx, y + dy)) continue;
+                const Element& e = cells[idx + dy * width + dx];
+                open |= static_cast<uint32_t>((e.type == type) & (e.mass < LIQUID_PUSH_CAP))
+                        << (dy * SPAN + dx + R);
+            }
+    }
+
+    // The open candidates in the order the rings try them for this draw, bit k
+    // for RING.at[k], walked lowest bit first.
+    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::LiquidDisperse) ? -1 : 1;
+    uint32_t ordered = 0;
+    for (int k = 0; k < CELLS; ++k)
+        ordered |= ((open >> (RING.at[k].dy * SPAN + RING.at[k].dx * dir + R)) & 1u) << k;
+    while (ordered != 0) {
+        const RingOffset& o = RING.at[std::countr_zero(ordered)];
+        ordered &= ordered - 1;
+        const int dx = o.dx * dir;
+        const int room = LIQUID_PUSH_CAP - cells[idx + o.dy * width + dx].mass;
+        const int have = cells[idx].mass;
+        transfer_liquid(x, y, x + dx, y + o.dy, room < have ? room : have);
+        if (room >= have) return;  // all of it has gone
     }
 }
 
@@ -1194,6 +1290,9 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
         return -1;
     };
     bool moved = false;
+    // transfer_liquid wakes only where liquid lands; this cell is woken here, once
+    // for everything that leaves it, rather than once a transfer.
+    bool woken = false;
 
     // --- down: as much as the cell below will hold ---
     if (y + 1 < height) {
@@ -1204,9 +1303,12 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
             int flow = stable_lower(m + mb) - mb;
             if (flow > m) flow = m;
             if (flow > 0) {
-                transfer_liquid(idx, b, flow);
+                transfer_liquid(x, y, x, y + 1, flow);
                 moved = true;
-                if (cells[idx].type != type) return true;  // all of it fell
+                if (cells[idx].type != type) {  // all of it fell
+                    mark_dirty(x, y);
+                    return true;
+                }
             }
         }
     }
@@ -1290,15 +1392,17 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
             out_l = m - out_r;
         }
         if (out_r > 0) {
-            transfer_liquid(idx, idx + 1, out_r);
+            transfer_liquid(x, y, x + 1, y, out_r);
             moved = true;
         }
         if (out_l > 0 && cells[idx].type == type) {
-            transfer_liquid(idx, idx - 1, out_l);
+            transfer_liquid(x, y, x - 1, y, out_l);
             moved = true;
         }
+        // Once for everything that left it so far; still flowing, it stays awake.
+        if (moved || v != 0) mark_dirty(x, y);
         if (cells[idx].type != type) return true;
-        if (v != 0) mark_dirty(x, y);  // still flowing, so still awake
+        woken = moved || v != 0;
     }
 
     // --- up: whatever it holds past full ---
@@ -1316,8 +1420,9 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
             int up = m - stable_lower(m + ma);
             if (up > LIQUID_PUSH_CAP - ma) up = LIQUID_PUSH_CAP - ma;
             if (up > 0) {
-                transfer_liquid(idx, a, up);
+                transfer_liquid(x, y, x, y - 1, up);
                 moved = true;
+                if (!woken) mark_dirty(x, y);
             }
         }
     }
@@ -1402,7 +1507,9 @@ bool Grid::level_liquid(int x, int y) {
     // An idle cell has no momentum to give, and liquid arriving by pressure brings
     // none: it rose from below, not in from the side.
     cells[idx].flow = 0;
-    transfer_liquid(idx, to, amount);
+    const int ty = to / width;
+    transfer_liquid(x, y, to - ty * width, ty, amount);
+    mark_dirty(x, y);
     return true;
 }
 

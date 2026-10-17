@@ -8,9 +8,7 @@ Run::Run(int width, int height, uint64_t seed)
 
 void Run::reset(uint64_t seed, int new_width, int new_height) {
     // Both or neither, and only when it is actually a different size -- a resize to
-    // the size already held would throw away the allocation for nothing and would
-    // also silently drop the grid's make_room_above switch, which a plain wipe
-    // keeps.
+    // the size already held would throw away the allocation for nothing.
     if (new_width > 0 && new_height > 0 &&
         (new_width != grid.get_width() || new_height != grid.get_height())) {
         grid = Grid(new_width, new_height, seed);

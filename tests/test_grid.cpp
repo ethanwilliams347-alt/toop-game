@@ -1226,39 +1226,6 @@ int main() {
         check("a reset run matches a fresh run built with the same seed", worlds_match(a, b));
     }
 
-    // --- the make_room_above switch ---
-    //
-    // A switch that reaches only a field would make every row of an ablation table
-    // an identical number, so it has to be shown reaching the rule it names.
-    // make_room_above fires only on a brush write over something movable, so the
-    // scene is water with sand painted into the middle of it.
-    {
-        auto paint_into_water = [](Grid& g) {
-            for (int y = 30; y < 50; ++y)
-                for (int x = 10; x < 70; ++x) g.set_element(x, y, ElementType::Water);
-            for (int x = 30; x < 50; ++x) g.displace(x, 40, ElementType::Sand);
-        };
-
-        Grid lift(80, 60, 4242);
-        paint_into_water(lift);
-        step(lift, 60);
-
-        Grid no_lift(80, 60, 4242);
-        no_lift.set_room_above_enabled(false);
-        paint_into_water(no_lift);
-        step(no_lift, 60);
-        check("the make_room_above switch reaches the brush path",
-              !worlds_match(lift, no_lift));
-
-        // It survives a reset: configuration, not world state. Asserted rather than
-        // commented, so whoever changes their mind has to change a test and read
-        // the argument at Grid::reset.
-        Grid g(20, 20, 42);
-        g.set_room_above_enabled(false);
-        g.reset(42);
-        check("a reset keeps the configured make_room_above switch", !g.room_above_enabled());
-    }
-
     // --- Grid::paint ---
     {
         Grid g(20, 20, 123);

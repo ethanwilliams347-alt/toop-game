@@ -135,12 +135,6 @@ public:
     //
     // 0 means keep the size, not a world of no cells, so every existing caller and
     // every recorded session is unaffected.
-    //
-    // A resize is a heavier reset than a wipe and the difference is observable:
-    // Grid::reset's documented exception -- the make_room_above switch surviving, because it is
-    // configuration rather than world state -- does not survive a resize, because
-    // the grid is a new object. Carrying it across would mean the new grid is not a
-    // fresh Grid(w, h, seed), which is the one thing the reset contract promises.
     void reset(uint64_t seed, int new_width = 0, int new_height = 0);
 
     // Advances grid, player, dig tool, arrows and enemies by exactly one fixed
@@ -236,11 +230,10 @@ private:
     bool snap_poses = false;
     EventLog events_;
 
-    // The objective survives reset(), and this is the second documented exception to
-    // "reset restores a fresh Run", after Grid's make_room_above switch. It is a property of the
-    // level, not of the run played through it, and the caller re-stamps the same
-    // scene on reset, so a cleared objective would be one the caller has to remember
-    // to place again. Forgetting would produce a run that is unwinnable and says
+    // The objective survives reset(), the one documented exception to "reset
+    // restores a fresh Run". It is a property of the level, not of the run played
+    // through it, and the caller re-stamps the same scene on reset, so a cleared
+    // objective would be one the caller has to remember to place again. Forgetting would produce a run that is unwinnable and says
     // nothing.
     bool objective_set = false;
     int goal_x = 0;
