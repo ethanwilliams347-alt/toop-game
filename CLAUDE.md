@@ -5,42 +5,6 @@ fetched and built statically by `FetchContent`; don't vendor or system-install i
 
 **Read [ARCHITECTURE.md](ARCHITECTURE.md) before starting large code task. It can be wrong though, so use it as just a starting point.**
 
-## Invariants
-
-These hold across the whole tree. Each exists for a reason given alongside it; if a
-task seems to require breaking one, stop and say so rather than working around it.
-
-- **The simulation has no SDL** — no header, type, or include. `slop_engine` (the
-  OBJECT library built from `ENGINE_SOURCES`: all of `src/physics/` plus
-  `game/run.cpp`, `game/level.cpp`, `game/input_log.cpp`, `scene/scene.cpp`) links
-  nothing, so it never gets SDL's include dirs; that is what keeps the simulation
-  headless-testable, and `sdl_boundary_test` fails if that ever changes. Linking
-  SDL into `slop_engine`, or moving a file between the source sets in
-  `CMakeLists.txt` to fix a build, means the boundary has been crossed.
-- **`src/physics/` has no float.** Replay determinism needs every simulation number
-  to be reproducible across compilers and `/fp` modes. Use `fx::v` (signed 16.16,
-  `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
-- **Rendering never feeds simulation.** `light.cpp` and `player_anim.cpp`
-  read the grid `const` and write only their own buffers.
-  Includes run render → physics, never the reverse.
-- **The step loop allocates nothing in steady state.** `Run::step()` /
-  `Grid::update()` reuse persistent scratch vectors cleared with `.clear()`;
-  those with a hard bound are reserved to it in the `Grid` constructor, and the
-  few with none (the support queues, the tipping pool) grow to a high-water mark
-  and stay there. No local `std::vector`, `std::string`, or `std::function` in
-  anything reachable from `Run::step()`. `alloc_test` counts allocations and
-  fails if a replayed step makes any.
-- **Parsers reject the whole file, never a single line.** `load_prop_list`,
-  `load_level`, `backdrop_set::load`, `load_scene_list`, and
-  `load_sprite_manifest` return empty and set `*error` on
-  the first malformed record; callers log to `stderr` and continue degraded. Don't
-  add per-line skip-and-continue — a scene that renders wrong silently is the
-  failure this design prevents (`src/scene/props.h` has the full argument).
-- **Assets stage at build time.** A POST_BUILD step copies `assets/` (minus
-  `assets/wip/`) next to the exe. Bind sprites with
-  `python tools/load_sprite.py <key> <file.bmp>`; don't hardcode asset paths.
-
-
 ## Commands
 
 ```bash

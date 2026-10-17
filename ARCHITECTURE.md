@@ -5,12 +5,45 @@ where to start for a given task, and how one frame flows. Paths are given in
 full from the repo root so they can be opened or grepped directly. Symbols are
 named, never line numbers, so this file survives code moving.
 
-The invariants (no SDL / no float under `src/physics/`, render never feeds
-simulation, no allocation in the step loop, whole-file parser rejection, assets
-staged at build) and their reasons live in [CLAUDE.md](CLAUDE.md) under
-*Invariants*; this file shows where those lines fall and doesn't restate why.
+The rules that hold across the whole tree, and their reasons, are under
+*Invariants* below; the rest of this file shows where those lines fall.
 The rationale for an individual design is in the header comment of the file
 that holds it -- read that before changing the design.
+
+## Invariants
+
+These hold across the whole tree. Each exists for a reason given alongside it; if a
+task seems to require breaking one, stop and say so rather than working around it.
+
+- **The simulation has no SDL** — no header, type, or include. `slop_engine` (the
+  OBJECT library built from `ENGINE_SOURCES`: all of `src/physics/` plus
+  `game/run.cpp`, `game/level.cpp`, `game/input_log.cpp`, `scene/scene.cpp`) links
+  nothing, so it never gets SDL's include dirs; that is what keeps the simulation
+  headless-testable, and `sdl_boundary_test` fails if that ever changes. Linking
+  SDL into `slop_engine`, or moving a file between the source sets in
+  `CMakeLists.txt` to fix a build, means the boundary has been crossed.
+- **`src/physics/` has no float.** Replay determinism needs every simulation number
+  to be reproducible across compilers and `/fp` modes. Use `fx::v` (signed 16.16,
+  `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
+- **Rendering never feeds simulation.** `light.cpp` and `player_anim.cpp`
+  read the grid `const` and write only their own buffers.
+  Includes run render → physics, never the reverse.
+- **The step loop allocates nothing in steady state.** `Run::step()` /
+  `Grid::update()` reuse persistent scratch vectors cleared with `.clear()`;
+  those with a hard bound are reserved to it in the `Grid` constructor, and the
+  few with none (the support queues, the tipping pool) grow to a high-water mark
+  and stay there. No local `std::vector`, `std::string`, or `std::function` in
+  anything reachable from `Run::step()`. `alloc_test` counts allocations and
+  fails if a replayed step makes any.
+- **Parsers reject the whole file, never a single line.** `load_prop_list`,
+  `load_level`, `backdrop_set::load`, `load_scene_list`, and
+  `load_sprite_manifest` return empty and set `*error` on
+  the first malformed record; callers log to `stderr` and continue degraded. Don't
+  add per-line skip-and-continue — a scene that renders wrong silently is the
+  failure this design prevents (`src/scene/props.h` has the full argument).
+- **Assets stage at build time.** A POST_BUILD step copies `assets/` (minus
+  `assets/wip/`) next to the exe. Bind sprites with
+  `python tools/load_sprite.py <key> <file.bmp>`; don't hardcode asset paths.
 
 ## Model in one paragraph
 
