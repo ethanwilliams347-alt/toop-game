@@ -27,17 +27,13 @@ is worth more than the seconds.
 """
 import math
 import os
-import shutil
 import sys
 
 # Derived from this file's location rather than hardcoded: an absolute path
 # into one machine's home directory runs only there, and nothing says so.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
-from pixel_art import LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header, write_bmp, write_png
-
-DST_DIR = os.path.join(REPO_ROOT, "assets", "bg_gemini")
-BUILD_DST_DIR = os.path.join(REPO_ROOT, "build", "Release", "assets", "bg_gemini")
+from pixel_art import COLOR_KEY, LEGEND_WALL, write_layered_backdrop
 
 TARGET_W = 688
 TARGET_H = 288
@@ -45,11 +41,8 @@ TARGET_H = 288
 # Floor row for material map: scaled 2x from bg1's row 132
 FLOOR_ROW = 264
 
-# LEGEND_EMPTY / LEGEND_WALL come from tools/pixel_art.py, which checks them
-# against src/scene/legend.h.
-COLOR_KEY = (0xFF, 0x00, 0xFF)
-
-MAGENTA = (255, 0, 255)
+# pixel_art's colour key: a layer is transparent wherever it is left this.
+MAGENTA = COLOR_KEY
 
 # Exact palette colors measured from assets/bg1/
 SKY_BASE = (161, 201, 199)
@@ -565,45 +558,26 @@ def generate_fg_rocks():
     return img
 
 
-# Draw order back to front (exact engine compositing order):
-LAYER_DEFS = [
-    ("09_sky", "bg_gemini_09_sky.bmp", generate_sky),
-    ("08_ground", "bg_gemini_08_ground.bmp", generate_ground),
-    ("07_mountains", "bg_gemini_07_mountains.bmp", generate_mountains),
-    ("06_hills_far", "bg_gemini_06_hills_far.bmp", generate_hills_far),
-    ("05_hills_midfar", "bg_gemini_05_hills_midfar.bmp", generate_hills_midfar),
-    ("04_hills_mid", "bg_gemini_04_hills_mid.bmp", generate_hills_mid),
-    ("03_hills_midnear", "bg_gemini_03_hills_midnear.bmp", generate_hills_midnear),
-    ("02_hills_near", "bg_gemini_02_hills_near.bmp", generate_hills_near),
-    ("01_fg_rocks", "bg_gemini_01_fg_rocks.bmp", generate_fg_rocks),
+# Back to front, the order the engine composites them in.
+LAYERS = [
+    ("09_sky", generate_sky),
+    ("08_ground", generate_ground),
+    ("07_mountains", generate_mountains),
+    ("06_hills_far", generate_hills_far),
+    ("05_hills_midfar", generate_hills_midfar),
+    ("04_hills_mid", generate_hills_mid),
+    ("03_hills_midnear", generate_hills_midnear),
+    ("02_hills_near", generate_hills_near),
+    ("01_fg_rocks", generate_fg_rocks),
 ]
 
 
-def write_scene_maps(composite_rgb):
-    assert_legend_matches_header()
-    root_mat = os.path.join(REPO_ROOT, "assets", "bg_gemini_material.bmp")
-    root_alb = os.path.join(REPO_ROOT, "assets", "bg_gemini_albedo.bmp")
-
-    mat_pixels = []
-    alb_pixels = []
-    solid = 0
-    for y in range(TARGET_H):
-        for x in range(TARGET_W):
-            if y >= FLOOR_ROW:
-                mat_pixels.append(LEGEND_WALL)
-                solid += 1
-            else:
-                mat_pixels.append(LEGEND_EMPTY)
-            alb_pixels.append(composite_rgb[y * TARGET_W + x])
-
-    write_bmp(root_mat, TARGET_W, TARGET_H, mat_pixels)
-    write_bmp(root_alb, TARGET_W, TARGET_H, alb_pixels)
-
-    print(f"Scene maps written: floor at row {FLOOR_ROW}, {solid} solid cells.")
+def scene_cell(_x, y):
+    """Wall from FLOOR_ROW down, albedo the painted ground; air above it."""
+    return (LEGEND_WALL, None) if y >= FLOOR_ROW else None
 
 
-def write_readme():
-    content = """# Background Gemini (bg_gemini) Multi-Layer Extended Set
+README = """# Background Gemini (bg_gemini) Multi-Layer Extended Set
 
 Native resolution: 688 x 288 px (New generative pixel art extension of Background_1 / bg1)
 
@@ -624,7 +598,7 @@ Native resolution: 688 x 288 px (New generative pixel art extension of Backgroun
 ## Color Palette & Visual Rules
 
 - **Palette**: Exact RGB colors measured from `assets/bg1/`.
-- **Composition**: Authoring of extended geological features (towering mountain massif on left with serrated arêtes, crisp pyramid summits on far hills, shark-fin twin summits on midfar hills, stepped rock terraces framing open panoramic lake).
+- **Composition**: Authoring of extended geological features (towering mountain massif on left with serrated aretes, crisp pyramid summits on far hills, shark-fin twin summits on midfar hills, stepped rock terraces framing open panoramic lake).
 - **Ground Banding**:
   * Band 0 (rows 0..164): 0.30x parallax factor.
   * Band 1 (rows 164..200): 0.70x parallax factor.
@@ -635,49 +609,7 @@ Native resolution: 688 x 288 px (New generative pixel art extension of Backgroun
 - **Material Map**: Terrain floor at row 264 with Wall material `0x888888`, air above as Empty `0x000000`.
 - **Albedo Map**: Fully composed scene matching game presentation.
 """
-    with open(os.path.join(DST_DIR, "README.md"), "w") as f:
-        f.write(content)
-
-
-def main():
-    os.makedirs(DST_DIR, exist_ok=True)
-    os.makedirs(BUILD_DST_DIR, exist_ok=True)
-
-    print("Generating newly generated 688x288 backdrop layers for bg_gemini...")
-    composite_rgb = [MAGENTA] * (TARGET_H * TARGET_W)
-
-    for _tag, fname, gen_fn in LAYER_DEFS:
-        layer_arr = gen_fn()
-
-        # Save primary BMP
-        dst_path = os.path.join(DST_DIR, fname)
-        pixels = [layer_arr[y][x] for y in range(TARGET_H) for x in range(TARGET_W)]
-        write_bmp(dst_path, TARGET_W, TARGET_H, pixels)
-
-        # Copy to build dir if present
-        if os.path.exists(BUILD_DST_DIR):
-            shutil.copyfile(dst_path, os.path.join(BUILD_DST_DIR, fname))
-
-        # Composite back-to-front
-        for y in range(TARGET_H):
-            for x in range(TARGET_W):
-                color = layer_arr[y][x]
-                if color != MAGENTA:
-                    composite_rgb[y * TARGET_W + x] = color
-
-        print(f"Generated {fname}")
-
-    # The preview is for people, not the game, so it lives with the source art
-    # rather than in assets/, which is staged next to the exe.
-    preview_path = os.path.join(REPO_ROOT, "art_src", "previews", "bg_gemini.png")
-    os.makedirs(os.path.dirname(preview_path), exist_ok=True)
-    write_png(preview_path, TARGET_W, TARGET_H, composite_rgb)
-    print("Composite preview saved.")
-
-    write_scene_maps(composite_rgb)
-    write_readme()
-    print("Done! All assets in assets/bg_gemini/ successfully generated.")
 
 
 if __name__ == "__main__":
-    main()
+    write_layered_backdrop("bg_gemini", TARGET_W, TARGET_H, LAYERS, scene_cell, README)

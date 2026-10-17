@@ -118,14 +118,28 @@ target_include_directories(slop_engine PUBLIC src)
 # simulation is", and light must never become a simulation input.
 #
 # light.cpp calls into the grid, so every target that links slop_render links
-# slop_engine as well. The other two files call nothing outside this set.
+# slop_engine as well. player_anim.cpp calls nothing outside this set, but it
+# is not engine-free either: render/player_sprite.h, which it includes, takes
+# physics/player.h (and with it grid.h) to hold the sprite frame to Player's
+# box, so it recompiles with the grid and every user of it links the engine
+# anyway. It stays here rather than joining backdrop_set in slop_backdrop.
 set(RENDER_SOURCES
     src/render/light.cpp
     src/render/player_anim.cpp
-    src/render/backdrop_set.cpp
 )
 add_library(slop_render OBJECT ${RENDER_SOURCES})
 target_include_directories(slop_render PUBLIC src)
+
+# The backdrop.txt parser: SDL-free like RENDER_SOURCES, but unlike light.cpp
+# it includes nothing from the engine -- only render/'s own parallax headers
+# and util/text_record.h. Its own library so that backdrop_set_test can link it
+# without linking light.cpp, and with it the grid, into a suite with no use for
+# the simulation. It used to compile backdrop_set.cpp a second time for that.
+set(BACKDROP_SOURCES
+    src/render/backdrop_set.cpp
+)
+add_library(slop_backdrop OBJECT ${BACKDROP_SOURCES})
+target_include_directories(slop_backdrop PUBLIC src)
 
 # Authored files turned into records: the prop list, the sprite manifest, the
 # scene list and the BMP reader. Its own variable rather than a line in either
@@ -148,9 +162,10 @@ set(SCENE_PROP_SOURCES
 add_library(slop_scene_props OBJECT ${SCENE_PROP_SOURCES})
 target_include_directories(slop_scene_props PUBLIC src)
 
-# Frame composition and the screen-space layer. A fifth variable rather than a
+# Frame composition and the screen-space layer. Its own variable rather than a
 # line in RENDER_SOURCES, and the difference is SDL: everything in
-# RENDER_SOURCES is SDL-free by rule, and these are nothing but SDL draw calls.
+# RENDER_SOURCES and BACKDROP_SOURCES is SDL-free by rule, and these are nothing
+# but SDL draw calls.
 # Folding them in would quietly make everything that links RENDER_SOURCES link
 # SDL2 -- light_test, anim_test, grid_bench and preview_light, all of which are
 # headless and must stay so.
@@ -203,7 +218,7 @@ target_link_libraries(slop_present PUBLIC SDL2-static)
 # the old per-target source lists would have been 20 projects of 10 to 26
 # files each. /MP implies /FS, so the ASan build's /Zi PDBs are safe.
 if(MSVC)
-    foreach(_lib slop_engine slop_render slop_scene_props slop_frame slop_present)
+    foreach(_lib slop_engine slop_render slop_backdrop slop_scene_props slop_frame slop_present)
         target_compile_options(${_lib} PRIVATE /MP)
     endforeach()
 endif()
@@ -226,8 +241,8 @@ target_include_directories(SlopPhysics PRIVATE src)
 # here although slop_frame would bring it anyway: every target that gets SDL
 # says so on its own link line, so a search for SDL2-static finds all four
 # (this, golden_frame_test, present_test, preview_backdrop) and nothing else.
-target_link_libraries(SlopPhysics PRIVATE slop_engine slop_render slop_scene_props slop_frame
-                      slop_present SDL2main SDL2-static)
+target_link_libraries(SlopPhysics PRIVATE slop_engine slop_render slop_backdrop slop_scene_props
+                      slop_frame slop_present SDL2main SDL2-static)
 
 # main.cpp loads assets by a path relative to the working directory, not
 # relative to the source tree, so they have to sit next to the built executable
@@ -383,17 +398,12 @@ if(BUILD_TESTING)
 
     # Backdrop sets: the backdrop.txt parser, and every set a shipped scene names
     # checked against its BMPs -- sizes, order, feet, the plane, bands cut on flat
-    # paint, the wrap seam. The parser and the BMP reader only, no SDL; from the
-    # source tree so assets/ resolves.
-    #
-    # backdrop_set.cpp is compiled here rather than taken from slop_render,
-    # because the library would bring light.cpp with it, and light.cpp calls
-    # into the grid: linking it would mean linking the engine into a suite that
-    # has no use for the simulation. The file does not include grid.h, so the
-    # second compile is not paid when the grid changes.
-    add_executable(backdrop_set_test tests/test_backdrop_set.cpp src/render/backdrop_set.cpp)
+    # paint, the wrap seam. The parser and the BMP reader only -- slop_backdrop
+    # and slop_scene_props, no engine and no SDL; from the source tree so
+    # assets/ resolves.
+    add_executable(backdrop_set_test tests/test_backdrop_set.cpp)
     target_include_directories(backdrop_set_test PRIVATE src tests)
-    target_link_libraries(backdrop_set_test PRIVATE slop_scene_props)
+    target_link_libraries(backdrop_set_test PRIVATE slop_backdrop slop_scene_props)
     add_test(NAME backdrop_set_test COMMAND backdrop_set_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The camera's view arithmetic: the framing, the world-edge clamps, and the
@@ -476,14 +486,28 @@ if(BUILD_TESTING)
     # with. It cannot see a physics header that only SDL-side files include and
     # that includes SDL itself; nothing here could before either.
     #
-    # A static library only so EXCLUDE_FROM_ALL keeps it out of the normal
-    # build; it is never meant to get as far as archiving.
-    add_library(sdl_boundary_probe STATIC EXCLUDE_FROM_ALL tests/sdl_boundary_probe.cpp)
-    target_include_directories(sdl_boundary_probe
-                               PRIVATE $<TARGET_PROPERTY:slop_engine,INCLUDE_DIRECTORIES>)
+    # The test runs the compiler on the probe itself, syntax only (/Zs,
+    # -fsyntax-only), with -I for each of slop_engine's directories -- cl takes
+    # the dash spellings too. $<TARGET_PROPERTY:...,INCLUDE_DIRECTORIES> is
+    # evaluated with the INTERFACE include directories of whatever slop_engine
+    # links, which is what makes a PRIVATE link count. COMMAND_EXPAND_LISTS turns
+    # the joined list into one argument per directory. It used to run
+    # `cmake --build` on a probe target from inside the test, which took 1.45 s
+    # of MSBuild start-up to run one preprocessor line and depended on the build
+    # tree's generator. The compiler needs no environment for this: the probe's
+    # one include fails before any system header is looked for. A probe that
+    # does find SDL.h either compiles (in a Developer prompt) or stops on SDL's
+    # own <stddef.h> (outside one), and neither matches the expression below.
+    if(MSVC)
+        set(SLOP_SYNTAX_ONLY /nologo /Zs)
+    else()
+        set(SLOP_SYNTAX_ONLY -fsyntax-only)
+    endif()
     add_test(NAME sdl_boundary_test
-             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG>
-                     --target sdl_boundary_probe)
+             COMMAND ${CMAKE_CXX_COMPILER} ${SLOP_SYNTAX_ONLY}
+                     "-I$<JOIN:$<TARGET_PROPERTY:slop_engine,INCLUDE_DIRECTORIES>,;-I>"
+                     ${CMAKE_SOURCE_DIR}/tests/sdl_boundary_probe.cpp
+             COMMAND_EXPAND_LISTS)
     set_tests_properties(sdl_boundary_test PROPERTIES
         PASS_REGULAR_EXPRESSION "SDL\\.h'?:? (No such file|file not found)")
 
@@ -544,8 +568,8 @@ if(BUILD_TESTING)
     # SDL for the software renderer, as golden_frame_test does; asserts nothing.
     add_executable(preview_backdrop tests/preview_backdrop.cpp)
     target_include_directories(preview_backdrop PRIVATE src tests)
-    target_link_libraries(preview_backdrop PRIVATE slop_engine slop_render slop_scene_props slop_frame
-                          SDL2-static)
+    target_link_libraries(preview_backdrop PRIVATE slop_engine slop_render slop_backdrop
+                          slop_scene_props slop_frame SDL2-static)
 
     # Burn timing and burn shape, in numbers. Not an add_test() for the same
     # reason preview_light is not: what it reports is a matter of taste, and a

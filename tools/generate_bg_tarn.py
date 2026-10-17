@@ -41,26 +41,21 @@ clean on every layer.
 
 import math
 import os
-import shutil
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
 from pixel_art import (
-    COLOR_KEY,  # noqa: E402
-    LEGEND_EMPTY,
+    COLOR_KEY,
     LEGEND_WALL,
-    assert_legend_matches_header,
     color_of,
     dither_mix,
-    write_bmp,
-    write_png,
+    rgb,
+    rnd,
+    wnoise,
+    write_layered_backdrop,
+    wsin,
 )
-
-DST_DIR = os.path.join(REPO_ROOT, 'assets', 'bg_tarn')
-BUILD_DST_DIRS = [
-    os.path.join(REPO_ROOT, 'build', cfg, 'assets', 'bg_tarn') for cfg in ('Release', 'Debug', '')
-]
 
 W = 688
 H = 288
@@ -103,42 +98,16 @@ SUN_R = 8
 
 # --- periodic primitives -----------------------------------------------------
 #
-# Everything horizontal is built from these two, which is the whole of how the
-# layers tile: a sine with an integer number of cycles across W, and a value-noise
-# lattice whose last cell interpolates back into its first.
-
-
-def wsin(x, cycles, phase=0.0):
-    return math.sin(2.0 * math.pi * (cycles * x / W) + phase)
-
-
-def _hash(i, seed):
-    # Integer hash, the usual xorshift-multiply mix. Stated here rather than taken
-    # from `random` so the stream cannot change under a Python upgrade.
-    h = (i * 374761393 + seed * 668265263) & 0xFFFFFFFF
-    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
-    return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0
-
-
-def wnoise(x, cells, seed):
-    """Value noise in 0..1 with `cells` lattice points across W, wrapping."""
-    u = (x % W) * cells / float(W)
-    i = int(math.floor(u))
-    f = u - i
-    a = _hash(i % cells, seed)
-    b = _hash((i + 1) % cells, seed)
-    t = f * f * (3.0 - 2.0 * f)
-    return a + (b - a) * t
+# Everything horizontal is built from wsin and wnoise (tools/pixel_art.py), which
+# is the whole of how the layers tile: a sine with an integer number of cycles
+# across W, and a value-noise lattice whose last cell interpolates back into its
+# first. Every layer here is W wide.
 
 
 def wdist(a, b):
     """Horizontal distance on the wrapped strip."""
     d = abs((a - b) % W)
     return min(d, W - d)
-
-
-def rnd(i, seed):
-    return _hash(i, seed)
 
 
 def blank():
@@ -169,7 +138,7 @@ SKY_STOPS = [  # (row the band is fully reached, colour)
 def sky_colour(x, y):
     # A slow wobble on the band edges so they read as layers of haze rather than
     # as a ruled gradient.
-    yy = y + 3.0 * wsin(x, 3, 0.4 * y / 40.0) + 1.5 * wsin(x, 7, 1.3)
+    yy = y + 3.0 * wsin(x, 3, W, 0.4 * y / 40.0) + 1.5 * wsin(x, 7, W, 1.3)
     if yy <= SKY_STOPS[0][0]:
         return color_of(SKY_STOPS[0][1])
     for (r0, c0), (r1, c1) in zip(SKY_STOPS, SKY_STOPS[1:], strict=False):
@@ -243,7 +212,7 @@ def gen_clouds():
                 continue
             # Lens profile: thickest in the middle, a puff or two on top.
             edge = 1.0 - (d / float(half)) ** 2
-            top = th * edge + 1.6 * wnoise(x, 40, 70 + n) * edge
+            top = th * edge + 1.6 * wnoise(x, 40, W, 70 + n) * edge
             rows = int(round(top))
             if rows <= 0:
                 continue
@@ -267,11 +236,11 @@ def gen_clouds():
 # renderer draws each row at its own depth and never resamples rows, so the
 # perspective has to be in the paint.
 def lake_top(x):
-    return LAKE_TOP + int(round(1.2 * wsin(x, 5, 0.7) + 0.6 * wsin(x, 13)))
+    return LAKE_TOP + int(round(1.2 * wsin(x, 5, W, 0.7) + 0.6 * wsin(x, 13, W)))
 
 
 def lake_bottom(x):
-    return LAKE_BOTTOM + int(round(2.2 * wsin(x, 3, 2.0) + 1.0 * wsin(x, 8, 0.3)))
+    return LAKE_BOTTOM + int(round(2.2 * wsin(x, 3, W, 2.0) + 1.0 * wsin(x, 8, W, 0.3)))
 
 
 def gen_plane():
@@ -294,10 +263,10 @@ def gen_plane():
         # The plane is the one layer the rig stretches vertically -- up to 2.9x with
         # the camera at the ceiling -- and a dither stretched in one axis turns into
         # vertical stripes. A wavy edge stretched is just a taller wave.
-        far_edge = HORIZON + 6 + int(round(1.5 * wsin(x, 11, 0.5)))
-        sky_edge = lt + 2 + int(round(0.7 * wsin(x, 17, 1.1) + 0.5))
-        deep_edge = lt + 12 + int(round(2.0 * wsin(x, 6, 2.4) + wsin(x, 19)))
-        seam = lb + 10 + int(round(1.5 * wsin(x, 9, 0.9) + 0.8 * wsin(x, 23)))
+        far_edge = HORIZON + 6 + int(round(1.5 * wsin(x, 11, W, 0.5)))
+        sky_edge = lt + 2 + int(round(0.7 * wsin(x, 17, W, 1.1) + 0.5))
+        deep_edge = lt + 12 + int(round(2.0 * wsin(x, 6, W, 2.4) + wsin(x, 19, W)))
+        seam = lb + 10 + int(round(1.5 * wsin(x, 9, W, 0.9) + 0.8 * wsin(x, 23, W)))
         for y in range(HORIZON, H):
             if y < lt:
                 c = shore_far if y < far_edge else m_far
@@ -404,7 +373,7 @@ def mountain_form(x):
 
 def mountain_crest(x):
     h = MOUNTAIN_FOOT - mountain_form(x)
-    h += 3.0 * wnoise(x, 172, 3) + 1.5 * wnoise(x, 344, 4)  # crags
+    h += 3.0 * wnoise(x, 172, W, 3) + 1.5 * wnoise(x, 344, W, 4)  # crags
     return MOUNTAIN_FOOT - int(round(h))
 
 
@@ -466,7 +435,7 @@ def gen_mountains():
         150,
         color_of('tarn_snow'),
         color_of('tarn_snow_shade'),
-        lambda x: 184 + int(3 * wnoise(x, 86, 9)),
+        lambda x: 184 + int(3 * wnoise(x, 86, W, 9)),
         ridge_lines=PEAKS,
         form=mountain_form,
     )
@@ -476,13 +445,13 @@ def gen_mountains():
 def ridge_form(x):
     # Rolling, not jagged: these are bg1's grey-green foothills. A dip under the
     # sun so the foothills do not cut it.
-    h = 5.0 + 11.0 * wnoise(x, 9, 31) + 3.0 * wnoise(x, 23, 32)
+    h = 5.0 + 11.0 * wnoise(x, 9, W, 31) + 3.0 * wnoise(x, 23, W, 32)
     h -= 9.0 * sun_closeness(x, 70)
     return RIDGE_FOOT - max(2.0, h)
 
 
 def ridge_crest(x):
-    return int(round(ridge_form(x) - 0.8 * wnoise(x, 172, 33)))
+    return int(round(ridge_form(x) - 0.8 * wnoise(x, 172, W, 33)))
 
 
 def gen_ridge():
@@ -497,7 +466,7 @@ def gen_ridge():
     rim = color_of('tarn_ridge_rim')
     for x in range(W):
         top = ridge_crest(x)
-        contour = top + 3 + int(round(2.0 * wnoise(x, 21, 34)))
+        contour = top + 3 + int(round(2.0 * wnoise(x, 21, W, 34)))
         for y in range(top, RIDGE_FOOT + 1):
             img[y][x] = body if y < contour else (rim if y == contour else shade)
         if rnd(x, 5) < 0.85:
@@ -530,7 +499,7 @@ def gen_mesas():
             elif x > r:
                 t = top + (x - r) * 2
             else:
-                t = top + int(round(0.8 * wnoise(x, 172, 50 + n)))
+                t = top + int(round(0.8 * wnoise(x, 172, W, 50 + n)))
             for y in range(t, MESA_FOOT + 1):
                 c = band if (y - top) % 4 == 2 else body
                 if x > r - 3 if x < SUN_X else x < left + 3:
@@ -739,10 +708,6 @@ POND = (96, 152, 7)  # left, right, depth below the floor
 SAND_BANK = (520, 596, 5)  # left, right, height above the floor
 
 
-def rgb(v):
-    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
-
-
 def scene_cell(x, y):
     """(legend colour, albedo colour) for the cell, or None for air."""
     pl, pr, pd = POND
@@ -776,55 +741,5 @@ def scene_cell(x, y):
     return LEGEND_WALL, alb
 
 
-def write_scene(composite):
-    assert_legend_matches_header()
-    mat, alb = [], []
-    for y in range(H):
-        for x in range(W):
-            cell = scene_cell(x, y)
-            if cell is None:
-                mat.append(LEGEND_EMPTY)
-                alb.append(composite[y * W + x])
-            else:
-                mat.append(cell[0])
-                alb.append(cell[1])
-    write_bmp(os.path.join(REPO_ROOT, 'assets', 'bg_tarn_material.bmp'), W, H, mat)
-    write_bmp(os.path.join(REPO_ROOT, 'assets', 'bg_tarn_albedo.bmp'), W, H, alb)
-    return alb
-
-
-def stage(path):
-    for d in BUILD_DST_DIRS:
-        if os.path.isdir(os.path.dirname(d)):
-            os.makedirs(d, exist_ok=True)
-            shutil.copyfile(path, os.path.join(d, os.path.basename(path)))
-
-
-def main():
-    os.makedirs(DST_DIR, exist_ok=True)
-    composite = [KEY] * (W * H)
-    for tag, fn in LAYERS:
-        img = fn()
-        flat = [img[y][x] for y in range(H) for x in range(W)]
-        path = os.path.join(DST_DIR, f'bg_tarn_{tag}.bmp')
-        write_bmp(path, W, H, flat)
-        stage(path)
-        for i, c in enumerate(flat):
-            if c != KEY:
-                composite[i] = c
-        feet = max((y for y in range(H) for x in range(W) if img[y][x] != KEY), default=-1)
-        print(
-            f'wrote {os.path.basename(path):<28} lowest painted row {feet:3d} '
-            f'(factor {factor_at(feet):.3f})'
-        )
-    alb = write_scene(composite)
-    # The preview is for people, not the game, so it lives with the source art
-    # rather than in assets/, which is staged next to the exe.
-    preview = os.path.join(REPO_ROOT, 'art_src', 'previews', 'bg_tarn.png')
-    os.makedirs(os.path.dirname(preview), exist_ok=True)
-    write_png(preview, W, H, alb)
-    print('wrote bg_tarn_material.bmp, bg_tarn_albedo.bmp, art_src/previews/bg_tarn.png')
-
-
 if __name__ == '__main__':
-    main()
+    write_layered_backdrop('bg_tarn', W, H, LAYERS, scene_cell, factor_at=factor_at)

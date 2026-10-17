@@ -1,6 +1,6 @@
-# Ruff settings for the Python art pipeline in tools/ (and the odd script at the
-# repo root). Run through `just code_cleanup`, which formats and lints only the
-# Python files a branch has changed -- see tools/code_cleanup.py for why.
+# Ruff settings for the Python art pipeline in tools/. Run through
+# `just code_cleanup`, which formats and lints only the Python files a branch has
+# changed -- see tools/code_cleanup.py for why.
 
 target-version = "py310"
 line-length = 100
