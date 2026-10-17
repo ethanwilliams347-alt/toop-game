@@ -194,7 +194,7 @@ void test_held_dig_cycles() {
 
         Conditions c = standing();
         tool.update(g, true, 200, 40, 399, 40);  // held, connecting
-        c.dig_progress = tool.swing_progress();
+        c.dig_progress = fx::to_float(tool.swing_progress());
         update(s, c, 1);
 
         if (s.anim != &ps::DIG) continue;

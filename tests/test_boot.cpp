@@ -280,9 +280,8 @@ void test_free_first_landing() {
 // --- the fixture half: the launch check, as assertions ---
 
 void test_shipped_fixture() {
-    std::string error, warning;
-    Scene scene = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp",
-                            &error, &warning);
+    std::string error;
+    Scene scene = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp", &error);
     if (!error.empty()) {
         check("fixture: the shipped scene loads", false, error);
         return;

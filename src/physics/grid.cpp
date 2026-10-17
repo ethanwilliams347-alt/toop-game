@@ -66,22 +66,49 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     scratch_visit.resize(width * height, 0);
     balance_visit.resize(width * height, 0);
 
-    // The step loop allocates nothing, and these three are why that is true rather
-    // than merely usual: they grow by push_back and are only ever .clear()ed, so
-    // without a reserve the first collapse or pressure probe to reach a new high-water
-    // mark would reallocate mid-step. Each is reserved to a hard bound, not a guess:
+    // The step loop allocates nothing in steady state: every scratch vector below
+    // grows by push_back and is only ever .clear()ed, so its capacity survives
+    // from step to step. Reserving takes the growth out of the step entirely for
+    // every one with a hard bound -- without it, the first collapse or pressure
+    // probe to reach a new high-water mark reallocates mid-step, on the step with
+    // the most work in it. Each is reserved to that bound, not a guess:
     //
-    //   support_component -- capped by the `> MAX_SUPPORT_CELLS` check in
-    //     resolve_support, which runs after the push, so one past the cap.
-    //   support_stack -- not capped by that check at all. Every cell popped pushes up
-    //     to eight neighbours, and pops stop pushing once the component passes the
-    //     cap, so the stack never holds more than eight per judged cell plus the seed.
+    //   support_component, drop_keys -- capped by the `> MAX_SUPPORT_CELLS` check
+    //     in fall_if_unsupported, which runs after the push, so one past the cap.
+    //   support_stack, balance_stack -- not capped by those checks at all. Every
+    //     cell popped pushes up to eight neighbours, and pops stop pushing once the
+    //     component passes the cap, so a stack never holds more than eight per
+    //     judged cell plus the seed.
+    //   balance_component, tip_next, tip_carry, tip_displaced -- the balance check
+    //     gives up one past MAX_SUPPORT_CELLS, and a tipping body is a balance
+    //     component, so every one of these is bounded by it. (Each TipBody's own
+    //     two vectors are reserved the same way when the pool grows; see
+    //     start_tipping.)
+    //   fracture_component -- its cap is checked once per cell dequeued, before
+    //     that cell's up-to-eight neighbours are pushed, so it can pass the cap by
+    //     eight.
+    //   fracture_lowest -- one entry per column a piece spans, so the world's width.
     //   pressure_queue -- the `>= MAX_PRESSURE_CELLS` check runs once per cell
     //     dequeued, before its up-to-four neighbours are pushed, so a queue of
     //     MAX_PRESSURE_CELLS - 1 can pass it and still grow by four.
+    //
+    // Three have no bound short of the world itself, and are left to grow to their
+    // high-water mark and stay there: pending_support and the two resolve_support
+    // queues hold one entry per structure cell disturbed this step, which a large
+    // enough collapse makes as big as it likes. The tip_bodies pool likewise holds
+    // as many bodies as are tipping at once. tests/test_alloc.cpp holds the line
+    // that matters -- a world replaying a step it has already reached allocates
+    // nothing.
     support_component.reserve(MAX_SUPPORT_CELLS + 1);
     drop_keys.reserve(MAX_SUPPORT_CELLS + 1);
     support_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
+    balance_component.reserve(MAX_SUPPORT_CELLS + 1);
+    balance_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
+    tip_next.reserve(MAX_SUPPORT_CELLS + 1);
+    tip_carry.reserve(MAX_SUPPORT_CELLS + 1);
+    tip_displaced.reserve(MAX_SUPPORT_CELLS + 1);
+    fracture_component.reserve(MAX_SUPPORT_CELLS + 9);
+    fracture_lowest.reserve(static_cast<size_t>(width));
     pressure_queue.reserve(MAX_PRESSURE_CELLS + 3);
 
     // Nothing to seed. The seed is stored and read straight out of world_seed by

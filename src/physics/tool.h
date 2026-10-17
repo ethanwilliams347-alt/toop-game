@@ -61,16 +61,19 @@ public:
     // leave a swing suspended halfway through.
     bool update(Grid& grid, bool held, int from_x, int from_y, int aim_x, int aim_y);
 
-    // Where the swing is, as a fraction from 0 (just started) up to but never
-    // reaching 1, or -1 when no swing is in progress.
+    // Where the swing is, as an fx fraction from 0 (just started) up to but never
+    // reaching fx::ONE, or -fx::ONE when no swing is in progress.
     //
     // A fraction rather than a step count, so the swing's length is not
     // reconstructible by the consumer. "Step 14 of 36" requires the consumer to hold
     // 36, and the moment two files hold the swing's length one of them can be
     // retuned alone. A fraction is complete on its own, and the animation divides it
     // by its own frame count without ever learning this clock's units.
-    float swing_progress() const {
-        return swing < 0 ? -1.0f : static_cast<float>(swing) / SWING_STEPS;
+    //
+    // Fixed point rather than float, because src/physics/ holds no float; the
+    // renderer converts (present::dig_progress).
+    fx::v swing_progress() const {
+        return swing < 0 ? -fx::ONE : fx::from_ratio(swing, SWING_STEPS);
     }
 
     // Where the current aim would land, for drawing a cursor. Reports the impact

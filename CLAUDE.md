@@ -20,9 +20,13 @@ task seems to require breaking one, stop and say so rather than working around i
 - **Rendering never feeds simulation.** `light.cpp` and `player_anim.cpp`
   read the grid `const` and write only their own buffers.
   Includes run render → physics, never the reverse.
-- **The step loop allocates nothing.** `Run::step()` / `Grid::update()` reuse
-  persistent scratch vectors cleared with `.clear()`. No local `std::vector`,
-  `std::string`, or `std::function` in anything reachable from `Grid::update()`.
+- **The step loop allocates nothing in steady state.** `Run::step()` /
+  `Grid::update()` reuse persistent scratch vectors cleared with `.clear()`;
+  those with a hard bound are reserved to it in the `Grid` constructor, and the
+  few with none (the support queues, the tipping pool) grow to a high-water mark
+  and stay there. No local `std::vector`, `std::string`, or `std::function` in
+  anything reachable from `Run::step()`. `alloc_test` counts allocations and
+  fails if a replayed step makes any.
 - **Parsers reject the whole file, never a single line.** `load_prop_list`,
   `load_level`, `backdrop_set::load`, `load_scene_list`, and
   `load_sprite_manifest` return empty and set `*error` on

@@ -17,10 +17,10 @@ struct Loaded {
     Scene scene;
     level_list::LevelDef level;
     // A failure leaves the part that failed empty and says so here: an unreadable
-    // map is an empty world, an unreadable level file is every default. The game
-    // prints these and plays on, degraded and loud, as with every other file.
+    // or malformed map is an empty world, an unreadable level file is every
+    // default. The game prints these and plays on, degraded and loud, as with every
+    // other file.
     std::vector<std::string> errors;
-    std::vector<std::string> warnings;
 };
 
 Loaded load(const scene_list::SceneDef& def, const std::string& assets_dir,

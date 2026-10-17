@@ -201,22 +201,21 @@ public:
     int center_x() const { return body.x + WIDTH / 2; }
     int center_y() const { return body.y + HEIGHT / 2; }
 
-    // The body's position including the sub-cell remainder. For rendering only --
-    // nothing in src/physics/ may read these, and no test asserts on them, because
-    // a fractional position is exactly the float-edge representation the integer
-    // scheme below exists to keep out of collision.
+    // The sub-cell remainder of the body's position, in fx cells. For the
+    // renderer's interpolation -- nothing in src/physics/ may read these to make a
+    // decision, because a fractional position is exactly the float-edge
+    // representation the integer scheme below exists to keep out of collision.
     //
     // They exist because discarding the remainder at draw time is visible, not a
     // rounding detail: at any speed with a fraction in it, cell_x() advances on
     // some steps and stalls on others, so the motion stutters even though the
     // simulation is right.
     //
-    // Float here rather than fixed point, and only here: this is the one number the
-    // player hands to the renderer, which multiplies it by a screen scale and rounds
-    // it to a pixel. Converting at the boundary keeps the float on the render side,
-    // where a last-bit difference is a pixel that was going to be rounded anyway.
-    float visual_x() const { return static_cast<float>(body.x) + fx::to_float(body.rem_x); }
-    float visual_y() const { return static_cast<float>(body.y) + fx::to_float(body.rem_y); }
+    // Fixed point, like everything else here. The conversion to float happens on
+    // the render side (present::player_visual), the same arrangement as
+    // Enemy::remainder_x, so src/physics/ holds no float at all.
+    fx::v remainder_x() const { return body.rem_x; }
+    fx::v remainder_y() const { return body.rem_y; }
 
     bool is_on_ground() const { return body.on_ground; }
 

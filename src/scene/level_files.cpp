@@ -8,11 +8,10 @@ Loaded load(const scene_list::SceneDef& def, const std::string& assets_dir,
             bool (*species_ok)(const char*)) {
     Loaded out;
     if (!def.declared_empty()) {
-        std::string error, warning;
+        std::string error;
         out.scene = bmp::load((assets_dir + def.material).c_str(),
-                              (assets_dir + def.albedo).c_str(), &error, &warning);
+                              (assets_dir + def.albedo).c_str(), &error);
         if (!error.empty()) out.errors.push_back("Failed to load scene: " + error);
-        if (!warning.empty()) out.warnings.push_back(warning);
     }
     if (!def.level.empty()) {
         std::string error;
