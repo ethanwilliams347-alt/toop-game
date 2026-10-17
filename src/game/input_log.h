@@ -59,7 +59,12 @@ namespace input_log {
 // 5: one-shot actions moved out of the button byte into a command slot (a kind
 //    byte and an argument byte; see Command in run.h). The spawn bits 64 and 128
 //    are gone, and a new one-shot no longer needs a bit or a version.
-constexpr uint32_t FORMAT_VERSION = 5;
+//
+// 6: the fingerprints hash every field of a cell, temperature and piece_tag
+//    included. The record layout is unchanged, but a version-5 header's
+//    fingerprints were taken over fewer fields and can never match one taken
+//    now, so an old log would report a stale world it does not have.
+constexpr uint32_t FORMAT_VERSION = 6;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt
@@ -96,9 +101,11 @@ struct Log {
     std::vector<Input> steps;
 };
 
-// Every cell of the grid, hashed. Uses the same four fields test_run.cpp's
-// worlds_match compares, so "the fingerprints agree" and "the suites' notion of
-// an identical world" mean the same thing.
+// Every cell of the grid, hashed: every field of Element, the same ones
+// tests/world_match.h compares, so "the fingerprints agree" and "the suites'
+// notion of an identical world" mean the same thing. Temperature and piece_tag
+// matter as much as type: a replay that has diverged in heat or in where a slab
+// cracked is a different world before any cell has changed what it is.
 uint64_t fingerprint(const Grid& grid);
 
 // The grid's fingerprint plus everything else in a Run that a level puts there:

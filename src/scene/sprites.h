@@ -46,6 +46,20 @@ public:
     std::vector<SpriteBinding> bindings_;
 };
 
+// The player sheet's key, and the shipped file it falls back to when the
+// manifest does not list it -- or is missing, or is malformed and ignored.
+//
+// Named here rather than written as a literal at the call site, so the fallback
+// has a test: boot_test reads this file out of the shipped assets/. The literal
+// in main.cpp once named a sheet that had been moved to assets/wip/, which is
+// never staged, so deleting sprites.txt -- documented as safe -- quietly turned
+// the player into the plain-rectangle fallback.
+//
+// Props need no entry: a prop's key is its own name and its fallback is
+// `<name>.bmp`, which boot_test already checks for every prop the list names.
+inline constexpr const char* PLAYER_SHEET_KEY = "player_sheet";
+inline constexpr const char* PLAYER_SHEET_FILE = "player_sheet.bmp";
+
 // Parses the manifest. One record per line, `#` starts a comment:
 //
 //     <key> <file.bmp> [<frame_w> <frame_h>]

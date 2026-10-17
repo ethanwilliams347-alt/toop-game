@@ -75,8 +75,8 @@ int main() {
         std::string err;
         SpriteManifest m = parse("tree_a oak.bmp\n", &err);
         check("an unlisted key falls back to the shipped file",
-              m.path_for("player_sheet", "player_sheet_fly.bmp") ==
-                  "assets/player_sheet_fly.bmp");
+              m.path_for(PLAYER_SHEET_KEY, PLAYER_SHEET_FILE) ==
+                  std::string("assets/") + PLAYER_SHEET_FILE);
         check("an unlisted key is not found", m.find("player_sheet") == nullptr);
     }
     {

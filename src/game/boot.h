@@ -119,6 +119,7 @@ inline Standing stand_player_on_ground(Run& run) {
     const int surface = highest_surface_under(run.grid, run.player.cell_x(), Player::WIDTH);
     if (surface < 0) return Standing{};
     run.player = Player(run.player.cell_x(), surface - Player::HEIGHT);
+    run.player.settle(run.grid);
     return Standing{true, surface};
 }
 
@@ -141,6 +142,7 @@ inline Standing stand_player_on_ground(Run& run) {
 inline void stand_player_on_floor(Run& run, int left = -1) {
     run.player =
         Player(left >= 0 ? left : run.grid.get_width() / 2, run.grid.get_height() - Player::HEIGHT);
+    run.player.settle(run.grid);
 }
 
 // Where the objective ended up, and whether it got placed at all.

@@ -98,25 +98,52 @@ void test_interpolation() {
     check("alpha is pinned to 1 while paused", p.alpha(true) == 1.0f);
 
     // An ordinary stride interpolates.
-    const pacer::Interpolated mid = pacer::interpolate(10.0f, 20.0f, 12.0f, 20.0f, 0.5f);
+    const pacer::Interpolated mid = pacer::interpolate(10.0f, 20.0f, 12.0f, 20.0f, 0.5f, false);
     check("an ordinary move eases", !mid.snapped && mid.x == 11.0f && mid.y == 20.0f);
 
-    // A teleport does not. resolve_overlap can shove the body several cells at
-    // once to push it out of terrain; easing across that draws the player skating
-    // through the wall it was just rescued from.
-    const pacer::Interpolated jump = pacer::interpolate(10.0f, 20.0f, 40.0f, 20.0f, 0.5f);
+    // So does a fast one. A body at terminal velocity covers several cells a step
+    // (Player::MAX_FALL_SPEED is about 6.7), and the old distance clamp snapped
+    // every step of that dive -- the fall, and the camera following it, stuttered.
+    const float dive = fx::to_float(fx::per_step(Player::MAX_FALL_SPEED));
+    const pacer::Interpolated fall =
+        pacer::interpolate(10.0f, 20.0f, 10.0f, 20.0f + dive, 0.5f, false);
+    check("a terminal-velocity fall eases rather than snapping",
+          !fall.snapped && fall.y > 20.0f && fall.y < 20.0f + dive, std::to_string(fall.y));
+
+    // A teleport does not, however short. resolve_overlap can shove the body
+    // several cells at once to push it out of terrain; easing across that draws the
+    // player skating through the wall it was just rescued from.
+    const pacer::Interpolated jump = pacer::interpolate(10.0f, 20.0f, 12.0f, 20.0f, 0.5f, true);
     check("a teleport snaps rather than easing",
-          jump.snapped && jump.x == 40.0f && jump.y == 20.0f);
+          jump.snapped && jump.x == 12.0f && jump.y == 20.0f);
 
-    // Either axis over the limit snaps both. Interpolating the small axis while
-    // snapping the large one draws a diagonal that never happened.
-    const pacer::Interpolated diag = pacer::interpolate(10.0f, 20.0f, 11.0f, 60.0f, 0.5f);
-    check("a teleport on one axis snaps the other too",
-          diag.snapped && diag.x == 11.0f && diag.y == 60.0f);
+    // Both axes snap together. Interpolating one axis while snapping the other
+    // draws a diagonal that never happened.
+    const pacer::Interpolated diag = pacer::interpolate(10.0f, 20.0f, 11.0f, 60.0f, 0.5f, true);
+    check("a teleport snaps both axes", diag.snapped && diag.x == 11.0f && diag.y == 60.0f);
+}
 
-    // The clamp is a distance, so it must fire in both directions.
-    const pacer::Interpolated back = pacer::interpolate(40.0f, 20.0f, 10.0f, 20.0f, 0.5f);
-    check("the teleport clamp is symmetric", back.snapped);
+// --- who says a move was a teleport ----------------------------------------
+//
+// The flag the interpolation reads, from the body that knows. A body buried
+// shallowly is relocated by the ring search and says so; the next ordinary step
+// clears it.
+void test_teleport_flag() {
+    Grid g(64, 64);
+    for (int x = 0; x < 64; ++x) g.set_element(x, 60, ElementType::Wall);
+    Player p(20, 60 - Player::HEIGHT);
+    p.settle(g);
+    PlayerInput none;
+    p.update(g, none);
+    check("an ordinary step is not a teleport", !p.teleported());
+
+    // Sand poured over the lower half of the body: the ring search lifts it out.
+    for (int y = 60 - Player::HEIGHT / 2; y < 60; ++y)
+        for (int x = 20; x < 20 + Player::WIDTH; ++x) g.set_element(x, y, ElementType::Sand);
+    p.update(g, none);
+    check("a relocation out of terrain is reported as a teleport", p.teleported());
+    p.update(g, none);
+    check("and the report lasts one step", !p.teleported());
 }
 
 // --- the settings menu -----------------------------------------------------
@@ -228,6 +255,7 @@ int main() {
     test_freeze_rule();
     test_steps();
     test_interpolation();
+    test_teleport_flag();
     test_menu_navigation();
     test_menu_selection();
     test_menu_switch_results();

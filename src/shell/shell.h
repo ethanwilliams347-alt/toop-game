@@ -69,6 +69,13 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
 // point: dropping the vector alone leaks a set's textures every scene change.
 void clear_backdrop(frame::Backdrop& backdrop);
 
+// Sets every texel of the cell texture to transparent. upload_cells only ever
+// writes the rect the grid covers, so whatever is outside it stays until this
+// clears it -- once when the texture is made, and again on every scene load,
+// because a scene that loads into the same texture at the same scale inherits
+// the previous scene's pixels in any part of the view the new grid does not cover.
+void blank_cells(SDL_Texture* cells);
+
 // Uploads the camera's view of the grid into `cells`, `visible_w` x `visible_h`
 // cells. `scratch` is only used when the view reaches past the grid's edge.
 void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, int visible_w,

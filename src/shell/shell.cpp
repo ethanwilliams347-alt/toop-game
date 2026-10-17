@@ -102,12 +102,9 @@ bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& m
     // frame only ever writes the rect the grid actually covers. A world smaller than
     // the viewport on either axis leaves the remainder holding whatever the driver's
     // allocation contained, which shows as garbage along the edge rather than as the
-    // backdrop. Once per texture, since it can only ever be wrong once.
-    {
-        const std::vector<uint32_t> blank(
-            static_cast<size_t>(mode.padded_w(scale)) * mode.padded_h(scale), 0);
-        SDL_UpdateTexture(cells, nullptr, blank.data(), mode.padded_w(scale) * sizeof(uint32_t));
-    }
+    // backdrop. Cleared here for a new texture, and by main.cpp again on every scene
+    // load -- see blank_cells for why once is not enough.
+    blank_cells(cells);
 
     if (targets.cells) SDL_DestroyTexture(targets.cells);
     if (targets.light_texture) SDL_DestroyTexture(targets.light_texture);
@@ -216,6 +213,14 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
 }
 
 // --- the cells -----------------------------------------------------------------
+
+void blank_cells(SDL_Texture* cells) {
+    if (!cells) return;
+    int w = 0, h = 0;
+    if (SDL_QueryTexture(cells, nullptr, nullptr, &w, &h) != 0 || w <= 0 || h <= 0) return;
+    const std::vector<uint32_t> blank(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
+    SDL_UpdateTexture(cells, nullptr, blank.data(), w * static_cast<int>(sizeof(uint32_t)));
+}
 
 // Upload only the visible rect, not the whole grid, starting from the camera's
 // current view rather than always (0, 0). Clamped by the caller to the grid's

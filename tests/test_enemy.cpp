@@ -19,6 +19,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -250,6 +251,72 @@ int main() {
         check("over a while, rather than the step it touches the flame",
               steps > 4 * Enemy::BURN_INTERVAL_STEPS, "steps=" + std::to_string(steps));
         check("and the head is still on while it does", head_lost_while_feet_burned == 0);
+    }
+
+    // --- a burnt pixel scorches its own grain, not the ground it fell on ---
+    //
+    // A pixel whose cell holds loose powder drops its grain on top of the powder,
+    // so the grain is not in the pixel's cell. The scorch used to darken the
+    // pixel's cell regardless, which is the terrain sand under the feet -- a little
+    // darker every burn tick, until the ground under a burning body was black.
+    {
+        Grid g = make_world();
+        Enemy e = standing_enemy(g, 100);
+        // Hot sand where the feet are: a cell keeps its temperature when it is
+        // overwritten, so Fire then Sand leaves sand at Fire's temperature.
+        const int row = FLOOR_Y - 1;
+        std::vector<uint32_t> before;
+        for (int x = e.cell_x(); x < e.cell_x() + G.width; ++x) {
+            g.set_element(x, row, ElementType::Fire);
+            g.set_element(x, row, ElementType::Sand);
+            before.push_back(g.get_element(x, row).color);
+        }
+        const int pixels = e.pixel_count();
+        e.update(g, -10000, -10000, false);
+        check("a foot standing in hot sand burns", e.pixel_count() < pixels);
+        bool ground_untouched = true;
+        for (int x = e.cell_x(), i = 0; i < G.width; ++x, ++i) {
+            const Element c = g.get_element(x, row);
+            if (c.type != ElementType::Sand || c.color != before[static_cast<size_t>(i)])
+                ground_untouched = false;
+        }
+        check("the sand it burns in keeps its colour; the scorch is on the new grain",
+              ground_untouched);
+    }
+
+    // --- a pool full of sinking arrows does not stop the bow ---
+    //
+    // Fluid drag slows an arrow in deep water to a sixth of a cell a step, so a bow
+    // held over a lake fills the pool with arrows still in flight. With every slot
+    // flying and none stuck, the quiver used to refuse the shot -- a bow that
+    // silently stops working. It recycles the longest-flying arrow instead.
+    {
+        const auto run_owner = std::make_unique<Run>(200, 400);
+        Run& run = *run_owner;
+        for (int x = 0; x < 40; ++x) run.grid.set_element(x, 60, ElementType::Wall);  // a ledge
+        for (int y = 61; y < 400; ++y)
+            for (int x = 0; x < 200; ++x) run.grid.set_element(x, y, ElementType::Water);
+        run.player = Player(32, 60 - Player::HEIGHT);
+        run.player.settle(run.grid);
+
+        Input held;
+        held.shoot = true;
+        held.cursor_x = 199;  // out over the water, clear of the ledge
+        held.cursor_y = 70;
+        const int shots = Quiver::CAPACITY + 5;
+        int loosed = 0, most_flying = 0;
+        for (int i = 0; i < shots * Quiver::DRAW_STEPS; ++i) {
+            run.step(held);
+            loosed += run.events().count(Event::Kind::ArrowLoosed);
+            int flying = 0;
+            for (const Arrow& a : run.quiver.arrows())
+                if (a.live && !a.stuck) ++flying;
+            if (flying > most_flying) most_flying = flying;
+        }
+        check("the pool of arrows fills with arrows still in flight",
+              most_flying == Quiver::CAPACITY, "most flying=" + std::to_string(most_flying));
+        check("and the bow keeps firing on its draw regardless", loosed == shots,
+              "loosed " + std::to_string(loosed) + " of " + std::to_string(shots));
     }
 
     // --- the bow and the arrow ---

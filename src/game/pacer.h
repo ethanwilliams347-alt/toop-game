@@ -1,6 +1,4 @@
 #pragma once
-#include <cmath>
-
 #include "game/run.h"
 
 // The fixed-step frame pacer: how much simulated time a wall-clock frame buys,
@@ -79,26 +77,30 @@ struct Pacer {
 
 // Teleports must not be interpolated. resolve_overlap can shift the body several
 // cells at once to push it out of terrain, and easing across that draws the
-// player skating through the wall it was just rescued from. Anything larger than
-// a stride is a jump, not motion.
-inline constexpr float MAX_INTERPOLATED_CELLS = 4.0f;
-
-// The clamp is on the two-axis distance, not per axis, which is why this takes
-// both and returns both. A body pushed four cells sideways and one down has
-// teleported on both axes; interpolating the small one and snapping the big one
-// draws a diagonal that never happened.
+// player skating through the wall it was just rescued from.
+//
+// Whether a move was a teleport is the simulation's answer, not something to
+// guess from the distance. A distance threshold cannot tell the two apart: a
+// body at terminal velocity covers more cells in one step (MAX_FALL_SPEED is
+// about 6.7 cells a step) than a short shove out of a pile does, so any
+// threshold either eases a teleport or snaps an ordinary fall every step -- and
+// the camera, which follows the drawn position, jerks with it. The body says
+// when it was moved rather than travelled (Player::teleported,
+// Enemy::teleported), and the caller passes that through.
+//
+// Both axes snap together, which is why this takes both and returns both. A body
+// pushed four cells sideways and one down has teleported on both axes;
+// interpolating the small one and snapping the big one draws a diagonal that
+// never happened.
 struct Interpolated {
     float x = 0.0f;
     float y = 0.0f;
     bool snapped = false;  // true when the move was treated as a teleport
 };
 
-inline Interpolated interpolate(float prev_x, float prev_y, float now_x, float now_y,
-                                float alpha) {
-    if (std::abs(now_x - prev_x) > MAX_INTERPOLATED_CELLS ||
-        std::abs(now_y - prev_y) > MAX_INTERPOLATED_CELLS) {
-        return Interpolated{now_x, now_y, true};
-    }
+inline Interpolated interpolate(float prev_x, float prev_y, float now_x, float now_y, float alpha,
+                                bool teleported) {
+    if (teleported) return Interpolated{now_x, now_y, true};
     return Interpolated{prev_x + (now_x - prev_x) * alpha,
                         prev_y + (now_y - prev_y) * alpha, false};
 }
