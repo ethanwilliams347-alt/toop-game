@@ -1,35 +1,34 @@
-"""Converts the authored Background_1 layer set into engine BMPs in assets/bg1/.
+"""Converts the authored bg_valley layer set into engine BMPs in assets/bg_valley/.
 
 Converts each PNG layer to engine BMP with transparency colorkeying.
 Also generates the scene's material and albedo maps.
 
-    python tools/convert_background_layers.py
+    python tools/convert_bg_valley.py
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from pixel_art import (LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header,
-                       read_png, write_bmp)
+from pixel_art import LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header, read_png, write_bmp
 from png_to_bmp import convert
 
 # (source, destination, keys transparency). Listed front to back, the order the
 # art's README uses; the draw order is main.cpp's and is the reverse.
 LAYERS = [
-    ("01_foreground_rocks.png",  "bg1_01_fg_rocks.bmp",      True),
-    ("02_hills_near.png",        "bg1_02_hills_near.bmp",    True),
-    ("03_hills_midnear.png",     "bg1_03_hills_midnear.bmp", True),
-    ("04_hills_mid.png",         "bg1_04_hills_mid.bmp",     True),
-    ("05_hills_midfar.png",      "bg1_05_hills_midfar.bmp",  True),
-    ("06_hills_far.png",         "bg1_06_hills_far.bmp",     True),
-    ("07_distant_mountains.png", "bg1_07_mountains.bmp",     True),
-    ("08_ground_plane.png",      "bg1_08_ground.bmp",        True),
-    ("09_sky.png",               "bg1_09_sky.bmp",           False),
+    ("bg_valley_01_fg_rocks.png",  "bg_valley_01_fg_rocks.bmp",      True),
+    ("bg_valley_02_hills_near.png",        "bg_valley_02_hills_near.bmp",    True),
+    ("bg_valley_03_hills_midnear.png",     "bg_valley_03_hills_midnear.bmp", True),
+    ("bg_valley_04_hills_mid.png",         "bg_valley_04_hills_mid.bmp",     True),
+    ("bg_valley_05_hills_midfar.png",      "bg_valley_05_hills_midfar.bmp",  True),
+    ("bg_valley_06_hills_far.png",         "bg_valley_06_hills_far.bmp",     True),
+    ("bg_valley_07_mountains.png", "bg_valley_07_mountains.bmp",     True),
+    ("bg_valley_08_ground.png",      "bg_valley_08_ground.bmp",        True),
+    ("bg_valley_09_sky.png",               "bg_valley_09_sky.bmp",           False),
 ]
 
-SRC_DIR = os.path.join("art_src", "Background_1")
-DST_DIR = os.path.join("assets", "bg1")
+SRC_DIR = os.path.join("art_src", "bg_valley")
+DST_DIR = os.path.join("assets", "bg_valley")
 
 # The set's native size. Every layer is this, and a layer that is not is a
 # problem: main.cpp scales the whole stack by one integer factor, so a differing
@@ -65,19 +64,19 @@ FLOOR_ROW = 132
 # is confirmed by pixels: compositing in this order reproduces the reference
 # frame exactly everywhere the player is not. Any other order does not.
 DRAW_ORDER = [
-    "09_sky.png",
-    "08_ground_plane.png",
-    "07_distant_mountains.png",
-    "06_hills_far.png",
-    "05_hills_midfar.png",
-    "04_hills_mid.png",
-    "03_hills_midnear.png",
-    "02_hills_near.png",
-    "01_foreground_rocks.png",
+    "bg_valley_09_sky.png",
+    "bg_valley_08_ground.png",
+    "bg_valley_07_mountains.png",
+    "bg_valley_06_hills_far.png",
+    "bg_valley_05_hills_midfar.png",
+    "bg_valley_04_hills_mid.png",
+    "bg_valley_03_hills_midnear.png",
+    "bg_valley_02_hills_near.png",
+    "bg_valley_01_fg_rocks.png",
 ]
 
-MATERIAL_PATH = os.path.join("assets", "bg1_material.bmp")
-ALBEDO_PATH = os.path.join("assets", "bg1_albedo.bmp")
+MATERIAL_PATH = os.path.join("assets", "bg_valley", "bg_valley_material.bmp")
+ALBEDO_PATH = os.path.join("assets", "bg_valley", "bg_valley_albedo.bmp")
 
 # How opaque a source pixel has to be to count as part of the composite. The same
 # threshold png_to_bmp uses for the colour key, imported rather than repeated so
@@ -86,7 +85,7 @@ from pixel_art import ALPHA_THRESHOLD
 
 
 def build_scene_maps():
-    """Writes the material and albedo BMPs that give `bg1` a floor.
+    """Writes the material and albedo BMPs that give `bg_valley` a floor.
 
     The albedo is the whole frame rather than only the floor band. Only rows
     FLOOR_ROW.. are ever read - an Empty cell places nothing, so its albedo pixel

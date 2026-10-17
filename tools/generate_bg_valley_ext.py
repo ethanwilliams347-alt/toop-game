@@ -1,16 +1,16 @@
-"""Builds `bg1_ext`, a 688x288 extension of the Background_1 scene, out of
-Background_1's own measured pixels.
+"""Builds `bg_valley_ext`, a 688x288 extension of the bg_valley scene, out of
+bg_valley's own measured pixels.
 
 Nothing here is an art direction decision that was not already made. Every
 colour, every silhouette shape and every band boundary is read off
-art_src/Background_1/*.png and re-laid-out at the larger size. The generator
+art_src/bg_valley/*.png and re-laid-out at the larger size. The generator
 holds two things the source cannot state for itself -- how the extra columns are
 filled, and where the extra rows go -- and both are argued below.
 
-    python tools/generate_bg1_ext.py
+    python tools/generate_bg_valley_ext.py
 
-Writes assets/bg1_ext/ (nine layer BMPs, colour-keyed exactly as
-convert_background_layers.py writes assets/bg1/) plus the scene's material and
+Writes assets/bg_valley_ext/ (nine layer BMPs, colour-keyed exactly as
+convert_bg_valley.py writes assets/bg_valley/) plus the scene's material and
 albedo maps. Deterministic: the layout is driven by a fixed-seed xorshift, so a
 re-run is byte-identical and a diff in assets/ means a real change here.
 
@@ -64,7 +64,7 @@ drawing idiom -- a 1px rim on every mass's top edge, a 1px line along its foot,
 interior contour lines tracing the ridges behind it -- is reproduced without
 being described. And because a segment keeps its own rows, every hill's foot
 lands where the source put it plus the vertical shift. That matters beyond
-looks: assets/bg1/backdrop.txt bands the ground plane at the factors of whatever stands
+looks: assets/bg_valley/backdrop.txt bands the ground plane at the factors of whatever stands
 on each band, and nothing in this file is free to move those contacts.
 
 --- the mountains, which are the one layer not re-laid-out at all -------------
@@ -122,8 +122,8 @@ from pixel_art import (
     write_bmp,
 )
 
-SRC_DIR = os.path.join("art_src", "Background_1")
-DST_DIR = os.path.join("assets", "bg1_ext")
+SRC_DIR = os.path.join("art_src", "bg_valley")
+DST_DIR = os.path.join("assets", "bg_valley_ext")
 
 # The source's native size, and the extension's. Read as a pair: every offset
 # below is stated as a difference between them rather than as a bare number.
@@ -139,7 +139,7 @@ SRC_HORIZON = 63
 HORIZON = SRC_HORIZON + SHIFT  # 207
 
 # The floor row is measured off the reference frame -- the argument is at
-# convert_background_layers.FLOOR_ROW and is not repeated. It is bottom-anchored
+# convert_bg_valley.FLOOR_ROW and is not repeated. It is bottom-anchored
 # like everything else the player touches.
 SRC_FLOOR_ROW = 132
 FLOOR_ROW = SRC_FLOOR_ROW + SHIFT  # 276
@@ -157,7 +157,7 @@ RIDGE_SCALE = 200
 RIDGE_JITTER = 7
 
 # From src/scene/legend.h, which is frozen. Looked up there, never invented --
-# the same two rows convert_background_layers.py uses, via tools/pixel_art.py,
+# the same two rows convert_bg_valley.py uses, via tools/pixel_art.py,
 # which checks them against the header.
 
 # Fixed so the output is reproducible. Any value would do; this one is not
@@ -172,23 +172,23 @@ SEED = 0x62673165
 # paths it takes: "islands" is a keyed silhouette with gaps in it, "ridge" is a
 # keyed silhouette that spans the frame, "bands" is strata.
 LAYERS = [
-    ("01_foreground_rocks.png", "bg1_ext_01_fg_rocks.bmp", "islands"),
-    ("02_hills_near.png", "bg1_ext_02_hills_near.bmp", "islands"),
-    ("03_hills_midnear.png", "bg1_ext_03_hills_midnear.bmp", "islands"),
-    ("04_hills_mid.png", "bg1_ext_04_hills_mid.bmp", "islands"),
-    ("05_hills_midfar.png", "bg1_ext_05_hills_midfar.bmp", "islands"),
-    ("06_hills_far.png", "bg1_ext_06_hills_far.bmp", "islands"),
-    ("07_distant_mountains.png", "bg1_ext_07_mountains.bmp", "ridge"),
-    ("08_ground_plane.png", "bg1_ext_08_ground.bmp", "bands"),
-    ("09_sky.png", "bg1_ext_09_sky.bmp", "bands"),
+    ("bg_valley_01_fg_rocks.png", "bg_valley_ext_01_fg_rocks.bmp", "islands"),
+    ("bg_valley_02_hills_near.png", "bg_valley_ext_02_hills_near.bmp", "islands"),
+    ("bg_valley_03_hills_midnear.png", "bg_valley_ext_03_hills_midnear.bmp", "islands"),
+    ("bg_valley_04_hills_mid.png", "bg_valley_ext_04_hills_mid.bmp", "islands"),
+    ("bg_valley_05_hills_midfar.png", "bg_valley_ext_05_hills_midfar.bmp", "islands"),
+    ("bg_valley_06_hills_far.png", "bg_valley_ext_06_hills_far.bmp", "islands"),
+    ("bg_valley_07_mountains.png", "bg_valley_ext_07_mountains.bmp", "ridge"),
+    ("bg_valley_08_ground.png", "bg_valley_ext_08_ground.bmp", "bands"),
+    ("bg_valley_09_sky.png", "bg_valley_ext_09_sky.bmp", "bands"),
 ]
 
 # Back to front -- the numeric-descending filename order, the same order
-# convert_background_layers.DRAW_ORDER and assets/bg1_ext/backdrop.txt state.
+# convert_bg_valley.DRAW_ORDER and assets/bg_valley_ext/backdrop.txt state.
 DRAW_ORDER = [name for name, _, _ in reversed(LAYERS)]
 
-MATERIAL_PATH = os.path.join("assets", "bg1_ext_material.bmp")
-ALBEDO_PATH = os.path.join("assets", "bg1_ext_albedo.bmp")
+MATERIAL_PATH = os.path.join("assets", "bg_valley_ext", "bg_valley_ext_material.bmp")
+ALBEDO_PATH = os.path.join("assets", "bg_valley_ext", "bg_valley_ext_albedo.bmp")
 
 # The smallest hole left between two placed masses. Zero would let two islands
 # fuse into one wider island, which is the one way this layout can produce a
@@ -238,11 +238,11 @@ class Rng:
             seq[i], seq[j] = seq[j], seq[i]
 
 
-# --- reading bg1 -------------------------------------------------------------
+# --- reading bg_valley -------------------------------------------------------------
 
 
 def read_layer(name):
-    """Returns (opaque[y][x], colour[y][x]) for one Background_1 PNG.
+    """Returns (opaque[y][x], colour[y][x]) for one bg_valley PNG.
 
     `colour` is meaningless where `opaque` is false. Transparency is the same
     alpha threshold `png_to_bmp.convert` uses, imported rather than repeated so
@@ -263,7 +263,7 @@ def read_layer(name):
 def palette_of(opaque, colour):
     """The layer's colours, most-used first.
 
-    **This is why `bg1_ext` cannot drift off bg1's palette.** Nothing downstream
+    **This is why `bg_valley_ext` cannot drift off bg_valley's palette.** Nothing downstream
     names a colour; every pixel written is one of the tuples this returns.
     """
     counts = collections.Counter()
@@ -329,7 +329,7 @@ def spread(slack, slots, rng):
     """Split `slack` columns of empty space between `slots` gaps, unevenly.
 
     Even spacing is what makes a generated layer look generated, so the split is
-    weighted at random - which is also what reproduces bg1's own composition,
+    weighted at random - which is also what reproduces bg_valley's own composition,
     where `hills_near`'s three rocks are separated by a 3-column notch and a
     173-column hole.
     """
@@ -409,7 +409,7 @@ def jitter_ridge(cols, rng, amplitude, hold_percent):
     """Walk the ridge line up and down by a few rows as it crosses the frame.
 
     The mountains are the one layer that is *not* re-laid-out - see the section
-    above - so without this the extended range would be bg1's range at twice the
+    above - so without this the extended range would be bg_valley's range at twice the
     size and nothing else. A slow bounded walk changes which bumps are where
     without breaking the landform, which is the only kind of variation a single
     continuous ridge can take: every alternative tried here (shuffled segments,
@@ -488,7 +488,7 @@ def reconstruct_clipped(cols, slope_span):
 def tapered(seg, span):
     """Wedge off a mass end that the source frame cut flat.
 
-    bg1's masses that touch its left or right edge stop mid-slope, so a column
+    bg_valley's masses that touch its left or right edge stop mid-slope, so a column
     30 rows tall sits at the boundary. That is invisible against the frame edge
     and is a vertical cliff anywhere else, which is what it became the first
     time these masses were placed inland. An end that already tapers is left
@@ -534,7 +534,7 @@ def paint_masses(cols, base, accent, dy):
 
     Fill first, then the accents, then the rim and the foot line. The rim is
     recomputed rather than taken from the record because a stretched segment can
-    lose its top pixel to resampling, and bg1's idiom is that **every** column's
+    lose its top pixel to resampling, and bg_valley's idiom is that **every** column's
     top pixel is accent - measured, on every layer that is not clipped by the
     frame.
     """
@@ -592,7 +592,7 @@ def boundaries_of(opaque, colour, first, strata):
 
 
 def walk_like(rows, lo, hi, rng):
-    """A new boundary of `NATIVE_W` columns with bg1's step distribution.
+    """A new boundary of `NATIVE_W` columns with bg_valley's step distribution.
 
     Sampling steps from the empirical pool is what reproduces the *texture* of
     these contours - long flat runs broken by a single-row step - which a smooth
@@ -651,7 +651,7 @@ def flatten(grid, keyed):
     for the one reason that module's own docstring allows a second copy: nothing
     in this path has a PNG or an alpha channel to hand it, so `convert` cannot
     be called at all. An opaque pixel that happens to be exactly the
-    transparency colour would vanish at render time; bg1 has none, and this
+    transparency colour would vanish at render time; bg_valley has none, and this
     asserts rather than assumes it.
     """
     out = []
@@ -662,7 +662,7 @@ def flatten(grid, keyed):
                     raise SystemExit("error: an opaque layer has an unpainted pixel")
                 out.append(COLOR_KEY)
             elif c == COLOR_KEY:
-                raise SystemExit("error: bg1 uses the transparency colour as paint")
+                raise SystemExit("error: bg_valley uses the transparency colour as paint")
             else:
                 out.append(c)
     return out
@@ -674,7 +674,7 @@ def check_flat_cuts(grid, cuts):
 
     A band boundary is a step in scroll offset, so it can only be invisible
     where the rows either side of it are one flat colour and the same one. This
-    is `boot_test`'s `test_bg1_ground_bands` check, run here as well so that a
+    is `boot_test`'s `test_bg_valley_ground_bands` check, run here as well so that a
     bad roll is caught by the tool that produced it rather than by a suite two
     steps later.
     """
@@ -689,9 +689,9 @@ def check_flat_cuts(grid, cuts):
 
 
 def build_scene_maps(composite):
-    """The material and albedo maps that give `bg1_ext` a floor.
+    """The material and albedo maps that give `bg_valley_ext` a floor.
 
-    Same shape as `convert_background_layers.build_scene_maps` and for the same
+    Same shape as `convert_bg_valley.build_scene_maps` and for the same
     reason - a backdrop set is a world the player has to stand in, and a `floor`
     spawn would pin the body to the world's bottom border. The albedo is the
     whole frame rather than the floor band because `src/scene/bmp.cpp` requires
@@ -716,7 +716,7 @@ def build_scene_maps(composite):
 
 
 def build_layer(src_name, kind, rng):
-    """One layer: measure bg1's, lay out the extension, return the pixel grid
+    """One layer: measure bg_valley's, lay out the extension, return the pixel grid
     and the line describing what came out."""
     opaque, colour = read_layer(src_name)
 
@@ -759,7 +759,7 @@ def build_layer(src_name, kind, rng):
     grid = paint_masses(placed, base, accent, SHIFT)
     covered = sum(1 for c in placed if c is not None)
     note += (
-        f", {100 * covered // NATIVE_W}% of columns covered against bg1's "
+        f", {100 * covered // NATIVE_W}% of columns covered against bg_valley's "
         f"{100 * source_cols // SRC_W}%"
     )
     return grid, True, note

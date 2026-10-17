@@ -9,9 +9,9 @@
 // gives: the draw calls live in render/frame.cpp, and the question of where a
 // row lands does not need them, so a headless suite (rig_test) can hold it.
 //
-// --- what the bg1 family could not do, and why ------------------------------
+// --- what the bg_valley family could not do, and why ------------------------------
 //
-// The bg1 family (assets/bg1/backdrop.txt) is careful and correct about the
+// The bg_valley family (assets/bg_valley/backdrop.txt) is careful and correct about the
 // problem it had: nine painted layers that all draw pieces of ONE ground plane.
 // Give them different vertical factors and the plane shears apart under the
 // objects standing on it, so the vertical factor is locked at 1.00 and the
@@ -43,9 +43,9 @@
 //      and checks the lowest painted row is that foot. Retune the camera (h, c) and every
 //      factor in the stack moves together, consistently.
 //
-//      bg1 already obeys this, which is how the relation was checked: its
+//      bg_valley already obeys this, which is how the relation was checked: its
 //      hills_midfar (0.30) stands at row 73 and hills_near (0.70) at row 89,
-//      which solves to h = 61, c = 101 -- and bg1_08_ground's first opaque row
+//      which solves to h = 61, c = 101 -- and bg_valley_08_ground's first opaque row
 //      is 63. Ethan's factors were a pinhole camera all along.
 //
 //   2. The plane can scroll one row at a time, each at factor(r) -- line scroll,
@@ -62,20 +62,20 @@
 // what looking down on a valley from higher up is.
 //
 // Taken at full strength that stretch is large. bg_tarn's eye height is 64 rows
-// and a 1080p camera can rise about 164 rows above the standing view, so flying
-// to the ceiling magnifies the plane 1 + 164/64 = 3.6x vertically, and pixel art
-// at 3.6x in one axis reads as smearing. So the vertical factor is the horizontal one pulled toward 1:
+// and a 1080p camera at its scale of 8 can rise about 142 rows above the standing
+// view, so flying to the ceiling magnifies the plane 1 + 142/64 = 3.2x vertically,
+// and pixel art at 3.2x in one axis reads as smearing. So the vertical factor is the horizontal one pulled toward 1:
 //
 //     vfactor(f) = 1 - k * (1 - f)
 //
-// k = 1 is the honest camera; k = 0 is bg1's locked vertical. Any k keeps the
+// k = 1 is the honest camera; k = 0 is bg_valley's locked vertical. Any k keeps the
 // glue, because the plane row and the object standing on it go through the same
 // function of the same f. Only the amount of vertical depth cue changes. k is a
 // feel constant and lives on the set, with TUNING.md.
 //
 // --- the anchor --------------------------------------------------------------
 //
-// bg1's layers are placed at -(cam * f): the painting is exact when the camera
+// bg_valley's layers are placed at -(cam * f): the painting is exact when the camera
 // is at the world's top-left corner and nowhere else. Here a layer is placed at
 //
 //     -(anchor + f * (cam - anchor))

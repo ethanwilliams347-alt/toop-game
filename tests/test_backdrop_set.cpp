@@ -1,7 +1,7 @@
 // Backdrop sets: the backdrop.txt parser, and every set a shipped scene names
 // held to the BMPs it describes.
 //
-// The second half is what boot_test (for the bg1 family) and rig_test (for
+// The second half is what boot_test (for the bg_valley family) and rig_test (for
 // bg_tarn) used to do against C++ tables. The numbers moved into text files
 // next to the art; the checks moved here with them, and now run on every set
 // whatever its model, so a property one set has is checked on every set that
@@ -155,6 +155,24 @@ std::vector<Shipped> shipped_sets() {
     check("shipped: the scene list loads", !scenes.empty(), err);
     for (const scene_list::SceneDef& def : scenes) {
         if (def.backdrop.empty()) continue;
+        // The naming rule in assets/scenes.txt's header: a backdrop scene is one
+        // name, bg_<place>[_<variant>], used for the scene, its backdrop= and its
+        // folder, and everything the scene loads lives in that folder under that
+        // name. Checked here rather than left to the comment, because a row
+        // pointing at another set's material map loads and plays -- it is just the
+        // wrong world under the right painting.
+        {
+            const std::string& set = def.backdrop;
+            const std::string own = set + "/" + set + "_";
+            check(("shipped: scene '" + def.name + "' is named bg_<place> and is its backdrop's name")
+                      .c_str(),
+                  set.compare(0, 3, "bg_") == 0 && def.name == set, "backdrop=" + set);
+            check(("shipped: scene '" + def.name + "' loads its maps from its own folder").c_str(),
+                  def.material == own + "material.bmp" && def.albedo == own + "albedo.bmp",
+                  def.material + ", " + def.albedo);
+            check(("shipped: scene '" + def.name + "' loads its level from its own folder").c_str(),
+                  def.level.empty() || def.level == own + "level.txt", def.level);
+        }
         bool seen = false;
         for (const Shipped& s : out) seen |= s.name == def.backdrop;
         if (seen) continue;
@@ -410,19 +428,19 @@ void test_rig_set(const Shipped& sh) {
 // file makes that is not about its own art. A factor that drifts makes it a
 // different landscape in the same palette, and nothing about a wrong ladder
 // fails to load.
-void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
+void test_bg_valley_ext_is_bg_valley(const std::vector<Shipped>& sets) {
     const Shipped* base = nullptr;
     const Shipped* ext = nullptr;
     for (const Shipped& s : sets) {
-        if (s.name == "bg1") base = &s;
-        if (s.name == "bg1_ext") ext = &s;
+        if (s.name == "bg_valley") base = &s;
+        if (s.name == "bg_valley_ext") ext = &s;
     }
-    check("bg1_ext: both sets are shipped", base && ext);
+    check("bg_valley_ext: both sets are shipped", base && ext);
     if (!base || !ext) return;
     const backdrop_set::Set& a = base->set;
     const backdrop_set::Set& b = ext->set;
 
-    check("bg1_ext: the world is exactly twice bg1's on both axes",
+    check("bg_valley_ext: the world is exactly twice bg_valley's on both axes",
           b.native_w == a.native_w * 2 && b.native_h == a.native_h * 2);
     bool same = a.layers.size() == b.layers.size();
     for (size_t i = 0; same && i < a.layers.size(); ++i) {
@@ -431,7 +449,7 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
         same = la.factor == lb.factor && la.opaque == lb.opaque && la.foreground == lb.foreground &&
                la.bands.empty() == lb.bands.empty();
     }
-    check("bg1_ext: every layer carries bg1's factor and bg1's flags", same);
+    check("bg_valley_ext: every layer carries bg_valley's factor and bg_valley's flags", same);
 
     // The bands moved down by the frame's growth and did not change shape: the
     // vertical rule the art was generated under, which makes the extension's
@@ -446,7 +464,7 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
             shifted = bb[k].parallax_x == ba[k].parallax_x && bb[k].row1 == ba[k].row1 + shift &&
                       (k == 0 ? bb[k].row0 == 0 : bb[k].row0 == ba[k].row0 + shift);
     }
-    check("bg1_ext: the ground bands are bg1's, at the same factors, moved down by the "
+    check("bg_valley_ext: the ground bands are bg_valley's, at the same factors, moved down by the "
           "frame's growth",
           shifted);
 
@@ -465,7 +483,7 @@ void test_bg1_ext_is_bg1(const std::vector<Shipped>& sets) {
             !bmp::read((b.dir + b.layers[i].file).c_str(), ib, nullptr))
             continue;  // the read itself is checked per set
         const std::set<uint32_t> want = palette_of(ia), got = palette_of(ib);
-        check(("bg1_ext: " + b.layers[i].file + " is painted in exactly the colours of " +
+        check(("bg_valley_ext: " + b.layers[i].file + " is painted in exactly the colours of " +
                a.layers[i].file)
                   .c_str(),
               want == got,
@@ -483,6 +501,6 @@ int main() {
         if (s.set.anchor == backdrop_set::Anchor::Corner) test_corner_set(s);
         if (s.set.has_rig) test_rig_set(s);
     }
-    test_bg1_ext_is_bg1(sets);
+    test_bg_valley_ext_is_bg_valley(sets);
     return report();
 }

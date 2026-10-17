@@ -7,7 +7,8 @@
 //     python tools/rawpng.py out/still_0.raw still_0.png 1920 1080
 //
 // The window defaults to 1920x1080; a last argument WxH picks another (the
-// sizes in game/display.h are the ones worth looking at). `pan=N` is N frames
+// sizes in game/display.h are the ones worth looking at), framed at the
+// scene's own scale= the way the game frames it. `pan=N` is N frames
 // of a walk at standing height from the world's left edge to its right one,
 // which is the shot a level many screens wide needs: a flight shows depth, a
 // pan shows whether the long art ever repeats or runs out.
@@ -44,12 +45,13 @@
 
 namespace {
 
-// Set once in main from the optional WxH argument, before anything reads them.
+// Set once in main from the optional WxH argument and the scene's scale=,
+// before anything reads them.
 int WINDOW_W = 1920;
 int WINDOW_H = 1080;
-constexpr int SCALE = 10;
-int PADDED_W = WINDOW_W / SCALE + 1;
-int PADDED_H = WINDOW_H / SCALE + 1;
+int SCALE = Camera::DEFAULT_SCALE;
+int PADDED_W = 0;
+int PADDED_H = 0;
 constexpr int BODY_H = 26;  // Player::HEIGHT, stated here so this links no physics
 
 SDL_Texture* load(SDL_Renderer* r, const std::string& path, bool key) {
@@ -100,14 +102,12 @@ int main(int argc, char** argv) {
         const bool has_x = end != argv[4] && *end == 'x';
         const char* h_text = has_x ? end + 1 : end;
         const long h = has_x ? std::strtol(h_text, &end, 10) : 0;
-        if (!has_x || end == h_text || *end != '\0' || w < SCALE || h < SCALE) {
+        if (!has_x || end == h_text || *end != '\0' || w < 1 || h < 1) {
             std::fprintf(stderr, "window '%s' is not WxH\n", argv[4]);
             return 2;
         }
-        WINDOW_W = w;
-        WINDOW_H = h;
-        PADDED_W = WINDOW_W / SCALE + 1;
-        PADDED_H = WINDOW_H / SCALE + 1;
+        WINDOW_W = static_cast<int>(w);
+        WINDOW_H = static_cast<int>(h);
     }
     std::string err;
     const std::vector<scene_list::SceneDef> scenes =
@@ -120,6 +120,14 @@ int main(int argc, char** argv) {
                      err.empty() ? "" : ": ", err.c_str());
         return 2;
     }
+    SCALE = def->scale > 0 ? def->scale : Camera::DEFAULT_SCALE;
+    if (WINDOW_W < SCALE || WINDOW_H < SCALE) {
+        std::fprintf(stderr, "window %dx%d is under one cell at scale %d\n", WINDOW_W, WINDOW_H,
+                     SCALE);
+        return 2;
+    }
+    PADDED_W = WINDOW_W / SCALE + 1;
+    PADDED_H = WINDOW_H / SCALE + 1;
     const std::string dir = "assets/" + def->backdrop + "/";
     const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &err);
     if (set.layers.empty()) {

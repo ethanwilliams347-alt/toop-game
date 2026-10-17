@@ -394,7 +394,7 @@ int main() {
     }
 
     // The other model: a corner-anchored, vertically locked set with a banded
-    // surface -- the bg1 family. Its own checksum, so a change to one model's
+    // surface -- the bg_valley family. Its own checksum, so a change to one model's
     // placement cannot hide inside the other's number.
     {
         frame::Backdrop corner;

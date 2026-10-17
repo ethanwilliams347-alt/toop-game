@@ -28,7 +28,7 @@ void draw_clear(SDL_Renderer* renderer, const Params&) {
 // One function for every layer of every set. Every layer is placed about the
 // backdrop's anchor, -(anchor + f * (cam - anchor)), on both axes, and wraps
 // horizontally through backdrop_wrap::wrap_axis. With the anchor at the world's
-// corner that is -(cam * f), the placement the bg1 family was painted for; and
+// corner that is -(cam * f), the placement the bg_valley family was painted for; and
 // a world-sized layer at f <= 1 then covers the window from its first copy at
 // every camera position, so a set whose art does not tile never shows a second
 // one. (For a world W cells wide and a viewport of V, the layer's right edge at

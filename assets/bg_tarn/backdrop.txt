@@ -16,16 +16,19 @@
 #
 # Vertical strength 0.75, chosen from preview_backdrop flights at 0.5 and 0.75.
 # At 0.5 the horizon falls with the camera at half the world's rate, so flying
-# to the ceiling shows only sky. At 1.0 the plane magnifies 1 + 164/64 = 3.6x at
-# the ceiling (1080p) and the lake's rows smear. 0.75 keeps the lake in the
-# bottom third at the ceiling and magnifies it at most 2.9x. TUNING.md carries it.
+# to the ceiling shows only sky. At 1.0 the plane magnifies 1 + 142/64 = 3.2x at
+# the ceiling (1080p, the scene's scale of 8) and the lake's rows smear. 0.75
+# keeps the lake in the bottom third at the ceiling and magnifies it at most
+# 2.7x. TUNING.md carries it. (Chosen at scale 10, where the ceiling was 164
+# rows up and the numbers 3.6x and 2.9x. A taller window has less room to climb,
+# so scale 8 stretches less and 0.75 is still inside what was judged.)
 #
 # The ripple is 0.6 cells either way: under one cell, so a water row never
 # detaches from the row above it by a whole art pixel, which reads as tearing.
 # The clouds drift 0.6 cells/s right to left -- a lap of the 688-cell sky takes
 # about nineteen minutes, slow enough to be noticed rather than watched.
 #
-# The reeds are 1.30 and in front of the player. Above bg1's cap of 1.00, which
+# The reeds are 1.30 and in front of the player. Above bg_valley's cap of 1.00, which
 # exists for a world-sized layer that does not wrap; every layer here wraps
 # (anchor standing). 1.30 rather than more because faster than that a reed is a
 # flicker rather than a thing.

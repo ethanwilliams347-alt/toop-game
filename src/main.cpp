@@ -1202,7 +1202,7 @@ int main(int argc, char* argv[]) {
 
         // Where the backdrop is exactly the painting. Per frame, because a standing
         // anchor depends on the viewport, which the display mode can change under a
-        // loaded scene; a corner-anchored set (the bg1 family) is the painting at the
+        // loaded scene; a corner-anchored set (the bg_valley family) is the painting at the
         // world's top-left, which is an anchor of (0, 0).
         if (backdrop_anchor == backdrop_set::Anchor::Standing)
             present::stand_backdrop_anchor(backdrop, fp.padded_w, fp.padded_h, world_w, world_h);

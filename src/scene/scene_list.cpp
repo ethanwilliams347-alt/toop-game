@@ -54,12 +54,24 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
     // and an extension. Stricter than text_record::name_ok's dotted form, which
     // takes any number of dots: a scene field names one file, and "a.b.bmp" or a
     // name with no extension is more likely a typo than a file.
+    //
+    // It may sit in one folder, `<dir>/<file>`, where the folder is a bare name
+    // too. That is how a backdrop scene keeps its maps and level beside its layers
+    // in assets/<set>/ (the naming rule in assets/scenes.txt). One level and a
+    // plain name, so there is still no `..`, no absolute path and no backslash:
+    // the field can reach a folder under assets/ and nothing outside it.
     auto file_field = [&](const std::string& raw, std::string& out) -> bool {
         if (raw == "-") { out.clear(); return true; }
+        const size_t slash = raw.find('/');
+        if (slash != std::string::npos &&
+            (raw.find('/', slash + 1) != std::string::npos ||
+             !text_record::name_ok(std::string_view(raw).substr(0, slash))))
+            return false;
+        const size_t stem = slash == std::string::npos ? 0 : slash + 1;
         const size_t dot = raw.rfind('.');
-        if (dot == std::string::npos) return false;
+        if (dot == std::string::npos || dot < stem) return false;
         const std::string_view name = raw;
-        if (!text_record::name_ok(name.substr(0, dot))) return false;
+        if (!text_record::name_ok(name.substr(stem, dot - stem))) return false;
         if (!text_record::name_ok(name.substr(dot + 1))) return false;
         out = raw;
         return true;
@@ -217,6 +229,21 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                 return fail("'" + key +
                             "=' is not a scene field (mode, size, scale, level, backdrop)");
             }
+        }
+
+        // A file in a folder is only ever in the scene's own backdrop folder.
+        // Not any folder: assets/wip/ holds drafts and is deliberately not staged
+        // next to the exe (CMakeLists.txt), so a row reaching into it would load
+        // from the source tree and fail in the build.
+        for (const std::string* file : {&def.material, &def.albedo, &def.props, &def.level}) {
+            const size_t slash = file->find('/');
+            if (slash == std::string::npos) continue;
+            if (def.backdrop.empty() || std::string_view(*file).substr(0, slash) != def.backdrop)
+                return fail("'" + *file +
+                            "' is in a folder, and a scene's files may only sit in its "
+                            "own backdrop= folder" +
+                            (def.backdrop.empty() ? std::string(" (this scene names none)")
+                                                  : " ('" + def.backdrop + "/')"));
         }
 
         scenes.push_back(def);

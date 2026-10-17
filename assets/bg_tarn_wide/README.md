@@ -1,13 +1,13 @@
 # bg_tarn_wide: the tarn as a long walk
 
 bg_tarn's mountain lake at sunset, redrawn in the style of Cast n Chill /
-Wild n Chill and stretched into one scene 2752 cells wide (8 screens at
-3440x1440, about 14 at 1920x1080) that the camera follows end to end. Loaded at
-scale 10 by the `bg_tarn_wide` row in `assets/scenes.txt`; its level is
-`assets/bg_tarn_wide_level.txt`.
+Wild n Chill and stretched into one scene 2752 cells wide (6.4 screens at
+3440x1440, about 11.5 at 1920x1080) that the camera follows end to end. Loaded at
+scale 8 by the `bg_tarn_wide` row in `assets/scenes.txt`; its level is
+`bg_tarn_wide_level.txt`, here.
 
 **Generated, not drawn.** `python tools/generate_bg_tarn_wide.py` writes every
-BMP here, `assets/bg_tarn_wide_material.bmp` /
+BMP here, including `bg_tarn_wide_material.bmp` /
 `bg_tarn_wide_albedo.bmp`, and the preview `art_src/previews/bg_tarn_wide.png`.
 Deterministic: a diff here is a change to the script.
 This README is the one hand-written file. Every colour is a `wt_*` name in

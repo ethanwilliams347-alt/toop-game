@@ -13,18 +13,18 @@
 // There used to be three ways to draw a background. A generated sky, mountain
 // range and receding ground tile (render/backdrop_layers.h, written by
 // tools/generate_backdrop.py) that only the `empty` debug scene still used, with
-// a near-terrain tint pass compiled in and switched off. The `bg1` family
-// (render/bg1_backdrop.h): nine hand-painted layers at typed factors, locked
+// a near-terrain tint pass compiled in and switched off. The `bg_valley` family
+// (the former render/bg1_backdrop.h): nine hand-painted layers at typed factors, locked
 // vertically, with the ground cut into three bands. And the perspective rig
 // (render/depth_rig.h, render/rig_backdrop.h), which derives each factor from the
 // row the layer stands on. frame.cpp branched between them inside every layer
 // function, frame::Backdrop carried fields for all three, and main.cpp had a
 // loader for each.
 //
-// The rig turned out to contain the other two as settings. A bg1 layer placed at
-// -(cam * f) is a rig layer whose anchor is the world's corner; bg1's locked
+// The rig turned out to contain the other two as settings. A bg_valley layer placed at
+// -(cam * f) is a rig layer whose anchor is the world's corner; bg_valley's locked
 // vertical is a rig with vertical_strength 0 (depth_rig.h says so: "k = 0 is
-// bg1's locked vertical"); and bg1's bands are per-row factors, which the rig's
+// bg_valley's locked vertical"); and bg_valley's bands are per-row factors, which the rig's
 // plane already draws, just stepped instead of continuous. So there is now one
 // layer type, one file format, one loader and one draw function, and a set picks
 // its behaviour with three lines of data:
@@ -102,7 +102,7 @@ using Band = backdrop_wrap::Band;
 
 enum class Anchor {
     // The stack is the painting when the camera is at the world's top-left: every
-    // layer is placed at -(cam * f). What the bg1 family was drawn for, and the
+    // layer is placed at -(cam * f). What the bg_valley family was drawn for, and the
     // only anchor under which a world-sized layer at f <= 1 never needs a second
     // copy -- so art that does not tile can be used.
     Corner,
@@ -136,7 +136,7 @@ struct Set {
     int native_w = 0, native_h = 0;
     Anchor anchor = Anchor::Standing;
     // Off: no layer may use foot= or plane, and the vertical is locked (k = 0),
-    // which is the bg1 family's model.
+    // which is the bg_valley family's model.
     bool has_rig = false;
     depth_rig::Rig rig{0, 1, 0.0f};
     float ripple_amplitude = 0.0f;  // cells
