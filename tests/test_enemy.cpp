@@ -863,9 +863,13 @@ int main() {
     // Every surviving pixel's place in posed frame space, from its world place,
     // inside the species' pad; and every cell of the pose's bounds, if it names a
     // pixel, names one whose forward place is within a cell (squared distance 2)
-    // of that cell. Returns false on the first violation.
+    // of that cell -- two cells (squared distance 8) for a species with
+    // tentacles, whose cells filled in at the outside of a bend are drawn up to
+    // that far from their pixel (tentacle.h). Returns false on the first
+    // violation.
     auto pose_is_sound = [](const Enemy& e, std::string& why) {
         const Species& k = e.species();
+        const int slack = k.tentacles ? 8 : 2;
         const body_art::Art& a = *k.art;
         const int pad = k.rig.pad;
         const int left = e.cell_x() - k.offset_x();
@@ -899,7 +903,7 @@ int main() {
                 int fx = 0, fy = 0;
                 e.world_of(i % a.w, i / a.w, fx, fy);
                 const int dx = fx - wx, dy = fy - wy;
-                if (dx * dx + dy * dy > 2) {
+                if (dx * dx + dy * dy > slack) {
                     why = "pixel " + std::to_string(i) + " drawn at " + std::to_string(px) + "," +
                           std::to_string(py) + " but its grain would land " + std::to_string(dx) +
                           "," + std::to_string(dy) + " away";
@@ -1283,6 +1287,244 @@ int main() {
                   "ahead=" + std::to_string(ahead) + " behind=" + std::to_string(behind));
             check(("every walking fish pose is sound" + mode).c_str(), sound, why);
         }
+    }
+
+    // ================= the angler =================
+    //
+    // The fish on tentacles: its legs and lure are chains of links (tentacle.h)
+    // rather than parts turned whole. Everything the body rules promise has to
+    // survive that -- a fresh body maps every pixel to itself, what is drawn is
+    // what is hit, a cut drops what is past it -- and so do the two things the
+    // chains add: a foot on the ground stays put, and the lure strikes where the
+    // blow lands.
+    const Species& AN = species::ANGLER;
+    const body_art::Art& AA = *AN.art;
+    const tentacle::Set& TS = *AN.tentacles;
+    const tentacle::Chain& rear_chain = TS.chain[0];
+    const tentacle::Chain& lure_chain = TS.chain[2];
+    int bulb_x = -1, bulb_y = -1;  // the bulb's glowing core
+    for (int y = 0; y < AA.h && bulb_x < 0; ++y)
+        for (int x = 0; x < AA.w && bulb_x < 0; ++x)
+            if (AA.at(x, y) == 'v') {
+                bulb_x = x;
+                bulb_y = y;
+            }
+    const rig::Joint rear_tip = rear_chain.rest[rear_chain.links()];
+    const rig::Joint front_tip = TS.chain[1].rest[TS.chain[1].links()];
+    auto angler_arena = [&](int player_x) {
+        auto run = std::make_unique<Run>(WORLD_W, WORLD_H);
+        for (int y = FLOOR_Y; y < WORLD_H; ++y)
+            for (int x = 0; x < WORLD_W; ++x) run->grid.set_element(x, y, ElementType::Wall);
+        run->player = Player(player_x, FLOOR_Y - Player::HEIGHT);
+        run->spawn_enemy(100, FLOOR_Y - AN.height, AN);
+        return run;
+    };
+
+    // --- the chain arithmetic ---
+    {
+        // Reach keeps every link its rest length and puts a reachable tip on its
+        // target; the rest chain turned onto itself is the identity, to the bit.
+        const int n = rear_chain.links();
+        const tentacle::Lengths len = tentacle::rest_lengths(rear_chain);
+        tentacle::Points p = tentacle::rest_points(rear_chain);
+        const rig::Point root = p[0];
+        const rig::Point target{p[n].x + fx::from_int(9), p[n].y - fx::from_int(4)};
+        // Run to convergence: in the game three rounds a step is enough because
+        // the next step carries on from where this one stopped.
+        tentacle::reach(p, len, n, root, target, 12);
+        fx::v worst = 0;
+        for (int i = 0; i < n; ++i)
+            worst = std::max(
+                worst,
+                std::abs(tentacle::length(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y) - len[i]));
+        const fx::v miss = tentacle::length(p[n].x - target.x, p[n].y - target.y);
+        check("a solved chain keeps every link its length", worst <= 4,
+              "worst=" + std::to_string(worst));
+        check("and puts a reachable tip on its target, within a tenth of a cell",
+              miss < fx::ONE / 10, "miss=" + std::to_string(miss));
+        check("p[0] stays on the root", p[0].x == root.x && p[0].y == root.y);
+        const tentacle::Points rest = tentacle::rest_points(lure_chain);
+        bool identity = true;
+        for (int i = 0; i < lure_chain.links(); ++i) {
+            const rig::Xform t = tentacle::link_turn(lure_chain, i, rest[i], rest[i + 1]);
+            identity = identity && t.c == fx::ONE && t.s == 0 && t.tx == 0 && t.ty == 0;
+        }
+        check("a link at rest turns by nothing at all", identity);
+        // The lure hooks back under itself, which is what broke a link_of that
+        // cut the chain by straight lines: the bulb belongs to the last link.
+        check("the bulb belongs to the lure's last link",
+              tentacle::link_of(lure_chain, bulb_x, bulb_y) == lure_chain.links() - 1,
+              "link=" + std::to_string(tentacle::link_of(lure_chain, bulb_x, bulb_y)));
+    }
+
+    // --- a fresh angler ---
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - AN.height, AN);
+        // At rest every pixel is drawn exactly where the art has it, including
+        // every tentacle pixel through its own link.
+        int misplaced = 0;
+        std::string first;
+        for (int y = 0; y < AA.h; ++y)
+            for (int x = 0; x < AA.w; ++x) {
+                if (!AA.is_body(x, y) || e.posed_pixel(x, y) == y * AA.w + x) continue;
+                if (misplaced++ == 0) first = std::to_string(x) + "," + std::to_string(y);
+            }
+        check("a fresh angler draws every pixel where its art has it", misplaced == 0,
+              "misplaced=" + std::to_string(misplaced) + " first=" + first);
+        // Every tentacle pixel is within its chain's radius of its own link: the
+        // bound place_links draws round each posed link to look for them.
+        bool within = true;
+        std::string far;
+        for (int k = 0; k < TS.count && within; ++k) {
+            const tentacle::Chain& c = TS.chain[k];
+            for (int y = 0; y < AA.h; ++y)
+                for (int x = 0; x < AA.w; ++x) {
+                    if (!AA.is_body(x, y) || rig::part_of(AA, AN.rig, x, y) != c.part) continue;
+                    const int i = tentacle::link_of(c, x, y);
+                    const rig::Joint a = c.rest[i], b = c.rest[i + 1];
+                    const double ux = b.x - a.x, uy = b.y - a.y;
+                    const double t = std::clamp(
+                        ((x - a.x) * ux + (y - a.y) * uy) / (ux * ux + uy * uy), 0.0, 1.0);
+                    const double dx = x - a.x - t * ux, dy = y - a.y - t * uy;
+                    if (dx * dx + dy * dy > double(c.radius) * c.radius) {
+                        within = false;
+                        far = std::to_string(x) + "," + std::to_string(y);
+                    }
+                }
+        }
+        check("every tentacle pixel is within its chain's radius of its link", within, far);
+        settle(g, e, 30);
+        check("a spawned angler is alive and whole",
+              e.is_alive() && e.pixel_count() == angler_art::PIXEL_COUNT,
+              "pixels=" + std::to_string(e.pixel_count()));
+        check("it stands on the floor", e.cell_y() + AN.height == FLOOR_Y,
+              "feet=" + std::to_string(e.cell_y() + AN.height));
+        check("it has its lure and its feet", e.has_arms() && e.has_feet());
+    }
+
+    // --- the walk: feet plant, alternate, and never skate ---
+    {
+        const auto run_owner = angler_arena(WORLD_W * 4);
+        Run& run = *run_owner;
+        bool sound = true;
+        std::string why;
+        int skates = 0, rear_up = 0, front_up = 0, both_up = 0;
+        int prev[2][2] = {{0, 0}, {0, 0}};
+        const int start_x = run.enemies[0].cell_x();
+        const rig::Joint tips[2] = {rear_tip, front_tip};
+        for (int i = 0; i < 300 && sound; ++i) {
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            sound = pose_is_sound(e, why);
+            bool up[2];
+            for (int k = 0; k < 2; ++k) {
+                const int x = world_x(e, tips[k].x, tips[k].y),
+                          y = world_y(e, tips[k].x, tips[k].y);
+                up[k] = y < FLOOR_Y - 3;
+                // A foot standing on the floor two steps running has not moved
+                // under the body; a cell of rounding is allowed for, since a foot
+                // is held still at the body's sub-cell position and drawn at its
+                // whole one. On the floor means on it: a foot a cell up is at the
+                // start or end of a swing, and moving.
+                if (i > 0 && y == FLOOR_Y - 1 && prev[k][1] == FLOOR_Y - 1 &&
+                    std::abs(x - prev[k][0]) > 1)
+                    ++skates;
+                prev[k][0] = x;
+                prev[k][1] = y;
+            }
+            if (up[0] && !up[1]) ++rear_up;
+            if (up[1] && !up[0]) ++front_up;
+            if (up[0] && up[1]) ++both_up;
+        }
+        const int walked = std::abs(run.enemies[0].cell_x() - start_x);
+        check("a wandering angler walks", walked > 60, "walked=" + std::to_string(walked));
+        check("each tentacle lifts its foot in turn", rear_up > 10 && front_up > 10,
+              "rear=" + std::to_string(rear_up) + " front=" + std::to_string(front_up));
+        check("never both at once", both_up == 0, "both=" + std::to_string(both_up));
+        check("and a planted foot does not skate", skates == 0, "skates=" + std::to_string(skates));
+        check("every walking angler pose draws what is hit, within its pad", sound, why);
+    }
+
+    // --- the strike: reared back over the head, whipped down in front ---
+    {
+        const auto run_owner = angler_arena(100 + AN.width + 4);
+        Run& run = *run_owner;
+        bool sound = true, overhead = false, forward_at_impact = false;
+        int wound_up_at = -1, hit_at = -1;
+        std::string why;
+        for (int i = 0; i < 300 && sound && hit_at < 0; ++i) {
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            sound = pose_is_sound(e, why);
+            if (wound_up_at < 0 && e.windup_left() > 0) wound_up_at = i;
+            if (e.windup_left() > 0 &&
+                world_y(e, bulb_x, bulb_y) < rest_y(e, angler_art::SHOULDER_Y) - 20)
+                overhead = true;
+            if (run.player.damage_this_step() > 0) {
+                hit_at = i;
+                const int bx = world_x(e, bulb_x, bulb_y);
+                const int front = e.facing_left() ? e.cell_x() : e.cell_x() + AN.width;
+                forward_at_impact = (e.facing_left() ? bx < front : bx > front) &&
+                                    world_y(e, bulb_x, bulb_y) >= FLOOR_Y - 6;
+            }
+        }
+        check("an angler with you in reach winds up a strike", wound_up_at >= 0);
+        check("the bulb rears back high over its head", overhead);
+        check("the strike lands after the wind-up", hit_at - wound_up_at == AN.windup_steps,
+              "wound=" + std::to_string(wound_up_at) + " hit=" + std::to_string(hit_at));
+        check("with the bulb on the ground in front of the body", forward_at_impact);
+        check("for the angler's damage", run.player.health() == Player::MAX_HEALTH - AN.damage,
+              "hp=" + std::to_string(run.player.health()));
+        check("every angler pose through a strike draws what is hit, within its pad", sound, why);
+    }
+
+    // --- the turn: chased from behind, it comes round, and the chains with it ---
+    {
+        const auto run_owner = angler_arena(100 - 40);
+        Run& run = *run_owner;
+        bool sound = true;
+        std::string why;
+        for (int i = 0; i < 200 && sound; ++i) {
+            run.step(Input{});
+            sound = pose_is_sound(run.enemies[0], why);
+        }
+        check("an angler turned round to chase still draws what is hit", sound, why);
+        check("and has turned", run.enemies[0].facing_left());
+    }
+
+    // --- cuts ---
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(100, FLOOR_Y - AN.height, AN);
+        const int before = e.pixel_count();
+        // Through the rear tentacle at its middle joint: everything below is cut
+        // off from the heart, and the other tentacle still stands.
+        const rig::Joint mid = rear_chain.rest[rear_chain.links() / 2];
+        e.shatter(g, world_x(e, mid.x - 1, mid.y), world_y(e, mid.x - 1, mid.y),
+                  Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, mid.x + 2, mid.y), world_y(e, mid.x + 2, mid.y),
+                  Quiver::BITE_RADIUS);
+        check("shot through, a tentacle drops everything past the hole",
+              e.is_alive() && !e.has_pixel(rear_tip.x, rear_tip.y) && e.has_feet());
+        check("as sand, grain for pixel", count_sand(g) == before - e.pixel_count(),
+              "sand=" + std::to_string(count_sand(g)) +
+                  " lost=" + std::to_string(before - e.pixel_count()));
+        // And the lure, through its stalk just above the head: three shots
+        // across it, since the stalk there is wider than a bite. Everything
+        // past the cut comes off, bulb and all; the stub on the head is still
+        // lure, as a fish shot through the forearm still has an upper arm.
+        const rig::Joint stalk = lure_chain.rest[2];
+        const rig::Joint crown = lure_chain.rest[lure_chain.links() / 2];
+        for (const int dx : {-3, 0, 3})
+            e.shatter(g, world_x(e, stalk.x + dx, stalk.y), world_y(e, stalk.x + dx, stalk.y),
+                      Quiver::BITE_RADIUS);
+        check("shots across its stalk drop the lure past the cut, bulb and all",
+              e.is_alive() && e.has_arms() && !e.has_pixel(crown.x, crown.y) &&
+                  !e.has_pixel(bulb_x, bulb_y));
+        check("as sand, grain for pixel", count_sand(g) == before - e.pixel_count());
     }
 
     return report();
