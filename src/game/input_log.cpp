@@ -70,6 +70,8 @@ uint64_t fingerprint(const Grid& grid) {
             mix(e.ticks);
             mix(e.temperature);
             mix(e.piece_tag);
+            mix(e.mass);
+            mix(static_cast<uint8_t>(e.flow));
         }
     }
     return h;

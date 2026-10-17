@@ -64,7 +64,8 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
 
     support_visit.resize(width * height, 0);
     support_state.resize(width * height, 0);
-    scratch_visit.resize(width * height, 0);
+    fracture_visit.resize(width * height, 0);
+    level_visit.resize(width * height, 0);
     balance_visit.resize(width * height, 0);
     tip_visit.resize(width * height, 0);
 
@@ -90,9 +91,6 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     //     that cell's up-to-eight neighbours are pushed, so it can pass the cap by
     //     eight.
     //   fracture_lowest -- one entry per column a piece spans, so the world's width.
-    //   pressure_queue -- the `>= MAX_PRESSURE_CELLS` check runs once per cell
-    //     dequeued, before its up-to-four neighbours are pushed, so a queue of
-    //     MAX_PRESSURE_CELLS - 1 can pass it and still grow by four.
     //
     // Three have no bound short of the world itself, and are left to grow to their
     // high-water mark and stay there: pending_support and the two resolve_support
@@ -111,7 +109,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     tip_displaced.reserve(MAX_SUPPORT_CELLS + 1);
     fracture_component.reserve(MAX_SUPPORT_CELLS + 9);
     fracture_lowest.reserve(static_cast<size_t>(width));
-    pressure_queue.reserve(MAX_PRESSURE_CELLS + 3);
+    level_queue.reserve(LIQUID_LEVEL_CELLS + 4);
 
     // Nothing to seed. The seed is stored and read straight out of world_seed by
     // the hash in random.h, so the whole 64 bits reach the work by construction.
@@ -141,9 +139,8 @@ void Grid::reset(uint64_t seed) {
     support_epoch = 0;
     resolving_support = false;
 
-    pressure_queue.clear();
-    std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
-    scratch_epoch = 0;
+    std::fill(fracture_visit.begin(), fracture_visit.end(), uint8_t{0});
+    fracture_epoch = 0;
 
     fracture_component.clear();
     fracture_lowest.clear();
@@ -174,12 +171,11 @@ void Grid::reset(uint64_t seed) {
     // class exposes a way to change them after construction, and reset() must not
     // become the first.
     //
-    // vent_radius, seek_level_on and room_above_on are also not here. They are
-    // configuration -- how this engine behaves -- rather than facts about this
-    // world, so a reset that silently put them back to their defaults would throw
-    // away a setting the caller made on purpose. That makes reset() not quite "a
-    // fresh grid with this seed"; this is the exception, and it is pinned by a test
-    // in test_grid.cpp.
+    // room_above_on is also not here. It is configuration -- how this engine
+    // behaves -- rather than a fact about this world, so a reset that silently put
+    // it back to its default would throw away a setting the caller made on
+    // purpose. That makes reset() not quite "a fresh grid with this seed"; this is
+    // the exception, and it is pinned by a test in test_grid.cpp.
 }
 
 // Waking only the cell that changed is the classic dirty-rect bug: erase a
@@ -270,7 +266,12 @@ int Grid::get_index(int x, int y) const {
 
 Element Grid::get_element(int x, int y) const {
     // Out of bounds reads as solid so the world is sealed by its own border.
-    if (!is_within_bounds(x, y)) return Element{ElementType::Wall, material_of(ElementType::Wall).color, 0};
+    if (!is_within_bounds(x, y)) {
+        Element border;
+        border.type = ElementType::Wall;
+        border.color = material_of(ElementType::Wall).color;
+        return border;
+    }
     return cells[get_index(x, y)];
 }
 
@@ -360,6 +361,10 @@ void Grid::place(int x, int y, ElementType type, uint32_t color) {
     el.type = type;
     el.color = color;
     el.updated_tag = frame_tag;  // freshly placed cells wait until the next step to move
+    // A liquid or steam cell placed by anything but a flow starts full: the
+    // brush, a scene, a reaction. Reactions that turn one carrier of an amount
+    // into another hand it across themselves (try_react, step_steam).
+    if (carries_mass(type)) el.mass = LIQUID_FULL;
 
     // Heat belongs to the spot rather than to what is standing in it, so a cell
     // written into a hot region arrives hot and a reaction product keeps the
@@ -381,7 +386,7 @@ void Grid::place(int x, int y, ElementType type, uint32_t color) {
     // written, decide here whether the tag survives a transformation.
 
     cells[idx] = el;
-    pixels[idx] = el.color;
+    pixels[idx] = pixel_of(el);
     mark_dirty(x, y);
     note_warm_if(x, y, el.temperature);
 
@@ -400,8 +405,8 @@ void Grid::swap_elements(int x1, int y1, int x2, int y2) {
     const int idx2 = get_index(x2, y2);
 
     std::swap(cells[idx1], cells[idx2]);
-    pixels[idx1] = cells[idx1].color;
-    pixels[idx2] = cells[idx2].color;
+    pixels[idx1] = pixel_of(cells[idx1]);
+    pixels[idx2] = pixel_of(cells[idx2]);
 
     // Mark as updated so neither cell moves again this step.
     cells[idx1].updated_tag = frame_tag;
@@ -498,12 +503,10 @@ void Grid::resolve_support() {
         // Fracture's own visited marks, advanced with the pass rather than per call,
         // so one landing costs one fill instead of one per seed. A slab lands with
         // every cell of it queued, and each seed would otherwise re-walk the whole
-        // piece to answer a question the first one already answered. Sharing the
-        // buffer with the pressure search is safe because that search only runs
-        // inside the cell sweep, and support resolves before the sweep starts.
-        if (++scratch_epoch == 0) {
-            std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
-            scratch_epoch = 1;
+        // piece to answer a question the first one already answered.
+        if (++fracture_epoch == 0) {
+            std::fill(fracture_visit.begin(), fracture_visit.end(), uint8_t{0});
+            fracture_epoch = 1;
         }
         // Balance is stamped per check rather than per pass (see balance_visit),
         // so a pass only marks where its own stamps begin.
@@ -759,11 +762,11 @@ void Grid::fracture_landing(int x, int y) {
     // makes the early return work -- every other cell of a piece that has already
     // been through here is stamped, so a landing costs one fill however many of its
     // cells were queued.
-    if (scratch_visit[seed] == scratch_epoch) return;
+    if (fracture_visit[seed] == fracture_epoch) return;
 
     fracture_component.clear();
     fracture_component.push_back(seed);
-    scratch_visit[seed] = scratch_epoch;
+    fracture_visit[seed] = fracture_epoch;
 
     int min_x = x, max_x = x;
 
@@ -796,8 +799,8 @@ void Grid::fracture_landing(int x, int y) {
                 // non-zero for everything that has been moving, and it is read here
                 // before settle_marks clears it.
                 if (cells[nidx].ticks == 0) continue;
-                if (scratch_visit[nidx] == scratch_epoch) continue;
-                scratch_visit[nidx] = scratch_epoch;
+                if (fracture_visit[nidx] == fracture_epoch) continue;
+                fracture_visit[nidx] = fracture_epoch;
                 fracture_component.push_back(nidx);
             }
         }
@@ -964,20 +967,17 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
     const int idx = get_index(x, y);
 
     if (can_displace(mat, x, y + 1, 1)) {
-        // A swap puts the displaced fluid in the grain's old cell, one row up.
-        // That is harmless for a single grain and wrong for a stream: there is
-        // always another grain above, so the exchange repeats every step and the
-        // fluid is handed up the column without bound, arriving in open air tens
-        // of cells over the pool. Nothing in the swap rule refers to where the
-        // fluid's surface is, so nothing stops it.
+        // A plain swap puts the liquid in the grain's old cell, one row up. That
+        // is harmless for one grain and wrong for a stream: there is always
+        // another grain above, so the exchange repeats every step and the water
+        // is handed up the column without bound, arriving in open air tens of
+        // cells over the pool.
         //
-        // So the fluid is sent to that surface instead, when one is close enough
-        // to find. vent_fluid leaves Empty behind on success and the swap below
-        // then drops the grain into a vacancy rather than trading with the fluid
-        // at all; on failure this is exactly the plain swap. Only attempted when
-        // there is something to displace, since falling through air is the
-        // common case and pays nothing for this.
-        if (cells[get_index(x, y + 1)].type != ElementType::Empty) vent_fluid(x, y + 1);
+        // So the grain first presses the liquid it is sinking into into the
+        // liquid around it (disperse_liquid), and pressure carries it from there
+        // to the surface -- the whole pool rises, which is what pouring sand into
+        // a pool does. Only what had nowhere to go rides up with the swap.
+        if (is_liquid(cells[get_index(x, y + 1)].type)) disperse_liquid(x, y + 1);
         swap_elements(x, y, x, y + 1);
         return true;
     }
@@ -1016,6 +1016,7 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
         // all at once.
         if (is_solid(get_element(nx, y).type)) continue;
 
+        if (is_liquid(cells[get_index(nx, y + 1)].type)) disperse_liquid(nx, y + 1);
         swap_elements(x, y, nx, y + 1);
         return true;
     }
@@ -1023,8 +1024,12 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
     return false;
 }
 
-// dy is +1 for liquids (settle downwards) and -1 for gases (rise).
-bool Grid::step_fluid(int x, int y, const Material& mat, int dy) {
+// A gas moves as whole cells: it rises, spreads sideways to find room, and swaps
+// through anything heavier. Liquids used to share this path, with dy +1; they
+// now move as an amount (step_liquid), and what is left here is the gas half,
+// written against the direction gravity would pull it so it reads the same way.
+bool Grid::step_gas(int x, int y, const Material& mat) {
+    constexpr int dy = -1;
     if (can_displace(mat, x, y + dy, dy)) {
         swap_elements(x, y, x, y + dy);
         return true;
@@ -1043,46 +1048,25 @@ bool Grid::step_fluid(int x, int y, const Material& mat, int dy) {
         return true;
     }
 
-    // Blocked vertically, so flow sideways to find a level. Travelling several
-    // cells per step is what makes a pool settle quickly instead of oozing.
+    // Blocked from rising, so spread sideways, several cells a step, which is what
+    // lets a pocket of steam fill the underside of a ceiling instead of standing
+    // in a column.
     //
-    // A lateral move has to land somewhere it can rest or descend from, and that
-    // condition is why a pool can sleep. Without it, the last partial row of any
-    // body of liquid slides back and forth across its own flat surface forever: it
-    // cannot sink (equal density fails can_displace), and seek_level will not take
-    // it either, because a one-cell head is inside MIN_PRESSURE_HEAD's hysteresis.
-    // Bare Empty to the side was otherwise reason enough to move, so a tank filled
-    // to one cell over an exact multiple of its width never settled.
-    //
-    // Sideways travel therefore runs along a floor and never up onto one. Refusing
-    // only the move whose destination is perched on more of the same liquid is half
-    // the pointless moves; the other half is its mirror, a surface cell stepping off
-    // its own body onto a solid shoulder at the surface row. That move is one-way --
-    // the return trip fails, since the cell it came from is now liquid-floored -- so
-    // a cell that takes it is stranded permanently as a film one row proud of the
-    // water, a body of exactly one cell that seek_level cannot rescue.
-    //
-    // on_solid makes perched-ness strictly decrease across every lateral move, which
-    // is why this cannot jitter: the old defect needed a cell able to move back and
-    // forth across its own surface, and one direction is now closed. Puddle
-    // spreading along a floor is solid-to-solid and untouched.
+    // These rules were written when liquids shared this path, and each closes a
+    // way a cell could move back and forth forever: a sideways move has to land
+    // somewhere the cell can carry on from or rest on something solid
+    // (can_rest_at), and it never crosses open air (over_void). A gas inherits
+    // them unchanged; liquids now move as an amount (step_liquid) and need none.
     const bool on_solid = is_solid(get_element(x, y + 1).type);
     const auto can_rest_at = [&](int nx) {
         if (can_displace(mat, nx, y + 1, 1)) return true;  // it can carry on down
         return on_solid;  // otherwise only ever along a floor, never off one onto another
     };
 
-    // Nothing may travel sideways across open air. `spread` is a distance a fluid
-    // may cover along a surface to find its level, and it was being spent crossing
-    // empty space as well, because can_rest_at() is satisfied by "I could fall from
-    // there", which every point in mid-air satisfies. A cell inside a falling
-    // stream cannot descend, so it reached this scan, found several cells of
-    // nothing beside it, and teleported to the far end -- a horizontal spike shot
-    // out of the side of a pouring stream.
-    //
-    // Checked against y + dy rather than y + 1 so it reads the same way for a gas:
-    // the cell that has to hold something up is the one gravity would pull it
-    // towards, which is below for a liquid and above for a gas.
+    // Nothing may travel sideways across open air: `spread` is a distance along a
+    // surface, and spent crossing empty space it teleports a cell to the far end
+    // of the gap. Checked against y + dy, the side the cell would otherwise move
+    // towards -- above, for a gas.
     const auto over_void = [&](int nx) {
         return get_element(nx, y + dy).type == ElementType::Empty;
     };
@@ -1099,12 +1083,9 @@ bool Grid::step_fluid(int x, int y, const Material& mat, int dy) {
             // pass over a stretch it could not stop on to get to one it can.
             if (can_rest_at(cx)) best = cx;
 
-            // One cell of overhang is allowed and then the run stops. That one cell
-            // is what pouring off the edge of a ledge is -- reach the lip, step past
-            // it, fall -- so forbidding it outright would strand water on a shelf.
-            // What it must not become is a licence to keep going: past the lip there
-            // is nothing to flow along, so there is nothing left for `spread` to
-            // measure.
+            // One cell of overhang is allowed and then the run stops: reaching a lip
+            // and stepping past it is how a gas gets out from under an edge, and
+            // past the lip there is nothing left for `spread` to measure.
             if (over_void(cx)) break;
         }
         if (best != x) {
@@ -1113,194 +1094,315 @@ bool Grid::step_fluid(int x, int y, const Material& mat, int dy) {
         }
     }
 
-    // Out of ordinary moves. A liquid gets one last question -- see the comment on
-    // MAX_PRESSURE_CELLS in the header. Gases are excluded: dy < 0 has already
-    // spent its vertical move going up, and a gas finding its level is not a thing
-    // anyone has asked to see.
-    if (dy > 0 && seek_level_on && seek_level(x, y)) return true;
-
     return false;
 }
 
-int Grid::find_lower_surface(int x, int y, ElementType type) {
-    // Fresh epoch per search. Unlike the support fill's, these marks must not
-    // outlive the one search that made them: two adjacent surface cells of the same
-    // body ask genuinely different questions, because the threshold is measured
-    // from the asking cell's own row.
-    if (++scratch_epoch == 0) {  // wrapped, so old marks can no longer be told apart
-        std::fill(scratch_visit.begin(), scratch_visit.end(), uint8_t{0});
-        scratch_epoch = 1;
+int Grid::stable_lower(int total) { return total < LIQUID_FULL ? total : LIQUID_FULL; }
+
+uint32_t Grid::pixel_of(const Element& e) {
+    if (!is_liquid(e.type)) return e.color;
+    const int m = e.mass;
+    // Thin liquid lets the backdrop through; never fully, so a film still reads
+    // as wet.
+    constexpr int FLOOR_ALPHA = 48;
+    const int alpha =
+        m >= LIQUID_FULL ? 255 : FLOOR_ALPHA + (m * (255 - FLOOR_ALPHA)) / LIQUID_FULL;
+    return (static_cast<uint32_t>(alpha) << 24) | (e.color & 0x00FFFFFFu);
+}
+
+void Grid::transfer_liquid(int from, int to, int amount) {
+    if (amount <= 0) return;
+    Element& s = cells[from];
+    Element& d = cells[to];
+    if (d.type == ElementType::Empty) {
+        // Liquid arriving in empty space: a new cell of it, carrying the
+        // source's heat, in the colour its own spot would have. It arrived this
+        // step, so it moves from the next -- otherwise an amount could be handed
+        // along a whole row inside one sweep.
+        const uint8_t heat = s.temperature;
+        d = Element{};
+        d.type = s.type;
+        d.color = jittered_color(material_of(s.type), static_cast<uint64_t>(to));
+        d.temperature = heat;
+        d.updated_tag = frame_tag;
+    }
+    // Momentum is mass times velocity, and it moves with the mass.
+    const int dm = d.mass;
+    d.flow = static_cast<int8_t>((d.flow * dm + s.flow * amount) / (dm + amount));
+    d.mass = static_cast<uint16_t>(dm + amount);
+    s.mass = static_cast<uint16_t>(s.mass - amount);
+    if (s.mass == 0) {
+        // Emptied: Empty, at ambient, the way erasing a cell leaves it.
+        s = Element{};
+        s.updated_tag = frame_tag;
+    }
+    pixels[from] = pixel_of(s);
+    pixels[to] = pixel_of(d);
+    const int fy = from / width, ty = to / width;
+    mark_dirty(from - fy * width, fy);
+    mark_dirty(to - ty * width, ty);
+    note_warm_if(to - ty * width, ty, d.temperature);
+}
+
+void Grid::disperse_liquid(int x, int y) {
+    const int idx = get_index(x, y);
+    const ElementType type = cells[idx].type;
+    // Rings outward, nearest first, and only level with the cell or below it: the
+    // cells above are the grain's own column, where water pressed in would ride up
+    // with the next grain. Which side of a ring comes first is drawn per cell, so
+    // a pour does not comb its water one way.
+    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::LiquidDisperse) ? -1 : 1;
+    for (int r = 1; r <= LIQUID_DISPERSE_RADIUS; ++r) {
+        for (int dy = 0; dy <= r; ++dy) {
+            for (int i = -r; i <= r; ++i) {
+                const int dx = i * dir;
+                if (dy != r && dx != r && dx != -r) continue;  // the ring only
+                if (cells[idx].type != type) return;  // all of it has gone
+                const int nx = x + dx, ny = y + dy;
+                if (!is_within_bounds(nx, ny)) continue;
+                const int n = get_index(nx, ny);
+                if (cells[n].type != type) continue;
+                const int room = LIQUID_PUSH_CAP - cells[n].mass;
+                if (room <= 0) continue;
+                const int have = cells[idx].mass;
+                transfer_liquid(idx, n, room < have ? room : have);
+            }
+        }
+    }
+}
+
+bool Grid::step_liquid(int x, int y, const Material& mat) {
+    const int idx = get_index(x, y);
+    const ElementType type = cells[idx].type;
+
+    // Sinking through something lighter -- oil under water, or a gas -- is a
+    // whole-cell swap, as every move between unlike materials is.
+    if (y + 1 < height) {
+        const ElementType below = cells[idx + width].type;
+        if (below != ElementType::Empty && below != type && can_displace(mat, x, y + 1, 1)) {
+            swap_elements(x, y, x, y + 1);
+            return true;
+        }
     }
 
-    const int target_row = y + MIN_PRESSURE_HEAD;
+    // How much of this liquid cell n holds, 0 for empty space it could flow into,
+    // or -1 when n is anything else and takes none.
+    const auto holds = [&](int n) -> int {
+        const ElementType t = cells[n].type;
+        if (t == type) return cells[n].mass;
+        if (t == ElementType::Empty) return 0;
+        return -1;
+    };
+    bool moved = false;
 
-    pressure_queue.clear();
-    const int seed = get_index(x, y);
-    pressure_queue.push_back(seed);
-    scratch_visit[seed] = scratch_epoch;
+    // --- down: as much as the cell below will hold ---
+    if (y + 1 < height) {
+        const int b = idx + width;
+        const int mb = holds(b);
+        if (mb >= 0) {
+            const int m = cells[idx].mass;
+            int flow = stable_lower(m + mb) - mb;
+            if (flow > m) flow = m;
+            if (flow > 0) {
+                transfer_liquid(idx, b, flow);
+                moved = true;
+                if (cells[idx].type != type) return true;  // all of it fell
+            }
+        }
+    }
 
-    for (size_t head = 0; head < pressure_queue.size(); ++head) {
-        const int idx = pressure_queue[head];
-        const int cy = idx / width;
-        const int cx = idx - cy * width;
+    // --- sideways: the difference, and the momentum ---
+    //
+    // Amounts are seen only up to full. What a sinking grain presses into a cell
+    // past full is the up flow's to carry to the surface; spread sideways it went
+    // round and round a band of water capped by sand, every cell trading with
+    // every neighbour every step, which kept the band awake and was most of what
+    // sand sinking through water cost.
+    {
+        const int m = cells[idx].mass < LIQUID_FULL ? cells[idx].mass : LIQUID_FULL;
+        // Dry ground beside a cell too thin to spread onto it is a wall to that
+        // cell, for momentum as well as for flow: otherwise the empty side keeps
+        // pushing a velocity the cell can never act on, and the edge of every
+        // puddle stays awake for good.
+        // Empty space over the same liquid is not dry ground but the body's own
+        // surface, and a film spreads across it however thin: otherwise the last
+        // part of a cell left on top of a pool stands as a patch of film a row
+        // proud of it, for good.
+        const auto side = [&](int n) {
+            const int h = holds(n);
+            if (h == 0 && m < LIQUID_MIN_SPREAD &&
+                (n + width >= static_cast<int>(cells.size()) || cells[n + width].type != type))
+                return -1;
+            return h < LIQUID_FULL ? h : LIQUID_FULL;
+        };
+        const int ml = x > 0 ? side(idx - 1) : -1;
+        const int mr = x + 1 < width ? side(idx + 1) : -1;
 
-        // A surface of this body, low enough to be worth moving to. This can never
-        // be the asking cell itself, which is at row y.
-        if (cy >= target_row && cells[idx - width].type == ElementType::Empty) return idx;
+        // Momentum. Pushed by the difference in amount either side -- a wall
+        // pushes back as hard as this cell does -- and damped every step, so it
+        // dies away in a body at rest and is never stored where there is no flow.
+        int grad = (ml < 0 ? m : ml) - (mr < 0 ? m : mr);
+        if (grad > -LIQUID_DEAD && grad < LIQUID_DEAD) grad = 0;
+        int v = cells[idx].flow * LIQUID_FLOW_SCALE + grad * LIQUID_ACCEL / 256;
+        v = v * LIQUID_DAMP / 256;
+        int vmax = mat.spread * LIQUID_SPEED_PER_SPREAD;
+        vmax = vmax < 127 * LIQUID_FLOW_SCALE ? vmax : 127 * LIQUID_FLOW_SCALE;
+        v = v > vmax ? vmax : (v < -vmax ? -vmax : v);
+        if ((v > 0 && mr < 0) || (v < 0 && ml < 0)) v = 0;  // into a wall: stopped
+        // Stored to the byte's resolution, rounded up or down at random in
+        // proportion to the remainder, so the stored velocity is right on average.
+        // Truncating instead threw away every push smaller than a step of the
+        // byte, and on a gentle slope that is every push: momentum never built and
+        // the last fraction of a cell levelled by diffusion alone, over thousands
+        // of steps. A dying velocity still reaches zero -- the damping shrinks it
+        // below a step, and then it rounds to nothing as often as not.
+        int q = v / LIQUID_FLOW_SCALE;
+        const int rem = v - q * LIQUID_FLOW_SCALE;  // same sign as v
+        if (rem != 0 && pick(LIQUID_FLOW_SCALE, static_cast<uint64_t>(idx),
+                             sim_random::Stream::LiquidFlowRound) < (rem < 0 ? -rem : rem))
+            q += rem < 0 ? -1 : 1;
+        cells[idx].flow = static_cast<int8_t>(q);
+        v = q * LIQUID_FLOW_SCALE;
+
+        // Spreading: a share of the difference to each lower side, the share set
+        // by how runny the material is, plus the momentum in its direction.
+        const int spread = mat.spread > 0 ? mat.spread : 1;
+        const int share = 2 + 10 / spread;
+        // Rounded up, so any difference past the dead band moves at least a unit:
+        // rounded down, every cell crossed holds back a few units, and pressure
+        // dies out along a tunnel. Never more than half the difference, so
+        // spreading alone cannot overshoot.
+        const auto spread_to = [&](int n) {
+            const int d = m - n;
+            return (n >= 0 && d >= LIQUID_DEAD) ? (d + share - 1) / share : 0;
+        };
+        int out_r = spread_to(mr);
+        int out_l = spread_to(ml);
+        // Momentum in its own direction: downhill always, uphill only as a surge.
+        if (v > 0 && mr >= 0 && (mr < m || v >= LIQUID_MIN_SURGE)) out_r += v;
+        if (v < 0 && ml >= 0 && (ml < m || -v >= LIQUID_MIN_SURGE)) out_l -= v;
+        // Never past full: a full cell has no room, and a surge into one would
+        // only be pressed straight back up.
+        if (mr >= 0 && out_r > LIQUID_FULL - mr) out_r = LIQUID_FULL - mr;
+        if (ml >= 0 && out_l > LIQUID_FULL - ml) out_l = LIQUID_FULL - ml;
+        if (out_r + out_l > m) {
+            out_r = out_r * m / (out_r + out_l);
+            out_l = m - out_r;
+        }
+        if (out_r > 0) {
+            transfer_liquid(idx, idx + 1, out_r);
+            moved = true;
+        }
+        if (out_l > 0 && cells[idx].type == type) {
+            transfer_liquid(idx, idx - 1, out_l);
+            moved = true;
+        }
+        if (cells[idx].type != type) return true;
+        if (v != 0) mark_dirty(x, y);  // still flowing, so still awake
+    }
+
+    // --- up: whatever it holds past full ---
+    //
+    // All of it, so pressed water reaches the surface in a sweep rather than
+    // creeping there: rows run bottom to top, and each cell it lands in passes it
+    // on the same step. Up to LIQUID_PUSH_CAP in the cell above, which is what
+    // keeps a column capped by sand -- where it can go no further -- inside the
+    // 16 bits of Element::mass.
+    if (y > 0) {
+        const int a = idx - width;
+        const int ma = holds(a);
+        if (ma >= 0) {
+            const int m = cells[idx].mass;
+            int up = m - stable_lower(m + ma);
+            if (up > LIQUID_PUSH_CAP - ma) up = LIQUID_PUSH_CAP - ma;
+            if (up > 0) {
+                transfer_liquid(idx, a, up);
+                moved = true;
+            }
+        }
+    }
+
+    // --- pressure: only once nothing nearer moved it ---
+    //
+    // Last because it is the expensive question and the rarely needed one: a cell
+    // with a downhill neighbour gets there by flowing, and only a body levelling
+    // through somewhere flow cannot -- a tunnel of full cells -- needs the search.
+    if (!moved) moved = level_liquid(x, y);
+    return moved;
+}
+
+bool Grid::level_liquid(int x, int y) {
+    // Only a surface cell gives. Anything with liquid or solid on top of it is
+    // pinned by what is above it, and taking from a buried cell would tunnel a
+    // hole through the middle of a body rather than lower its surface. Row 0 falls
+    // out of the same test, since get_element reads out of bounds as Wall.
+    if (get_element(x, y - 1).type != ElementType::Empty) return false;
+    const int idx = get_index(x, y);
+    const ElementType type = cells[idx].type;
+    const int m = cells[idx].mass;
+
+    // Heights in units, measured up from the bottom row, so a cell's surface is
+    // its row's floor plus what it holds and a difference reads straight off.
+    const auto height_of = [&](int row, int held) {
+        return (height - 1 - row) * LIQUID_FULL + held;
+    };
+    const int source = height_of(y, m);
+
+    // Nearest-first through the body, orthogonally: a diagonal step would let two
+    // pools that merely touch at a corner level into each other.
+    level_queue.clear();
+    level_queue.push_back(idx);
+    level_visit[idx] = 1;
+    int to = -1, amount = 0;
+    for (size_t head = 0; head < level_queue.size(); ++head) {
+        const int n = level_queue[head];
+        const int ny = n / width;
+        const int nx = n - ny * width;
+
+        // A surface of this body with room: a cell short of full with nothing on
+        // it, or the Empty on top of a full one.
+        if (n != idx) {
+            int r = -1;
+            if (get_element(nx, ny - 1).type == ElementType::Empty)
+                r = cells[n].mass < LIQUID_FULL ? n : n - width;
+            if (r >= 0) {
+                const int ry = r / width;
+                const int rm = cells[r].type == type ? cells[r].mass : 0;
+                const int d = source - height_of(ry, rm);
+                if (d >= LIQUID_LEVEL_HEAD) {
+                    // Half the difference levels the two exactly and cannot
+                    // overshoot, so nothing is sent back the other way.
+                    amount = d / 2;
+                    if (amount > m) amount = m;
+                    if (amount > LIQUID_FULL - rm) amount = LIQUID_FULL - rm;
+                    if (amount > LIQUID_LEVEL_RATE) amount = LIQUID_LEVEL_RATE;
+                    to = r;
+                    break;
+                }
+            }
+        }
 
         // Checked after the test above, so a body that reaches the cap still gets
         // to answer with what it found rather than being cut off one cell short.
-        if (static_cast<int>(pressure_queue.size()) >= MAX_PRESSURE_CELLS) return -1;
-
-        static constexpr int DX[4] = { 0,  0, -1, 1 };
-        static constexpr int DY[4] = {-1,  1,  0, 0 };
+        if (static_cast<int>(level_queue.size()) >= LIQUID_LEVEL_CELLS) continue;
+        static constexpr int DX[4] = {0, 0, -1, 1};
+        static constexpr int DY[4] = {-1, 1, 0, 0};
         for (int k = 0; k < 4; ++k) {
-            const int nx = cx + DX[k];
-            const int ny = cy + DY[k];
-            if (!is_within_bounds(nx, ny)) continue;
-
-            const int nidx = get_index(nx, ny);
-            if (cells[nidx].type != type) continue;
-            if (scratch_visit[nidx] == scratch_epoch) continue;
-
-            scratch_visit[nidx] = scratch_epoch;
-            pressure_queue.push_back(nidx);
+            const int cx = nx + DX[k], cy = ny + DY[k];
+            if (!is_within_bounds(cx, cy)) continue;
+            const int c = get_index(cx, cy);
+            if (cells[c].type != type || level_visit[c] != 0) continue;
+            level_visit[c] = 1;
+            level_queue.push_back(c);
         }
     }
+    for (const int n : level_queue) level_visit[n] = 0;
 
-    return -1;
-}
-
-bool Grid::seek_level(int x, int y) {
-    // Only a surface cell moves. Anything with liquid or solid on top of it is
-    // pinned by what is above it, and letting a buried cell go would tunnel a hole
-    // through the middle of a body rather than lower its surface.
-    //
-    // This also bounds the cost: in a settled pool it is one array read per cell,
-    // and only the thin surface line reaches the search. The row-0 case falls out
-    // of the same test, since get_element reads out-of-bounds as Wall.
-    if (get_element(x, y - 1).type != ElementType::Empty) return false;
-
-    const int target = find_lower_surface(x, y, cells[get_index(x, y)].type);
-    if (target < 0) return false;
-
-    // Onto the receiving surface, not into it. The cell above the target is the
-    // Empty that find_lower_surface required, so this is a swap with Empty and
-    // conserves matter for the same reason every other move in this file does.
-    const int ty = target / width;
-    swap_elements(x, y, target - ty * width, ty - 1);
-    return true;
-}
-
-bool Grid::vent_fluid(int fx, int fy) {
-    const int idx = get_index(fx, fy);
-    const ElementType fluid = cells[idx].type;
-
-    // The box, clipped to the world once rather than tested a cell at a time. This
-    // scan was the largest cost in `churning` -- a grain sinking through bulk water
-    // looks at every cell of the box and almost never finds one free -- so the loops
-    // below walk rows directly instead of paying a bounds check and an index
-    // multiply per cell.
-    const int r = vent_radius;
-    const int x_lo = fx - r > 0 ? fx - r : 0;
-    const int x_hi = fx + r < width - 1 ? fx + r : width - 1;
-    const int y_lo = fy - r > 0 ? fy - r : 0;
-    const int y_hi = fy + r < height - 1 ? fy + r : height - 1;
-
-    // Every destination is an Empty cell inside the box, so a box with none in it
-    // has no answer whatever order it is read in. Checked first, in plain memory
-    // order, because that is the common case and it lets the direction hash below
-    // be skipped along with the ordered scan. The result is unchanged: the ordered
-    // scan visits exactly these cells, only in a different order.
-    bool any_empty = false;
-    for (int ny = y_lo; ny <= y_hi && !any_empty; ++ny) {
-        const Element* row = &cells[static_cast<size_t>(ny) * width];
-        for (int nx = x_lo; nx <= x_hi; ++nx) {
-            if (row[nx].type == ElementType::Empty) {
-                any_empty = true;
-                break;
-            }
-        }
-    }
-    if (!any_empty) return false;
-
-    // The destination must be this fluid's own free surface -- an Empty cell with
-    // more of the same fluid directly beneath it -- and not merely any Empty within
-    // reach. Any-Empty reproduces the defect this was written to fix: the nearest
-    // empty cell to a grain entering the water is very often the air just above the
-    // sand pile, so the water is deposited back on top of the pile.
-    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::VentMirror) ? -1 : 1;
-
-    // The same clip expressed as offsets, in the mirrored frame: nx = fx + ox * dir,
-    // and ox still runs low to high, so ties break in exactly the order they did
-    // when every cell of the full box was visited and the out-of-world ones skipped.
-    const int ox_lo = dir > 0 ? x_lo - fx : fx - x_hi;
-    const int ox_hi = dir > 0 ? x_hi - fx : fx - x_lo;
-
-    // Two kinds of destination. Sending the fluid to its own surface fixes the
-    // pour, and then the defect returns once the sand pile has grown into a cone
-    // standing proud of the water: the thin films of water clinging to the cone's
-    // flanks have sand underneath, not water, so there is no surface of their own
-    // kind to go to, and grains rolling down the slope go back to handing them
-    // upwards one cell at a time. The pile itself becomes the conveyor.
-    //
-    // So a flank film may also drain to somewhere it can rest, and that route is
-    // restricted to ny >= fy -- level or downhill, never up. Water running down the
-    // outside of a pile is what should happen; the defect is water going the other
-    // way.
-    int drain_x = -1, drain_y = -1, drain_score = 0;
-
-    int best_x = -1, best_y = -1, best_score = 0;
-    for (int ny = y_lo; ny <= y_hi; ++ny) {
-        const int oy = ny - fy;
-        const Element* row = &cells[static_cast<size_t>(ny) * width];
-        // The bottom row of the world stands on the border, which reads as Wall --
-        // the same answer get_element gives for the cell past the edge.
-        const Element* below = ny + 1 < height ? row + width : nullptr;
-        for (int ox = ox_lo; ox <= ox_hi; ++ox) {
-            // `dir` mirrors the scan rather than steering it, so the choice between
-            // two equally good cells either side of a grain is not always the left
-            // one. Its own stream (VentMirror), so it is not the very coin this
-            // fluid cell's own sideways move draws: a fixed order here would comb
-            // every pour in one direction, and a shared coin would tie the two.
-            const int nx = fx + ox * dir;
-            if (row[nx].type != ElementType::Empty) continue;
-
-            const ElementType under = below ? below[nx].type : ElementType::Wall;
-            const int score = std::abs(ox) + std::abs(oy);
-
-            if (under == fluid) {
-                if (best_x < 0 || score < best_score) {
-                    best_x = nx;
-                    best_y = ny;
-                    best_score = score;
-                }
-            } else if (ny >= fy && is_solid(under)) {
-                // Ranked by depth before distance, so a film takes the furthest step
-                // down the slope it can see rather than shuffling one cell at a time
-                // against a pile that is being fed from above.
-                const int depth = (ny - fy) * 16 - score;
-                if (drain_x < 0 || depth > drain_score) {
-                    drain_x = nx;
-                    drain_y = ny;
-                    drain_score = depth;
-                }
-            }
-        }
-    }
-
-    if (best_x < 0 && drain_x >= 0) {
-        best_x = drain_x;
-        best_y = drain_y;
-    }
-
-    // No surface within reach, so the caller falls back to the plain swap. This is
-    // the right answer rather than a giving-up: a grain sinking deep inside a large
-    // body of water has no conveyor above it feeding the exchange, which is the
-    // only thing that made the one-cell lift add up to anything.
-    if (best_x < 0) return false;
-
-    swap_elements(fx, fy, best_x, best_y);
+    if (to < 0 || amount <= 0) return false;
+    // An idle cell has no momentum to give, and liquid arriving by pressure brings
+    // none: it rose from below, not in from the side.
+    cells[idx].flow = 0;
+    transfer_liquid(idx, to, amount);
     return true;
 }
 
@@ -1465,7 +1567,7 @@ bool Grid::try_react(int x, int y) {
     };
 
     // Spontaneous-reaction targets must keep re-checking every frame even if they
-    // never move. Fire's own movement only calls mark_dirty when step_fluid actually
+    // never move. Fire's own movement only calls mark_dirty when step_gas actually
     // relocates it; a fully boxed-in flame -- surrounded by Wood with no Empty cell
     // to rise into -- would generate zero dirty marks after the frame it was created
     // and freeze forever, never decaying and never given another chance to ignite
@@ -1494,7 +1596,15 @@ bool Grid::try_react(int x, int y) {
         // coordinates -- which it would otherwise do, getting the same answer.
         if (chance_per_myriad(static_cast<int>(r.chance_per_myriad), static_cast<uint64_t>(get_index(x, y)),
                              sim_random::Stream::Reaction)) {
+            // Water boiling to steam keeps its amount, so condensing gives it
+            // back; anything else is a new cell and starts full (place()).
+            const uint16_t carried = cell.mass;
+            const bool hand_over = carries_mass(cell.type) && carries_mass(r.result);
             set_element(x, y, r.result);
+            if (hand_over) {
+                cells[idx].mass = carried;
+                pixels[idx] = pixel_of(cells[idx]);
+            }
             return true;
         }
         return false;  // first eligible row commits the cell for this frame, win or lose
@@ -1659,7 +1769,11 @@ bool Grid::step_steam(int x, int y) {
     if (!is_solid(get_element(x, y - 1).type)) return false;
 
     if (--cell.ticks == 0) {
+        // Back to water, with the amount the steam was carrying.
+        const uint16_t carried = cell.mass;
         set_element(x, y, ElementType::Water);
+        cells[idx].mass = carried;
+        pixels[idx] = pixel_of(cells[idx]);
         return true;
     }
 
@@ -1739,8 +1853,8 @@ void Grid::step_cell(int x, int y) {
     switch (mat.move) {
         case MoveKind::Static: break;
         case MoveKind::Powder: step_powder(x, y, mat); break;
-        case MoveKind::Liquid: step_fluid(x, y, mat, 1); break;
-        case MoveKind::Gas:    step_fluid(x, y, mat, -1); break;
+        case MoveKind::Liquid: step_liquid(x, y, mat); break;
+        case MoveKind::Gas:    step_gas(x, y, mat); break;
     }
 }
 

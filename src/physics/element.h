@@ -13,6 +13,21 @@ inline constexpr uint8_t AMBIENT_TEMPERATURE = 20;
 struct Element {
     ElementType type = ElementType::Empty;
 
+    // A liquid cell's sideways velocity, in Grid::LIQUID_FLOW_SCALE units of mass
+    // per step: positive flows right, negative left. Momentum, which is what lets released water
+    // surge, overshoot and slosh before it settles rather than levelling in a
+    // straight line. Zero for anything that is not a liquid. See step_liquid.
+    int8_t flow = 0;
+
+    // How much liquid the cell holds, in units of Grid::LIQUID_FULL to a full
+    // cell. A liquid cell holds between 1 and full -- more only for the few steps
+    // after a sinking grain presses its water in, until the excess has risen to
+    // the surface -- so a puddle can be a film and a surface can be part of a
+    // row, and liquid moves by amounts flowing rather than by cells being moved.
+    // Steam carries it too: steam is water in another state, and boiling and
+    // condensing hand the amount across. Zero for everything else.
+    uint16_t mass = 0;
+
     // ARGB8888, base colour plus per-cell jitter.
     //
     // Transparent, because the default type is Empty and the two have to agree.
@@ -84,12 +99,13 @@ struct Element {
 // entry per cell of the world and every step walks all of the awake part of it,
 // so a byte here is 500 KB and a slower sweep at the target resolution.
 //
-// type(1) + 3 pad + color(4) + updated_tag(1) + ticks(1) + temperature(1) +
-// piece_tag(1) is 12 bytes. The 3 pad is real space: `type` is one byte and
-// `color` needs four-byte alignment, so offsets 1-3 are a hole that a field
-// declared between them occupies for free. Three bytes remain there. Appending
-// after piece_tag is not a one-byte option -- alignment rounds 13 up to 16, so
-// it costs four bytes per cell.
+// type(1) + flow(1) + mass(2) + color(4) + updated_tag(1) + ticks(1) +
+// temperature(1) + piece_tag(1) is 12 bytes. flow and mass live in what was a
+// three-byte hole between `type` and `color` (`color` needs four-byte
+// alignment), so the liquid state costs nothing per cell; mass's two-byte
+// alignment lands exactly at offset 2. The hole is now full. Appending after
+// piece_tag is not a one-byte option -- alignment rounds 13 up to 16, so it
+// costs four bytes per cell.
 //
 // The assertion below is what makes the front hole safe to use on a machine
 // whose ABI packs this struct differently: a layout with no hole fails the

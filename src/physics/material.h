@@ -175,3 +175,16 @@ inline constexpr bool is_solid(ElementType type) {
     const MoveKind move = material_of(type).move;
     return move == MoveKind::Static || move == MoveKind::Powder;
 }
+
+// A liquid moves as an amount (Element::mass) that flows between cells, rather
+// than as whole cells; see Grid::step_liquid.
+inline constexpr bool is_liquid(ElementType type) {
+    return material_of(type).move == MoveKind::Liquid;
+}
+
+// Whether a cell of this type holds an amount in Element::mass: the liquids, and
+// steam, which is water in another state and hands its amount back when it
+// condenses.
+inline constexpr bool carries_mass(ElementType type) {
+    return is_liquid(type) || type == ElementType::Steam;
+}

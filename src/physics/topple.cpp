@@ -322,7 +322,7 @@ bool Grid::tip_move(TipBody& b) {
     const auto write = [&](int idx, Element e) {
         e.updated_tag = frame_tag;
         cells[idx] = e;
-        pixels[idx] = e.color;
+        pixels[idx] = pixel_of(e);
         const int cy = idx / width;
         mark_dirty(idx - cy * width, cy);
         note_warm_if(idx - cy * width, cy, e.temperature);
