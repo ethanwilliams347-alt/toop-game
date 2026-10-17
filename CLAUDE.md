@@ -3,19 +3,22 @@
 C++20 / SDL2 falling-sand engine. Windows x64, MSVC, CMake 3.14+. SDL2 2.30.0 is
 fetched and built statically by `FetchContent`; don't vendor or system-install it.
 
+**Read [ARCHITECTURE.md](ARCHITECTURE.md) before starting large code task. It can be wrong though, so use it as just a starting point.**
+
 ## Invariants
 
 These hold across the whole tree. Each exists for a reason given alongside it; if a
 task seems to require breaking one, stop and say so rather than working around it.
 
-- **`src/physics/` has no SDL** — no header, type, or include. `slop_engine` (the
-  OBJECT library built from `ENGINE_SOURCES`) links nothing, so it never gets
-  SDL's include dirs; that is what keeps physics headless-testable, and
-  `sdl_boundary_test` fails if that ever changes. Linking SDL into `slop_engine`,
-  or moving a file into `ENGINE_SOURCES` to fix a build, means the boundary has
-  been crossed.
+- **The simulation has no SDL** — no header, type, or include. `slop_engine` (the
+  OBJECT library built from `ENGINE_SOURCES`: all of `src/physics/` plus
+  `game/run.cpp`, `game/level.cpp`, `game/input_log.cpp`, `scene/scene.cpp`) links
+  nothing, so it never gets SDL's include dirs; that is what keeps the simulation
+  headless-testable, and `sdl_boundary_test` fails if that ever changes. Linking
+  SDL into `slop_engine`, or moving a file between the source sets in
+  `CMakeLists.txt` to fix a build, means the boundary has been crossed.
 - **`src/physics/` has no float.** Replay determinism needs every simulation number
-  to be reproducible across compilers and `/fp` modes. Use `fx` (signed 16.16,
+  to be reproducible across compilers and `/fp` modes. Use `fx::v` (signed 16.16,
   `src/physics/fixed.h`); `fx::to_float` is for render and tests only.
 - **Rendering never feeds simulation.** `light.cpp` and `player_anim.cpp`
   read the grid `const` and write only their own buffers.
@@ -37,33 +40,6 @@ task seems to require breaking one, stop and say so rather than working around i
   `assets/wip/`) next to the exe. Bind sprites with
   `python tools/load_sprite.py <key> <file.bmp>`; don't hardcode asset paths.
 
-## Intentional designs that look like cruft
-
-Leave these as they are; each has a rationale comment at the definition.
-
-- `Element::ticks` is a union of three meanings (fall clock / fire fuel / steam
-  countdown), guarded by `lifetimes_are_never_structural()` in `element.h`.
-  Splitting it grows every cell.
-- `updated_tag` is a frame tag, not a bool, so there's no per-step reset pass.
-- `mark_dirty` wakes the full 3×3 per cell across chunk borders. Narrowing it
-  brings back floating piles and chunk seams. It applies the 3×3 as one box per
-  chunk it touches rather than nine cell includes — the same cells, and the
-  cheap form matters: the per-cell version was 63% of `cascading`.
-- `fx::trunc` truncates toward zero and isn't `>>`; flooring drifts left-moving
-  bodies.
-- `is_grounded` compares `piece_tag`, not material, so cracks survive movement.
-- An enemy's arm is geometry (pixels outside the box's columns) except where the
-  art names arm letters (`body_art::Art::arm`), which only the fish does. Its
-  lure arm grows out of the top of its head, where no column rule fits. Keep
-  geometry for any body whose arms do hang beside the box.
-- `MAX_SUPPORT_CELLS` assumes "supported" when it gives up — a missed collapse is
-  invisible, a wrong one is rubble.
-- Far backdrop layers in a long scene are narrower tiles than the set (`width=`
-  in backdrop.txt). Widening them to the world's width only adds bytes; the
-  width needed is `345 + f * (W - 345)`, and `backdrop_set_test` enforces it.
-- Cross-file invariants are `static_assert`s (`player.h`, `element.h`,
-  `reaction.h`). If a retuned constant trips one, its message explains the
-  constraint — address it rather than loosening the assert.
 
 ## Commands
 
@@ -78,7 +54,7 @@ ctest --test-dir build -C Release -R grid_test --output-on-failure
 .\build\Release\SlopPhysics.exe                       # F9 writes session.rec
 .\build\Release\grid_bench.exe                        # timings, not a test
 .\build\Release\grid_bench.exe --focus                # the four A/B rows, 5 reps, ~4 min
-.\build\Release\preview_light.exe                     # headless frame dump
+.\build\Release\preview_light.exe out.raw 90          # headless frame dump (default file: preview.raw, 90 steps)
 python tools/rawpng.py out.raw out.png 804 604
 
 just code_cleanup                                     # pre-PR pass, see below
@@ -92,7 +68,8 @@ turn them into `add_test()`.
 ## Verifying changes
 
 - **Before opening or updating any PR:** `just code_cleanup` (needs `just`, LLVM's
-  clang-format/clang-tidy, and `ruff`). It runs `tools/code_cleanup.py`:
+  clang-format/clang-tidy, `ruff`, and a configured `build/`; diffs against
+  `origin/main`, else `main` — pass `--base <ref>` otherwise). It runs `tools/code_cleanup.py`:
   clang-format on the changed lines, clang-tidy on the changed C++ files, ruff on
   the changed Python files, then the Release build and ctest. Formatting is
   limited to changed lines because the tree predates `.clang-format`, and a
@@ -107,20 +84,18 @@ turn them into `add_test()`.
   `churning` and `cascading` at 1920×1080 are the rows that matter.
 - **`src/render/`:** `golden_frame_test` plus before/after `grid_bench --focus`,
   which includes the `light/fire` and `light/dark` rows.
+- **`src/ui/`, `render/overlay.cpp`:** these are drawn into `golden_frame_test`, so
+  the same re-baselining rule applies.
 - **Perf claims** need back-to-back `grid_bench --focus` runs: compare medians and
-  quote the spread beside them. Check the `placement:` line first. `grid_bench`
-  keeps its main thread on the P-cores with power throttling off, because on a
-  hybrid CPU a thread that drifts to an E-core runs `churning` at 87.6 ms instead
-  of 46.7, and that drift, not the code, is the ±20% that used to appear between
-  builds. If the line doesn't say `on`, the numbers are not comparable. With it,
-  one binary repeats to 1–3% (worse with other work running, so close other
-  heavy programs and don't run a build while it runs). Code layout also moves timings
-  with no code change: across six MSVC builds that differed only in
-  `SLOP_BENCH_PAD`, the spread was churning 2.5%, light/fire 3%, cascading 7%,
-  light/dark 13%. A difference smaller than that on its row is unproven until it
-  survives rebuilding both sides with `-DSLOP_BENCH_PAD=16` (or `32`). `/GL` +
-  `/LTCG` doesn't remove this: it shrank light/dark's spread to 3% but one layout
-  put churning 10% above the rest.
+  quote the spread beside them. Check the `placement:` line first; if it doesn't
+  say `on` (P-cores pinned, power throttling off), the numbers are not comparable
+  — E-core drift alone nearly doubles `churning`. With it, one binary repeats to
+  1–3%; close other heavy programs and don't build while it runs. Code layout
+  alone moves rows by up to churning 2.5%, light/fire 3%, cascading 7%,
+  light/dark 13% (`/GL`+`/LTCG` doesn't fix it). A difference inside its row's
+  band is unproven until it survives rebuilding both sides with
+  `-DSLOP_BENCH_PAD=16` (or `32`). Background is in `tests/bench_grid.cpp` and
+  `CMakeLists.txt`.
 - **Feel constants:** update `TUNING.md` in the same commit (value, the file that
   declares it, and a `History` entry with the reason). Rows link files, never
   lines; `tuning_test` finds each constant by name and rejects `#L` anchors.
