@@ -703,6 +703,78 @@ int main() {
         check("and the wood", count_of(g, ElementType::Wood) == wood);
     }
 
+    // --- wood that catches stays in the piece it was part of ---
+    // Wood catching into Charred is a reaction, and reactions write through place(),
+    // which starts every cell as a piece of its own with tag 0. On untagged wood
+    // that changes nothing. On wood that has tipped, landed or broken, and so wears
+    // a tag, each cell that caught came away from its piece. Hanging in the air,
+    // it fell off and took the fire with it. burn_probe's plank on two posts
+    // stalls that way: it burns through, the far part tips about its post and is
+    // tagged, and the fire never crosses it. That was 7 seeds of 12.
+    //
+    // The same scene, smaller, checked at the cause rather than the symptom: at
+    // every step, each tagged cell that was Wood and is now Charred wears the same
+    // tag as a neighbour that was the same piece's Wood and still is. That, rather
+    // than "the tag it had", because a piece can be re-tagged as a whole in the
+    // step a cell of it catches -- it starts tipping, or breaks -- and the cell
+    // should go with it. Several worlds, because which part of the beam tips
+    // first, and whether it is still burning when it does, depends on the seed.
+    {
+        constexpr int LEN = 80, THICK = 3, GW = LEN + 20, GH = THICK + 40, X0 = 10, Y0 = 10;
+        int ignitions = 0, tagged = 0, kept = 0;
+        for (uint64_t seed = 1; seed <= 4; ++seed) {
+            Grid g(GW, GH, seed);
+            for (int i = 0; i < 3; ++i) {
+                fill(g, X0 + i, Y0 + THICK, X0 + i, GH - 1, ElementType::Wall);
+                fill(g, X0 + LEN - 1 - i, Y0 + THICK, X0 + LEN - 1 - i, GH - 1, ElementType::Wall);
+            }
+            fill(g, X0, Y0, X0 + LEN - 1, Y0 + THICK - 1, ElementType::Wood);
+            fill(g, X0, Y0, X0, Y0 + THICK - 1, ElementType::Charred);
+
+            std::vector<int> wood_tag(static_cast<size_t>(GW) * GH);
+            for (int s = 0; s < 1500; ++s) {
+                for (int y = 0; y < GH; ++y)
+                    for (int x = 0; x < GW; ++x) {
+                        const Element e = g.get_element(x, y);
+                        wood_tag[static_cast<size_t>(y) * GW + x] =
+                            e.type == ElementType::Wood ? e.piece_tag : -1;
+                    }
+                g.update();
+                for (int y = 0; y < GH; ++y)
+                    for (int x = 0; x < GW; ++x) {
+                        const int was = wood_tag[static_cast<size_t>(y) * GW + x];
+                        const Element e = g.get_element(x, y);
+                        if (was < 0 || e.type != ElementType::Charred) continue;
+                        ++ignitions;
+                        if (was == 0) continue;
+
+                        // The piece's tag now, read off an unburnt neighbour of it.
+                        int piece = -1;
+                        for (int dy = -1; dy <= 1 && piece < 0; ++dy)
+                            for (int dx = -1; dx <= 1 && piece < 0; ++dx) {
+                                const int nx = x + dx, ny = y + dy;
+                                if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= GW ||
+                                    ny >= GH)
+                                    continue;
+                                const Element n = g.get_element(nx, ny);
+                                if (wood_tag[static_cast<size_t>(ny) * GW + nx] == was &&
+                                    n.type == ElementType::Wood)
+                                    piece = n.piece_tag;
+                            }
+                        if (piece < 0)
+                            continue;  // nothing of its piece left beside it to compare with
+                        ++tagged;
+                        if (e.piece_tag == piece) ++kept;
+                    }
+            }
+        }
+        check("a beam that burns through tips, and its tagged wood catches", tagged > 0,
+              std::to_string(tagged) + " of " + std::to_string(ignitions) +
+                  " ignitions on tagged wood");
+        check("every cell that catches stays in its piece", kept == tagged,
+              std::to_string(kept) + " of " + std::to_string(tagged) + " stayed in their piece");
+    }
+
     // --- toppling is deterministic ---
     // It is the one part of the simulation with angles in it, so it is the one most
     // likely to hide a float or an order dependence. Same writes, same world.

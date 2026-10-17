@@ -394,10 +394,10 @@ void Grid::place(int x, int y, ElementType type, uint32_t color) {
     // it becomes a piece of its own with tag 0, so patching a crack with the brush
     // leaves a seam the support fill can see and nobody else can.
     //
-    // Harmless while no row in REACTIONS turns one structural material into
-    // another. A structural-to-structural row would silently reset the tag of every
-    // cell it touched, re-welding pieces that had come apart; if one is ever
-    // written, decide here whether the tag survives a transformation.
+    // A reaction is not a new cell, though, and Wood -> Charred turns one
+    // structural material into another. try_react decides that one: it carries
+    // the tag and the fall clock across, so a burning cell stays in its piece.
+    // The reset here stays right for the brush, which is what the seam is for.
 
     cells[idx] = el;
     pixels[idx] = pixel_of(el);
@@ -1707,10 +1707,30 @@ bool Grid::try_react(int x, int y) {
             // back; anything else is a new cell and starts full (place()).
             const uint16_t carried = cell.mass;
             const bool hand_over = carries_mass(cell.type) && carries_mass(r.result);
+
+            // Wood catching into Charred is the same cell of the same structure in a
+            // new state, so it stays in the piece it was in: its piece_tag, and its
+            // fall clock, which is what ticks means for both (tick_role). place()
+            // starts every cell as a piece of its own, which is right for the brush
+            // and was wrong here. On a piece that had ever broken, landed or tipped,
+            // and so wore a non-zero tag, every cell that caught became a separate
+            // tag-0 piece and fell off, taking the fire with it. The flame front
+            // could not walk along that piece at all. A tipping body also read each
+            // ignition as its shape changing and stopped. Carrying ticks is safe
+            // because tick_role in element.h gives every structural material the
+            // fall-clock role, so the byte means the same on both sides.
+            const bool same_structure = is_structural(cell.type) && is_structural(r.result);
+            const uint8_t tag = cell.piece_tag;
+            const uint8_t fall_clock = cell.ticks;
+
             set_element(x, y, r.result);
             if (hand_over) {
                 cells[idx].mass = carried;
                 pixels[idx] = pixel_of(cells[idx]);
+            }
+            if (same_structure) {
+                cells[idx].piece_tag = tag;
+                cells[idx].ticks = fall_clock;
             }
             return true;
         }

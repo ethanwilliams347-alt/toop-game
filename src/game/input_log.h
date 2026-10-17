@@ -69,7 +69,12 @@ namespace input_log {
 //    fingerprints hash both. A version-6 log was recorded against water that moved
 //    as whole cells, so it replays into a different simulation from its first
 //    step that touches water.
-constexpr uint32_t FORMAT_VERSION = 7;
+//
+// 8: wood that catches keeps the piece_tag and fall clock it had (try_react).
+//    A version-7 log was recorded against fire that split every tipped, landed
+//    or broken piece cell by cell as it burned, so it replays into a different
+//    world from the first step a tagged cell ignites.
+constexpr uint32_t FORMAT_VERSION = 8;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (scene_list::scene_name_ok); the cap is what lets read() refuse a corrupt

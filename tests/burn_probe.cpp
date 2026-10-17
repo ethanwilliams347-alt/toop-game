@@ -46,6 +46,26 @@ int front_of(const Grid& g, int x0, int y, int len) {
     return len;
 }
 
+// Whether anything is still burning anywhere in the world.
+//
+// A fire can go out, and every probe below waits on a condition that only a
+// fire still burning can bring about. Without this, a world whose fire has died
+// is stepped to the cap, and the cap is then printed as if it were a speed. On
+// seed 12 that is what spread used to report as 0.45 cells/s. The seeded
+// column sits on the left post, two of its three cells lose their burn-out roll
+// within 22 steps, and the Wood beside the last two peaks at 119 against an
+// ignition point of 120, with the post cooling it from below. That is the
+// ignition cliff described in material.h and reaction.h, reached from a small
+// seed on a cold support. It is a fire that never caught, not one that crawled.
+bool burning(const Grid& g) {
+    for (int y = 0; y < g.get_height(); ++y)
+        for (int x = 0; x < g.get_width(); ++x) {
+            const ElementType t = g.get_element(x, y).type;
+            if (t == ElementType::Charred || t == ElementType::Fire) return true;
+        }
+    return false;
+}
+
 // A horizontal plank, lit at its left end by seeding the first column as Charred
 // -- which is what ignition produces, so the probe starts where a real ignition
 // leaves off rather than by dropping a flame and hoping it catches.
@@ -84,17 +104,22 @@ void probe_spread() {
     // The far end is what burn-through means. Waiting for the whole plank to be gone
     // would measure consumption as well as travel, and those are two different
     // constants.
-    int steps = 0;
+    int steps = 0, furthest = 0;
     const int LIMIT = 20000;
     while (steps < LIMIT) {
-        int furthest = 0;
+        furthest = 0;
         for (int t = 0; t < THICK; ++t) {
             const int f = front_of(g, x0, y0 + t, LEN);
             if (f > furthest) furthest = f;
         }
-        if (furthest >= LEN) break;
+        if (furthest >= LEN || !burning(g)) break;
         g.update();
         ++steps;
+    }
+    if (furthest < LEN && !burning(g)) {
+        std::printf("spread:      went out at cell %d of %d after %d steps (%.2f s)\n", furthest,
+                    LEN, steps, static_cast<double>(steps) / FPS);
+        return;
     }
     std::printf("spread:      %d cells in %d steps (%.2f s) = %.2f cells/s\n",
                 LEN, steps, static_cast<double>(steps) / FPS,
@@ -121,6 +146,12 @@ void probe_consumption() {
         if (charred > peak_charred) peak_charred = charred;
         charred_area += charred;
         if (wood == 0 && charred == 0) break;
+        if (!burning(g)) {
+            std::printf(
+                "consumption: went out with %d of %d cells unburnt after %d steps (%.2f s)\n", wood,
+                LEN * THICK, steps, static_cast<double>(steps) / FPS);
+            return;
+        }
         g.update();
         ++steps;
     }
@@ -171,6 +202,11 @@ void probe_front() {
                 else ++remaining;
             }
         if (remaining == 0) break;
+        if (!burning(g)) {
+            std::printf("front:       went out with %d of %d cells unlit after %d steps (%.2f s)\n",
+                        remaining, LEN * THICK, steps, static_cast<double>(steps) / FPS);
+            return;
+        }
         g.update();
         ++steps;
     }
