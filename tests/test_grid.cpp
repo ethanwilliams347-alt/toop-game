@@ -1052,6 +1052,46 @@ int main() {
               std::to_string(hits) + "/10000, wanted ~2500");
     }
 
+    // --- heat crosses a pair once a step, whichever way round the pair is ---
+    //
+    // Each pair of neighbours belongs to one of its two cells. When every cell
+    // exchanged with all eight neighbours instead, a pair whose cells were both
+    // visited exchanged twice and one whose cold end was visited first, while
+    // still at ambient, exchanged once -- so how much heat crossed depended on
+    // the sweep's direction for that row. Mirrored pairs then disagreed.
+    {
+        const auto received = [](int hx, int hy, int cx, int cy) {
+            Grid g(32, 32);
+            // A cell keeps its temperature when overwritten, so Fire then Wall
+            // leaves a wall cell at Fire's temperature.
+            g.set_element(hx, hy, ElementType::Fire);
+            g.set_element(hx, hy, ElementType::Wall);
+            g.set_element(cx, cy, ElementType::Wall);
+            g.update();
+            return static_cast<int>(g.get_element(cx, cy).temperature) - AMBIENT_TEMPERATURE;
+        };
+        const int east = received(10, 10, 11, 10), west = received(11, 10, 10, 10);
+        const int south = received(10, 10, 10, 11), north = received(10, 11, 10, 10);
+        const int se = received(10, 10, 11, 11), nw = received(11, 11, 10, 10);
+        const int sw = received(11, 10, 10, 11), ne = received(10, 11, 11, 10);
+        const std::string detail = "E " + std::to_string(east) + " W " + std::to_string(west) +
+                                   " S " + std::to_string(south) + " N " + std::to_string(north) +
+                                   " SE " + std::to_string(se) + " NW " + std::to_string(nw) +
+                                   " SW " + std::to_string(sw) + " NE " + std::to_string(ne);
+        // Within one unit, not exactly: the hot end bleeds a unit back to ambient
+        // on its own visit, and whether that comes before or after the pair's
+        // exchange depends on which of the two owns the pair. Under the old rule
+        // the spread was nearly half the exchange (6 against 11).
+        const int all[8] = {east, west, south, north, se, nw, sw, ne};
+        int lo = all[0], hi = all[0];
+        for (const int v : all) {
+            lo = v < lo ? v : lo;
+            hi = v > hi ? v : hi;
+        }
+        check("heat crosses a pair the same amount in every direction", lo > 0 && hi - lo <= 1,
+              detail);
+    }
+
     // --- the step clock ---
     // Nothing reads this yet; it exists so the randomness hash has a wide time
     // input, and so a save file can say where a run had got to. Checked anyway,
