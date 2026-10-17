@@ -559,11 +559,12 @@ if(BUILD_TESTING)
     target_include_directories(burn_probe PRIVATE src tests)
     target_link_libraries(burn_probe PRIVATE slop_engine)
 
-    # Where water ends up when a powder is poured into it, in numbers and in an
-    # ASCII slice. Not an add_test() because the thing it reports is a shape.
-    add_executable(water_probe tests/water_probe.cpp)
-    target_include_directories(water_probe PRIVATE src tests)
-    target_link_libraries(water_probe PRIVATE slop_engine)
+    # What the liquids do, in numbers: a U-tube, a dam break, sand poured into a
+    # pool, a partial top row. Not an add_test() because what it reports is how
+    # well a fluid model behaves, not whether it is correct.
+    add_executable(fluid_probe tests/fluid_probe.cpp)
+    target_include_directories(fluid_probe PRIVATE src tests)
+    target_link_libraries(fluid_probe PRIVATE slop_engine)
 
     # How much of the authored rim highlight is still on a surface once the
     # world has settled. Not an add_test() for the same reason as the two above:

@@ -8,6 +8,7 @@
 // These cover that, and -- just as importantly -- the cases where nothing must
 // move, because a piece that falls when it shouldn't destroys a level.
 
+#include "liquid.h"
 #include "physics/grid.h"
 #include "test_util.h"
 #include <algorithm>
@@ -340,8 +341,8 @@ int main() {
               top_row_of(g, ElementType::Wall) > 40,
               "top wall row " + std::to_string(top_row_of(g, ElementType::Wall)));
         check("the water it displaced was not destroyed",
-              count_of(g, ElementType::Water) == 11 * 10,
-              std::to_string(count_of(g, ElementType::Water)) + " water");
+              liquid::total(g, ElementType::Water) == 11 * 10 * liquid::UNITS_PER_CELL,
+              std::to_string(liquid::total(g, ElementType::Water)) + " water");
     }
 
     // --- a slab drops once the sand under it falls away ---
@@ -691,13 +692,14 @@ int main() {
         fill(g, 10, 50, 31, 57, ElementType::Empty);
         fill(g, 10, 52, 31, 57, ElementType::Water);  // a pool in the pit
 
-        const int water = count_of(g, ElementType::Water);
+        const int64_t water = liquid::total(g, ElementType::Water);
         const int wood = count_of(g, ElementType::Wood);
         g.set_element(31, 50, ElementType::Empty);  // and undermine the post
         step(g, 400);
         check("tipping into a pool conserves the water",
-              count_of(g, ElementType::Water) == water,
-              std::to_string(count_of(g, ElementType::Water)) + " of " + std::to_string(water));
+              liquid::total(g, ElementType::Water) == water,
+              std::to_string(liquid::total(g, ElementType::Water)) + " of " +
+                  std::to_string(water));
         check("and the wood", count_of(g, ElementType::Wood) == wood);
     }
 
