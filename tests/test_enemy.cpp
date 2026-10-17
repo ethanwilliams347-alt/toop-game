@@ -104,11 +104,13 @@ int main() {
     // Every Run below is on the heap, behind a `Run&` of the name a stack Run
     // would have had. A Run is about 120 KB -- 24 enemy slots, each carrying a
     // pixel mask sized for the largest frame, the fish's 94x84 at four bits a
-    // pixel -- and this function declares
-    // a dozen of them in sibling blocks. MSVC does not reliably give sibling
-    // blocks the same stack slots, so on Windows' 1 MB default stack they add up
-    // and the suite died of a stack overflow before printing a line. Linux's 8 MB
-    // stack hid it, which is why it went unnoticed.
+    // pixel -- and this function declares a dozen of them in sibling blocks.
+    // MSVC does not reliably give sibling blocks the same stack slots, and under
+    // ASan never does (each local gets its own slot, wrapped in red zones, so a
+    // use after its scope ends is caught), so on Windows' 1 MB default stack
+    // they add up and the suite dies of a stack overflow before printing a line.
+    // Linux's 8 MB stack hides it. The heap is the fix rather than a bigger
+    // stack: a linker flag only moves the line a few more Runs away.
 
     // --- a fresh body ---
     {
@@ -732,13 +734,15 @@ int main() {
     }
 
     // --- the slam: winds up, lands, breaks the ground ---
+    // Returns the owner, as fish_arena does: returning the Run would copy it out
+    // of the heap into the caller's frame, which is the stack Run this file
+    // exists to avoid.
     auto troll_arena = [](int player_x) {
-        const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
-        Run& run = *run_owner;
+        auto run = std::make_unique<Run>(WORLD_W, WORLD_H);
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
-            for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
-        run.player = Player(player_x, FLOOR_Y - Player::HEIGHT);
-        run.spawn_enemy(100, FLOOR_Y - species::TROLL.height, species::TROLL);
+            for (int x = 0; x < WORLD_W; ++x) run->grid.set_element(x, y, ElementType::Wall);
+        run->player = Player(player_x, FLOOR_Y - Player::HEIGHT);
+        run->spawn_enemy(100, FLOOR_Y - species::TROLL.height, species::TROLL);
         return run;
     };
     auto count_type = [](const Grid& g, ElementType t) {
@@ -750,7 +754,8 @@ int main() {
     };
     {
         // The player just in front of it, inside the club's reach.
-        Run run = troll_arena(100 + T.width + 4);
+        const auto run_owner = troll_arena(100 + T.width + 4);
+        Run& run = *run_owner;
         const int walls = count_type(run.grid, ElementType::Wall);
         int wound_up_at = -1, hit_at = -1, x_at_windup = 0;
         int windup_event_at = -1, slam_event_at = -1, hurt_events = 0, hurt_amount = 0,
@@ -799,7 +804,8 @@ int main() {
     }
     {
         // The same, but the player walks out from under it once it starts.
-        Run run = troll_arena(100 + T.width + 4);
+        const auto run_owner = troll_arena(100 + T.width + 4);
+        Run& run = *run_owner;
         bool started = false, landed = false;
         int hurt = 0, slams = 0, hurt_events = 0;
         for (int i = 0; i < 300 && !landed; ++i) {
@@ -820,7 +826,8 @@ int main() {
     }
     {
         // Both arms shot off: it has nothing to slam with.
-        Run run = troll_arena(100 + T.width + 4);
+        const auto run_owner = troll_arena(100 + T.width + 4);
+        Run& run = *run_owner;
         Enemy& e = run.enemies[0];
         for (int y = TA.arm_top; y < TA.h; y += 2)
             for (int x = 0; x < TA.w; x += 2)
@@ -833,7 +840,8 @@ int main() {
     {
         // T at the cursor: the troll stands on the cursor rather than centring on
         // it, so pointing at the ground spawns one standing there.
-        Run run = troll_arena(10);
+        const auto run_owner = troll_arena(10);
+        Run& run = *run_owner;
         run.enemies[0] = Enemy{};
         Input in;
         in.command = Command::spawn(species::TROLL);
@@ -939,7 +947,8 @@ int main() {
     {
         // A troll's slam: the club goes up over its head in the wind-up and is
         // forward of the body when the blow lands, and every pose is sound.
-        Run run = troll_arena(100 + T.width + 4);
+        const auto run_owner = troll_arena(100 + T.width + 4);
+        Run& run = *run_owner;
         bool sound = true, overhead = false, forward_at_impact = false;
         std::string why;
         // The club's head: the bottom of the leading arm.

@@ -13,6 +13,7 @@
 #include "test_util.h"
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -149,7 +150,8 @@ void test_start() {
     const scene_list::SceneDef def = terrain_def();
 
     {
-        Run run(10, 10, 1);
+        const auto run_owner = std::make_unique<Run>(10, 10, 1);
+        Run& run = *run_owner;
         const level::Report r = level::start(run, def, sc, level_list::LevelDef{}, 7);
         check("start: the world takes the art's size",
               r.world_w == 400 && r.world_h == 200 && run.grid.get_width() == 400);
@@ -174,7 +176,8 @@ void test_start() {
     lv.enemies.push_back(level_list::EnemyDef{"ghoul", 120.0f, 4});
     lv.enemies.push_back(level_list::EnemyDef{"ghoul", 1000.0f, 5});  // off the world
 
-    Run run(10, 10, 1);
+    const auto run_owner = std::make_unique<Run>(10, 10, 1);
+    Run& run = *run_owner;
     const level::Report r = level::start(run, def, sc, lv, 7);
     check("start: an authored player column is the body's centre",
           run.player.center_x() == 50 && r.player_standing);
@@ -202,7 +205,8 @@ void test_start() {
 
     // Restarting is the same call, and must be the same world -- that is the
     // whole claim a recording's start fingerprint relies on.
-    Run again(10, 10, 1);
+    const auto again_owner = std::make_unique<Run>(10, 10, 1);
+    Run& again = *again_owner;
     level::start(again, def, sc, lv, 7);
     check("start: the same inputs build the same world",
           input_log::fingerprint(again) == input_log::fingerprint(run) &&
@@ -226,7 +230,8 @@ void test_shipped_scenes() {
         const level_files::Loaded loaded = level_files::load(def, "assets/", level::is_species);
         check(("shipped: '" + def.name + "' loads without errors").c_str(), loaded.errors.empty(),
               loaded.errors.empty() ? "" : loaded.errors.front());
-        Run run(10, 10, 1);
+        const auto run_owner = std::make_unique<Run>(10, 10, 1);
+        Run& run = *run_owner;
         const level::Report r = level::start(run, def, loaded.scene, loaded.level, 1);
         if (def.declared_empty()) continue;
         check(("shipped: '" + def.name + "' has an objective, so it can be won").c_str(),

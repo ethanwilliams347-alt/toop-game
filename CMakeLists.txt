@@ -29,12 +29,13 @@ if(MSVC)
 endif()
 
 # The enemy art is checked at compile time -- every pixel connected to the
-# heart, every row the right width (src/physics/body_art.h) -- and the troll's
-# 52x70 frame makes that the largest constant expression in the build. MSVC
-# stops evaluating a constant expression after 100,000 steps by default, well
-# short of a flood fill over 3,640 pixels, and reports the static_assert as "not
-# a constant expression" rather than as the art being wrong. GCC and Clang's
-# defaults are far higher. Set after SDL so it applies to this project only.
+# heart, every row the right width (src/physics/body_art.h) -- and the fish's
+# 94x84 frame (src/physics/fish_art.h), the largest of any species, makes that
+# the largest constant expression in the build. MSVC stops evaluating a constant
+# expression after 100,000 steps by default, well short of a flood fill over
+# 7,896 pixels, and reports the static_assert as "not a constant expression"
+# rather than as the art being wrong. GCC and Clang's defaults are far higher.
+# Set after SDL so it applies to this project only.
 if(MSVC)
     add_compile_options(/constexpr:steps10000000)
 endif()
@@ -47,19 +48,13 @@ endif()
 # Placed after SDL is fetched so only our code is instrumented. MSVC's ASan
 # rejects incremental linking and /RTC, so the asan recipe uses RelWithDebInfo
 # (no /RTC) with incremental linking off, which still has line numbers in reports.
-#
-# /STACK because ASan gives every local its own stack slot, wrapped in red zones,
-# so that it can catch a use after the local's scope has ended. An optimised
-# build lets locals in disjoint scopes share one slot instead. A Run is about
-# 108 KB, and run_test's main() holds fourteen of them in separate blocks: three
-# at once at most in Release, all fourteen side by side under ASan -- over 1.5 MB
-# against Windows' default 1 MB stack, a stack overflow before the first check.
-# 8 MB is the default stack on Linux, which is where ASan's habits come from.
+# Tests keep their Runs on the heap rather than this build raising the stack
+# limit; tests/test_enemy.cpp says why.
 option(SLOP_ASAN "Build with AddressSanitizer" OFF)
 if(SLOP_ASAN)
     if(MSVC)
         add_compile_options(/fsanitize=address /Zi)
-        add_link_options(/INCREMENTAL:NO /DEBUG /STACK:8388608)
+        add_link_options(/INCREMENTAL:NO /DEBUG)
     else()
         add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
         add_link_options(-fsanitize=address)
