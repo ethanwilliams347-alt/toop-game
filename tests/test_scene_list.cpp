@@ -11,6 +11,7 @@
 #include "scene/scene_list.h"
 #include "game/camera.h"
 #include "test_util.h"
+#include "util/text_record.h"
 
 #include <cstdio>
 #include <fstream>
@@ -113,101 +114,157 @@ int main() {
     }
     {
         const Result r = parse(std::string(GOOD) + "extra - - - floor sixth\n");
-        check("a sixth field that is not a mode is an error, not something to ignore",
+        check("a sixth field that is not key=value is an error, not something to ignore",
               r.rejected(), r.error);
     }
 
-    // --- the optional columns ----------------------------------------------
+    // --- the named fields --------------------------------------------------
     //
     // The thing being tested here is that "optional" did not become "tolerant". The
-    // required fields are all-or-nothing and the optional ones are absent-or-exact;
+    // required fields are all-or-nothing and the named ones are absent-or-exact;
     // a parser that fell back to the default on an unreadable mode or a lone width
     // would produce a world of the wrong size that loads and says nothing.
     {
         const Result r = parse("plain - - - floor\n");
-        check("a row written before the mode column existed is fixed",
+        check("a row that names no mode is fixed",
               r.scenes.size() == 1 && !r.scenes[0].is_unclamped(), r.error);
         check("and states no size, rather than inventing one",
               r.scenes.size() == 1 && r.scenes[0].custom_width == 0 &&
               r.scenes[0].custom_height == 0);
     }
     {
-        const Result r = parse("far - - - floor unclamped\n");
+        const Result r = parse("far - - - floor mode=unclamped\n");
         check("a mode with no size parses",
               r.scenes.size() == 1 && r.scenes[0].is_unclamped() && r.scenes[0].custom_width == 0,
               r.error);
     }
     {
+        const Result r = parse("far - - - floor mode=fixed\n");
+        check("mode=fixed is the default stated",
+              r.scenes.size() == 1 && !r.scenes[0].is_unclamped(), r.error);
+    }
+    {
         // The old spelling is refused rather than accepted as a synonym, with a
         // message that says what it became: the mode never made a world infinite.
-        const Result r = parse("far - - - floor infinite\n");
+        const Result r = parse("far - - - floor mode=infinite\n");
         check("the old `infinite` spelling is refused, naming its replacement",
               r.rejected() && r.error.find("unclamped") != std::string::npos, r.error);
     }
     {
-        const Result r = parse("big test_material.bmp test_albedo.bmp - terrain fixed 3840 1440\n");
+        const Result r =
+            parse("big test_material.bmp test_albedo.bmp - terrain mode=fixed size=3840x1440\n");
         check("a fixed row carries its own world size",
               r.scenes.size() == 1 && !r.scenes[0].is_unclamped() &&
                   r.scenes[0].custom_width == 3840 && r.scenes[0].custom_height == 1440,
               r.error);
     }
     {
-        const Result r = parse("half - - - floor fixed 3840\n");
-        check("a width with no height is refused, because half a size is not a size",
-              r.rejected(), r.error);
+        const Result r = parse("any - - - floor scale=10 size=344x144 mode=unclamped\n");
+        check("named fields read the same in any order",
+              r.scenes.size() == 1 && r.scenes[0].is_unclamped() &&
+                  r.scenes[0].custom_width == 344 && r.scenes[0].custom_height == 144 &&
+                  r.scenes[0].scale == 10,
+              r.error);
     }
     {
-        const Result r = parse("odd - - - floor sideways 100 100\n");
+        const Result r = parse("scaleonly - - - floor scale=10\n");
+        check("a scale needs no size now that it is named",
+              r.scenes.size() == 1 && r.scenes[0].scale == 10 && r.scenes[0].custom_width == 0,
+              r.error);
+    }
+    {
+        // Each one is half a size, a size of no cells, or a size that is not a
+        // number. Every one is refused, never read as part of a size.
+        const char* bad[] = {"3840",      "3840x",    "x1440",   "0x100",   "100x0",      "-8x100",
+                             "widextall", "10x10x10", "1e3x100", "+10x100", "1000000x100"};
+        for (const char* size : bad) {
+            const Result r = parse(std::string("bad - - - floor size=") + size + "\n");
+            check((std::string("size= refuses '") + size + "'").c_str(),
+                  r.rejected() && r.error.find("not a usable world size") != std::string::npos,
+                  r.error);
+        }
+    }
+    {
+        const Result r = parse("odd - - - floor mode=sideways\n");
         check("an unknown mode is refused rather than defaulted", r.rejected(), r.error);
     }
     {
-        const Result r = parse("zero - - - floor fixed 0 100\n");
-        check("a world of no cells is refused", r.rejected(), r.error);
+        const Result r = parse("twice - - - floor mode=fixed mode=unclamped\n");
+        check("a named field given twice is refused", r.rejected(), r.error);
     }
     {
-        const Result r = parse("neg - - - floor fixed -8 100\n");
-        check("and so is a negative one", r.rejected(), r.error);
+        const Result r = parse("twice - - - floor size=10x10 size=20x20\n");
+        check("...size= too", r.rejected(), r.error);
     }
     {
-        const Result r = parse("wordy - - - floor fixed wide tall\n");
-        check("a size that is not a number is refused", r.rejected(), r.error);
+        const Result r = parse("twice - - - floor scale=4 scale=4\n");
+        check("...and scale=, even agreeing with itself", r.rejected(), r.error);
     }
     {
-        const Result r = parse("toomuch - - - floor fixed 100 100 extra\n");
-        check("a ninth field that is not a scale is an error", r.rejected(), r.error);
-    }
-    {
-        const Result r = parse("toomuch2 - - - floor fixed 100 100 8 extra\n");
-        check("a tenth field is still an error", r.rejected(), r.error);
+        const Result r = parse("colour - - - floor tint=red\n");
+        check("an unknown key= is refused",
+              r.rejected() && r.error.find("tint=") != std::string::npos, r.error);
     }
 
-    // --- the scale column ---------------------------------------------
+    // --- the positional tail, which this format no longer has ---------------
     //
-    // The same absent-or-exact rule as the two columns above, plus one check that
-    // the default the header states really is the camera's: SceneDef spells the
-    // number itself rather than including src/game/camera.h, and that duplication is
-    // only safe while something pins the two together.
+    // A row written before the fields were named still has its mode, size and
+    // scale in it, and would mean something to whoever wrote it. It costs the whole
+    // file, like any other malformed row, and the message gives the new spelling so
+    // fixing it does not need the header.
     {
-        const Result r = parse("noscale - - - floor fixed 100 100\n");
+        const Result r = parse(std::string(GOOD) + "old - - - floor unclamped 1920 1080\n");
+        check("an old positional mode rejects the whole file", r.rejected(), r.error);
+        check("...at its line", r.error.find(":4:") != std::string::npos, r.error);
+        check("...naming the field and its named spelling",
+              r.error.find("'unclamped' is a positional field") != std::string::npos &&
+                  r.error.find("mode=unclamped size=1920x1080 scale=10") != std::string::npos,
+              r.error);
+    }
+    {
+        const Result r = parse("old test_material.bmp test_albedo.bmp - terrain fixed 344 144 10 "
+                               "backdrop=bg1\n");
+        check("so does a fixed one with a size, a scale and a named field after them",
+              r.rejected() && r.error.find("positional") != std::string::npos, r.error);
+    }
+    {
+        const Result r = parse("old - - - floor mode=fixed 344 144\n");
+        check("...and a bare size after a named mode",
+              r.rejected() && r.error.find("'344' is a positional field") != std::string::npos,
+              r.error);
+    }
+
+    // --- the scale ----------------------------------------------------
+    //
+    // The same absent-or-exact rule as the fields above, plus one check that the
+    // default the header states really is the camera's: SceneDef spells the number
+    // itself rather than including src/game/camera.h, and that duplication is only
+    // safe while something pins the two together.
+    {
+        const Result r = parse("noscale - - - floor size=100x100\n");
         check("a row that states no scale gets the engine default",
               r.scenes.size() == 1 && r.scenes[0].scale == Camera::DEFAULT_SCALE, r.error);
     }
     {
-        const Result r = parse("scaled - - - floor fixed 344 144 10\n");
+        const Result r = parse("scaled - - - floor size=344x144 scale=10\n");
         check("a stated scale is read",
               r.scenes.size() == 1 && r.scenes[0].scale == 10, r.error);
     }
     {
-        const Result r = parse("zeroscale - - - floor fixed 100 100 0\n");
+        const Result r = parse("zeroscale - - - floor scale=0\n");
         check("a scale of zero is refused, not defaulted", r.rejected(), r.error);
     }
     {
-        const Result r = parse("bigscale - - - floor fixed 100 100 65\n");
+        const Result r = parse("bigscale - - - floor scale=65\n");
         check("a scale past the cap is refused", r.rejected(), r.error);
     }
     {
-        const Result r = parse("wordscale - - - floor fixed 100 100 huge\n");
+        const Result r = parse("wordscale - - - floor scale=huge\n");
         check("a scale that is not a number is refused", r.rejected(), r.error);
+    }
+    {
+        const Result r = parse("unitscale - - - floor scale=10px\n");
+        check("a scale with a unit on it is refused, not read as 10", r.rejected(), r.error);
     }
     {
         const Result r = parse("fixture - - - floor\nfixture - - - floor\n");
@@ -232,11 +289,22 @@ int main() {
     //
     // The prop list learned this one; a scene list reaches the filesystem the same
     // way and gets the same refusal.
-    check("a bare stem is a usable name", scene_list::scene_name_ok("test_material"));
-    check("a forward slash is not", !scene_list::scene_name_ok("wip/draft"));
-    check("a backslash is not", !scene_list::scene_name_ok("wip" "\\" "draft"));
-    check("a parent reference is not", !scene_list::scene_name_ok(".."));
-    check("an empty name is not", !scene_list::scene_name_ok(""));
+    //
+    // text_record::name_ok is the one check behind every name in assets/ -- scene
+    // names, prop sprites, the sprite manifest's files, backdrop layers -- so its
+    // two forms are pinned here, once.
+    check("a bare stem is a usable name", text_record::name_ok("test_material"));
+    check("a forward slash is not", !text_record::name_ok("wip/draft"));
+    check("a backslash is not", !text_record::name_ok("wip"
+                                                      "\\"
+                                                      "draft"));
+    check("a parent reference is not", !text_record::name_ok(".."));
+    check("an empty name is not", !text_record::name_ok(""));
+    check("a dot is not part of a stem", !text_record::name_ok("a.bmp"));
+    check("but is part of a filename", text_record::name_ok("a.bmp", true));
+    check("a parent reference is still not, with dots allowed",
+          !text_record::name_ok("..", true) && !text_record::name_ok("a..bmp", true));
+    check("nor a separator", !text_record::name_ok("wip/a.bmp", true));
     {
         const Result r = parse("bad ../secret.bmp ../secret.bmp - floor\n");
         check("and a row that tries it is refused", r.rejected(), r.error);

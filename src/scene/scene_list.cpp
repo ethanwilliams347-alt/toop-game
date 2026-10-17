@@ -2,22 +2,11 @@
 
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <vector>
+#include "util/text_record.h"
 
 namespace scene_list {
-
-bool scene_name_ok(const std::string& name) {
-    if (name.empty()) return false;
-    if (name.find('/') != std::string::npos) return false;
-    if (name.find('\\') != std::string::npos) return false;
-    if (name.find("..") != std::string::npos) return false;
-    for (char c : name) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '_' || c == '-';
-        if (!ok) return false;
-    }
-    return true;
-}
 
 // The fallback main.cpp uses when assets/scenes.txt is missing or malformed, so
 // it is the guarantee that the game boots at all. It names no files, which is
@@ -56,25 +45,22 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
     int line_no = 0;
 
     auto fail = [&](const std::string& why) {
-        if (error) {
-            std::ostringstream msg;
-            msg << path << ":" << line_no << ": " << why;
-            *error = msg.str();
-        }
+        if (error) *error = text_record::at(path, line_no, why);
         scenes.clear();
         return scenes;
     };
 
-    // A filename field: `-` means none, anything else must be a safe name plus an
-    // extension. That is why this is not scene_name_ok directly -- a prop sprite is
-    // a stem and these are whole filenames, so the dot is allowed here and nowhere
-    // else.
+    // A filename field: `-` means none, anything else must be a safe stem, one dot
+    // and an extension. Stricter than text_record::name_ok's dotted form, which
+    // takes any number of dots: a scene field names one file, and "a.b.bmp" or a
+    // name with no extension is more likely a typo than a file.
     auto file_field = [&](const std::string& raw, std::string& out) -> bool {
         if (raw == "-") { out.clear(); return true; }
         const size_t dot = raw.rfind('.');
-        if (dot == std::string::npos || dot == 0 || dot + 1 >= raw.size()) return false;
-        if (!scene_name_ok(raw.substr(0, dot))) return false;
-        if (!scene_name_ok(raw.substr(dot + 1))) return false;
+        if (dot == std::string::npos) return false;
+        const std::string_view name = raw;
+        if (!text_record::name_ok(name.substr(0, dot))) return false;
+        if (!text_record::name_ok(name.substr(dot + 1))) return false;
         out = raw;
         return true;
     };
@@ -82,8 +68,7 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
     while (std::getline(in, line)) {
         ++line_no;
 
-        const size_t hash = line.find('#');
-        if (hash != std::string::npos) line.erase(hash);
+        text_record::strip_comment(line);
 
         std::istringstream fields(line);
         SceneDef def;
@@ -91,7 +76,7 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
 
         if (!(fields >> def.name)) continue;  // blank or comment-only
 
-        if (!scene_name_ok(def.name))
+        if (!text_record::name_ok(def.name))
             return fail("'" + def.name + "' is not a usable scene name "
                         "(letters, digits, _ and - only; no path separators)");
 
@@ -135,115 +120,104 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
 
         // --- named fields ----------------------------------------------------
         //
-        // `key=value`, anywhere after the five required fields. Named rather than
-        // positional because the positional tail is already three optional fields
-        // deep, and a fourth would make every row that wants it spell out a mode,
-        // a size and a scale it does not care about. Pulled out first so the
-        // positional reading below sees exactly what it always did.
-        {
-            std::string rest, token;
-            std::vector<std::string> positional;
-            while (fields >> token) {
-                const size_t eq = token.find('=');
-                if (eq == std::string::npos) {
-                    positional.push_back(token);
-                    continue;
-                }
-                const std::string key = token.substr(0, eq);
-                const std::string value = token.substr(eq + 1);
-                if (key == "level") {
-                    if (!def.level.empty())
-                        return fail("scene '" + def.name + "' names `level=` twice");
-                    if (!file_field(value, def.level) || def.level.empty())
-                        return fail("'" + value + "' is not a usable level file name");
-                } else if (key == "backdrop") {
-                    // A directory under assets/ holding backdrop.txt and its
-                    // layers (render/backdrop_set.h). A bare name, so a scene
-                    // cannot point outside assets/.
-                    if (!def.backdrop.empty())
-                        return fail("scene '" + def.name + "' names `backdrop=` twice");
-                    if (value.empty() || !scene_name_ok(value))
-                        return fail("'" + value +
-                                    "' is not a usable backdrop directory "
-                                    "(a bare name under assets/)");
-                    def.backdrop = value;
-                } else {
-                    return fail("'" + key + "=' is not a scene field (level, backdrop)");
-                }
-            }
-            for (const std::string& p : positional) rest += p + " ";
-            fields = std::istringstream(rest);
-        }
-
-        // --- the optional trailing fields ------------------------------------
+        // Everything after the five required fields is `key=value`, in any order,
+        // each key at most once. Named rather than positional because every one of
+        // them is optional: a positional tail had to be read in order, so a row that
+        // wanted a scale spelled out a mode and a size it did not care about, and
+        // `... unclamped 10` could not be told from a width of 10.
         //
         // Optional, and still read. A field the loader ignores is one an author
         // eventually tunes for nothing; an absent field is a different thing, and
-        // the two are kept apart by refusing every spelling that is neither. A
-        // sixth token that is not a mode is an error, and a seventh that arrives
-        // without an eighth is an error, rather than either being skipped back to
-        // the default.
-        std::string mode;
-        if (fields >> mode) {
-            if (mode == "fixed") def.mode = SceneMode::Fixed;
-            else if (mode == "unclamped")
-                def.mode = SceneMode::Unclamped;
-            else if (mode == "infinite")
-                return fail("`infinite` is now `unclamped`: the mode only lets the camera "
-                            "scroll past the world's side edges, and the world stays finite");
-            else
-                return fail("'" + mode + "' is not a scene mode (fixed or unclamped)");
-
-            // The size is a pair or it is absent. Half a size is not a size, and
-            // accepting one gives a world as wide as the author said and as tall
-            // as the engine guessed.
-            std::string w_raw, h_raw;
-            if (fields >> w_raw) {
-                if (!(fields >> h_raw))
-                    return fail("scene '" + def.name +
-                                "' gives a width with no height; state both or neither");
-
-                // Accumulated by hand rather than through std::stoi, because the build
-                // compiles with exceptions off and stoi's failure mode is a throw. Six
-                // digits is the cap, which cannot overflow an int.
-                auto positive_int = [](const std::string& raw, int& out) -> bool {
-                    if (raw.empty() || raw.size() > 6) return false;
-                    int v = 0;
-                    for (char c : raw) {
-                        if (c < '0' || c > '9') return false;
-                        v = v * 10 + (c - '0');
-                    }
-                    if (v <= 0) return false;
-                    out = v;
-                    return true;
-                };
-
-                if (!positive_int(w_raw, def.custom_width))
-                    return fail("'" + w_raw + "' is not a usable world width");
-                if (!positive_int(h_raw, def.custom_height))
-                    return fail("'" + h_raw + "' is not a usable world height");
-
-                // Nested inside the size on purpose. These fields are positional, so a
-                // row reading `... unclamped 10` cannot be told from one meaning a width
-                // of 10; the only unambiguous place a scale can sit is after a size that
-                // is already stated. A row wanting a scale therefore states its size
-                // too, which every row that would want one already does.
+        // the two are kept apart by refusing every spelling that is neither.
+        bool seen_mode = false, seen_size = false, seen_scale = false;
+        auto first_time = [](bool& seen) {
+            const bool first = !seen;
+            seen = true;
+            return first;
+        };
+        std::string token;
+        while (fields >> token) {
+            const size_t eq = token.find('=');
+            if (eq == std::string::npos) {
+                // The positional tail this format had until the fields were named.
+                // Refused with the spelling that replaced it, rather than with a
+                // bare "unexpected field" that leaves the author to work out why a
+                // row that used to load no longer does.
+                if (token == "fixed" || token == "unclamped" || token == "infinite" ||
+                    (token[0] >= '0' && token[0] <= '9'))
+                    return fail("'" + token +
+                                "' is a positional field; mode, size and scale are named "
+                                "now, as in mode=unclamped size=1920x1080 scale=10");
+                return fail("unexpected field '" + token +
+                            "' (after the five required fields, every field is key=value)");
+            }
+            const std::string key = token.substr(0, eq);
+            const std::string value = token.substr(eq + 1);
+            if (key == "level") {
+                if (!def.level.empty())
+                    return fail("scene '" + def.name + "' names `level=` twice");
+                if (!file_field(value, def.level) || def.level.empty())
+                    return fail("'" + value + "' is not a usable level file name");
+            } else if (key == "backdrop") {
+                // A directory under assets/ holding backdrop.txt and its layers
+                // (render/backdrop_set.h). A bare name, so a scene cannot point
+                // outside assets/.
+                if (!def.backdrop.empty())
+                    return fail("scene '" + def.name + "' names `backdrop=` twice");
+                if (!text_record::name_ok(value))
+                    return fail("'" + value +
+                                "' is not a usable backdrop directory "
+                                "(a bare name under assets/)");
+                def.backdrop = value;
+            } else if (key == "mode") {
+                if (!first_time(seen_mode))
+                    return fail("scene '" + def.name + "' names `mode=` twice");
+                if (value == "fixed")
+                    def.mode = SceneMode::Fixed;
+                else if (value == "unclamped")
+                    def.mode = SceneMode::Unclamped;
+                else if (value == "infinite")
+                    return fail("`infinite` is now `unclamped`: the mode only lets the camera "
+                                "scroll past the world's side edges, and the world stays finite");
+                else
+                    return fail("'" + value + "' is not a scene mode (fixed or unclamped)");
+            } else if (key == "size") {
+                // One field for both sides, so a size is a pair or it is absent.
+                // Half a size is not a size, and accepting one gives a world as wide
+                // as the author said and as tall as the engine guessed.
                 //
-                // The cap is 64 rather than unbounded because this multiplies into every
-                // screen coordinate in the renderer, and a typo of 1000 is a
+                // The six-digit cap is the one the hand-written reader this replaced
+                // had. Nothing downstream bounds a world, so a stray extra digit or
+                // two is refused here rather than allocated.
+                if (!first_time(seen_size))
+                    return fail("scene '" + def.name + "' names `size=` twice");
+                const std::string_view v = value;
+                const size_t x = v.find('x');
+                int w = 0, h = 0;
+                if (x == std::string_view::npos || !text_record::whole(v.substr(0, x), w) ||
+                    !text_record::whole(v.substr(x + 1), h) || w <= 0 || h <= 0 || w > 999999 ||
+                    h > 999999)
+                    return fail("size='" + value +
+                                "' is not a usable world size (WIDTHxHEIGHT in cells, like "
+                                "1920x1080)");
+                def.custom_width = w;
+                def.custom_height = h;
+            } else if (key == "scale") {
+                // The cap is 64 rather than unbounded because this multiplies into
+                // every screen coordinate in the renderer, and a typo of 1000 is a
                 // window-sized cell rather than a diagnosable error.
-                std::string scale_raw;
-                if (fields >> scale_raw) {
-                    if (!positive_int(scale_raw, def.scale) || def.scale > 64)
-                        return fail("'" + scale_raw +
-                                    "' is not a usable screen scale (1 to 64 pixels per cell)");
-                }
+                if (!first_time(seen_scale))
+                    return fail("scene '" + def.name + "' names `scale=` twice");
+                int scale = 0;
+                if (!text_record::whole(value, scale) || scale < 1 || scale > 64)
+                    return fail("scale='" + value +
+                                "' is not a usable screen scale (1 to 64 pixels per cell)");
+                def.scale = scale;
+            } else {
+                return fail("'" + key +
+                            "=' is not a scene field (mode, size, scale, level, backdrop)");
             }
         }
-
-        std::string extra;
-        if (fields >> extra)
-            return fail("unexpected extra field '" + extra + "'");
 
         scenes.push_back(def);
     }

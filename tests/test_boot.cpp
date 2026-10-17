@@ -426,7 +426,7 @@ void test_scene_resolve() {
         inf.mode = scene_list::SceneMode::Unclamped;
         check("resolve: the mode column is carried through, fixed",
               !scene_activation::resolve(def, 0, 0, 1920, 1080, 4).unclamped);
-        check("resolve: the mode column is carried through, unclamped",
+        check("resolve: the mode field is carried through, unclamped",
               scene_activation::resolve(inf, 0, 0, 1920, 1080, 4).unclamped);
     }
 

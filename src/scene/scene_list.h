@@ -12,32 +12,43 @@
 //
 // Format, one record per line, `#` to end-of-line is a comment:
 //
-//     # name    material           albedo            props           spawn    mode      w     h    scale
-//     fixture    test_material.bmp  test_albedo.bmp   test_props.txt  terrain
-//     empty      -                  -                 -               floor    unclamped 1920  1080
-//     bg1        bg1_material.bmp   bg1_albedo.bmp    -               terrain  fixed      344   144  10
+//     # name    material           albedo            props           spawn    named fields
+//     fixture   test_material.bmp  test_albedo.bmp   test_props.txt  terrain
+//     empty     -                  -                 -               floor    mode=unclamped size=1920x1080
+//     bg1       bg1_material.bmp   bg1_albedo.bmp    -               terrain  size=344x144 scale=10 backdrop=bg1
 //
-// Five fields required, `-` meaning none for the three filenames. Blank lines
-// are fine. Anything else is an error with a line number, never a silently
-// skipped row.
+// Five positional fields, all required, `-` meaning none for the three
+// filenames. Blank lines are fine. Anything else is an error with a line number,
+// never a silently skipped row.
 //
-// Three optional fields follow: `mode`, then `width` and `height` together. An
-// omitted field is not an ignored one -- it is a row that made no claim, and the
-// default it falls back to is stated at the field. `mode` is `fixed` (a bounded
-// world with solid borders and non-repeating backdrops) or `unclamped` (the
-// camera may scroll past the world's left and right edges, over tiling
-// backdrops), defaulting to `fixed`. Unclamped is not infinite: the grid is
-// still the stated size and its borders are still solid, so the body stops at
-// them -- only the view goes further.
-// `width height` must appear as a pair, since half a size is not a size; omitted
-// they mean derive it from the material BMP's own dimensions, or the engine
-// default when the scene names no BMP.
+// Everything after the five is a named field, `key=value`, in any order and each
+// at most once. An omitted field is not an ignored one -- it is a row that made
+// no claim, and the default it falls back to is stated here:
 //
-// Named fields, `key=value`, may follow anywhere after the five required ones:
-//
+//     mode=<mode>      `fixed` (the default) is a bounded world with solid
+//                      borders and non-repeating backdrops; `unclamped` lets the
+//                      camera scroll past the world's left and right edges, over
+//                      tiling backdrops. Unclamped is not infinite: the grid is
+//                      still the stated size and its borders are still solid, so
+//                      the body stops at them -- only the view goes further.
+//     size=<W>x<H>     the world in cells. One field, so it is a pair or absent;
+//                      absent means derive it from the material BMP's own
+//                      dimensions, or the engine default when the scene names no
+//                      BMP.
+//     scale=<N>        screen pixels per cell, 1 to 64; Camera::DEFAULT_SCALE when
+//                      absent.
 //     level=<file>     the level file (scene/level_list.h), resolved under assets/
 //     backdrop=<dir>   the backdrop drawn behind it: assets/<dir>/backdrop.txt
 //                      (render/backdrop_set.h). Without one, the clear colour.
+//
+// Mode, size and scale were positional until they were named, and a row still
+// written that way (`... floor unclamped 1920 1080`) is refused with the named
+// spelling in the message rather than read.
+//
+// Names and filenames are text_record::name_ok (util/text_record.h): letters,
+// digits, `_` and `-`, plus one dot before a filename's extension. Nothing else,
+// so no path separator and no `..`, and a scene list can never reach outside
+// assets/.
 //
 // Every field is read, which is why there is no `seed` column and no x/y spawn
 // column: a number the loader ignores is one an author eventually spends an
@@ -134,12 +145,6 @@ struct SceneDef {
 // otherwise silent: a duplicate name, which makes "switch to X" ambiguous, and
 // an empty list from a file that existed but held only comments.
 std::vector<SceneDef> load_scene_list(const std::string& path, std::string* error = nullptr);
-
-// True if `name` is something this loader will turn into a path or a scene name.
-// Rejects empty names, path separators and `..`, so a scene list can never reach
-// outside assets/. Exposed for the test, which is the only reason it is not
-// static.
-bool scene_name_ok(const std::string& name);
 
 // The list main.cpp uses when assets/scenes.txt is absent. Here rather than in
 // main.cpp so the fallback is testable, and so that "the file is missing" and

@@ -360,11 +360,12 @@ if(BUILD_TESTING)
 
     # The sprite manifest. Links the same parser-only set for the same reason:
     # it turns a text file into a list of records, knows no SDL, and nothing in
-    # the simulation may read it.
+    # the simulation may read it. From the source tree, so its last check can
+    # parse the shipped assets/sprites.txt.
     add_executable(sprites_test tests/test_sprites.cpp)
     target_include_directories(sprites_test PRIVATE src tests)
     target_link_libraries(sprites_test PRIVATE slop_scene_props)
-    add_test(NAME sprites_test COMMAND sprites_test)
+    add_test(NAME sprites_test COMMAND sprites_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The wrapping backdrop arithmetic. Links no source set at all -- the
     # narrowest link line in the project, because src/render/backdrop_wrap.h is

@@ -2,20 +2,7 @@
 
 #include <fstream>
 #include <sstream>
-#include "scene/number.h"
-
-bool prop_sprite_name_ok(const std::string& sprite) {
-    if (sprite.empty()) return false;
-    if (sprite.find('/') != std::string::npos) return false;
-    if (sprite.find('\\') != std::string::npos) return false;
-    if (sprite.find("..") != std::string::npos) return false;
-    for (char c : sprite) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '_' || c == '-';
-        if (!ok) return false;
-    }
-    return true;
-}
+#include "util/text_record.h"
 
 std::vector<PropDef> load_prop_list(const std::string& path, std::string* error) {
     std::vector<PropDef> props;
@@ -30,11 +17,7 @@ std::vector<PropDef> load_prop_list(const std::string& path, std::string* error)
     int line_no = 0;
 
     auto fail = [&](const std::string& why) {
-        if (error) {
-            std::ostringstream msg;
-            msg << path << ":" << line_no << ": " << why;
-            *error = msg.str();
-        }
+        if (error) *error = text_record::at(path, line_no, why);
         props.clear();
         return props;
     };
@@ -42,16 +25,14 @@ std::vector<PropDef> load_prop_list(const std::string& path, std::string* error)
     while (std::getline(in, line)) {
         ++line_no;
 
-        // Comments are stripped before anything else, so a `#` can follow a record
-        // on the same line.
-        const size_t hash = line.find('#');
-        if (hash != std::string::npos) line.erase(hash);
+        text_record::strip_comment(line);
 
         std::istringstream fields(line);
         std::string sprite;
         if (!(fields >> sprite)) continue;  // blank or comment-only
 
-        if (!prop_sprite_name_ok(sprite))
+        // A stem, not a filename: the loader adds the .bmp.
+        if (!text_record::name_ok(sprite))
             return fail("'" + sprite + "' is not a usable sprite name "
                         "(letters, digits, _ and - only; no path separators)");
 
@@ -61,7 +42,7 @@ std::vector<PropDef> load_prop_list(const std::string& path, std::string* error)
         std::string x_raw;
         if (!(fields >> x_raw)) return fail("'" + sprite + "' has no x coordinate");
         float x = 0.0f;
-        if (!number::decimal(x_raw, x)) {
+        if (!text_record::decimal(x_raw, x)) {
             std::string why = "'" + sprite + "' has an x of '";
             why += x_raw;
             why += "', which is not a number (plain decimal, like 145 or 187.5)";

@@ -17,7 +17,7 @@
 // its contents written down.
 //
 // Like props, nothing has an authored y. Every record is a column -- a whole,
-// non-negative number of cells, read by scene/number.h -- and the thing is stood
+// non-negative number of cells, read by text_record::whole -- and the thing is stood
 // on the terrain actually under it when the level starts (game/level.cpp). A y in the file would be a number the loader ignores once
 // someone digs the ground away, and a number the loader ignores is one an author
 // eventually spends an afternoon tuning.

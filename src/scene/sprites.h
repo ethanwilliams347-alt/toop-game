@@ -64,9 +64,10 @@ inline constexpr const char* PLAYER_SHEET_FILE = "player_sheet.bmp";
 //
 //     <key> <file.bmp> [<frame_w> <frame_h>]
 //
+// `file` is a bare filename in assets/ (text_record::name_ok with the dot
+// allowed): no path separators, no `..`. The frame size is two whole numbers or
+// absent, and nothing may follow it.
+//
 // A missing file yields an empty manifest and leaves `error` untouched, which is
 // how a caller tells "no manifest" apart from "a manifest that is wrong".
 SpriteManifest load_sprite_manifest(const std::string& path, std::string* error);
-
-// Same rules as prop sprite names: no path separators, no `..`.
-bool sprite_file_name_ok(const std::string& file);
