@@ -78,7 +78,12 @@ namespace input_log {
 // 9: water runs faster -- Grid::LIQUID_FLOW_SCALE doubled and water's spread
 //    went from 5 to 6. Element::flow means a different velocity, so a version-8
 //    log replays into a different world from the first step water moves.
-constexpr uint32_t FORMAT_VERSION = 9;
+//
+// 10: a piece whose centre of mass is below the corner it rests on tips instead
+//    of hanging there, and a tipping piece is released only once it has turned
+//    and has come clear (topple.cpp). A version-9 log replays into a different
+//    world from the first step anything tips off an edge.
+constexpr uint32_t FORMAT_VERSION = 10;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt

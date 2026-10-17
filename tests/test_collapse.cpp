@@ -684,6 +684,70 @@ int main() {
               rect_exactly_at(g, 30, 35, 32, 49, ElementType::Wood) && g.tipping_count() == 0);
     }
 
+    // --- a plank tipping off the end of a post comes down, it does not hang ---
+    // The frozen cantilever. A long plank's centre starts a cell or so above the
+    // corner it turns about and forty cells out, so it is "below the pivot" after
+    // about a degree. The release slid it one cell outward, which still left its
+    // end on a post three cells wide; support then found a piece held up with its
+    // centre below its corner, refused to tip it, and it hung there, tilted, in the
+    // air. burn_probe's plank on two posts did this whenever it burnt through.
+    {
+        Grid g(80, 40);
+        fill(g, 60, 25, 62, 39, ElementType::Wall);  // a post, top at row 25
+        fill(g, 10, 22, 62, 24, ElementType::Wood);  // 53x3, only its end on the post
+        nudge(g, 30, 21);
+
+        const int before = count_of(g, ElementType::Wood);
+        step(g, 600);
+
+        int lowest = -1;
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 80; ++x)
+                if (g.get_element(x, y).type == ElementType::Wood) lowest = y;
+        check("a plank tipping off a post swings down to the floor", lowest == 39,
+              "lowest wood row " + std::to_string(lowest) + " of 39");
+        check("and keeps every cell", count_of(g, ElementType::Wood) == before);
+        check("and comes to rest", g.tipping_count() == 0 && !g.has_pending_support_checks());
+    }
+
+    // --- a piece hooked over a ledge, with nowhere to go, is left alone ---
+    // Its centre is level with the corner it would turn about, so the first sliver
+    // of a turn reads as "below the pivot", and the release cannot slide it clear
+    // because a pillar is in the way. That used to end the turn there, unmoved, and
+    // requeue it -- so the same topple started again the next step, and every step
+    // after, each time under a new piece tag. Now it has to have turned before it
+    // is released, and it cannot turn: it is wedged and stays exactly as it is.
+    {
+        Grid g(40, 40);
+        fill(g, 0, 20, 9, 39, ElementType::Wall);    // a ledge, corner at (10, 20)
+        fill(g, 12, 20, 12, 39, ElementType::Wall);  // a pillar two cells beyond it
+        g.set_element(9, 19, ElementType::Wood);     // on the ledge
+        g.set_element(10, 19, ElementType::Wood);
+        g.set_element(10, 20, ElementType::Wood);    // against the ledge's face
+        g.set_element(11, 20, ElementType::Wood);    // against the pillar
+        nudge(g, 9, 18);
+        step(g, 120);
+
+        std::vector<Element> settled;
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 40; ++x) settled.push_back(g.get_element(x, y));
+        int changed = 0;
+        for (int s = 0; s < 120; ++s) {
+            g.update();
+            for (int y = 0, i = 0; y < 40; ++y)
+                for (int x = 0; x < 40; ++x, ++i) {
+                    const Element e = g.get_element(x, y);
+                    if (e.type != settled[i].type || e.piece_tag != settled[i].piece_tag) {
+                        ++changed;
+                        settled[i] = e;
+                    }
+                }
+        }
+        check("a wedged hook does not restart a topple every step", changed == 0,
+              std::to_string(changed) + " cell changes after it settled");
+        check("and keeps every cell", count_of(g, ElementType::Wood) == 4);
+    }
+
     // --- a piece tipping into water moves the water, it does not delete it ---
     {
         Grid g(60, 60);

@@ -829,8 +829,9 @@ private:
 
     // A tipping piece gives up and is handed back after this many steps, whatever
     // it is doing. Torque only ever grows as a piece goes over, so a real topple
-    // ends by collision or by its centre passing below the pivot long before this;
-    // the cap exists so that a case nobody thought of costs a frozen piece rather
+    // ends long before this: by collision, by coming clear of its corner once its
+    // centre is below it, or by reaching the bottom of its swing if it cannot; the
+    // cap exists so that a case nobody thought of costs a frozen piece rather
     // than one that is simulated forever.
     static constexpr int TIP_MAX_STEPS = 600;
 

@@ -178,12 +178,19 @@ bool Grid::topple_if_unbalanced(int x, int y, bool in_flight) {
     const int sy = right ? max_sy : min_sy;
     const int py = sy + 1;
 
-    // A centre of mass already below the corner it would turn about is a piece
-    // hanging from that corner, not standing on it, and turning about it would
-    // swing it up. Leave it: this is where a piece that slid off an edge and
-    // could not get clear ends up, and the alternative is a piece rotated through
-    // the floor.
-    if (sum_y2 > 2 * static_cast<int64_t>(py) * n) return false;
+    // A centre of mass already below the corner is a piece hanging from it rather
+    // than standing on it, and it tips all the same. Gravity about that corner
+    // still turns the centre down, towards hanging plumb beneath it, never up;
+    // step_tipping carries it there as a pendulum and lets it go if it comes
+    // clear. A piece that is genuinely hooked -- over a ledge, pressed against the
+    // face below -- cannot make its first move, and stays where it is, wedged.
+    //
+    // These used to be left alone, on the theory that turning them would swing
+    // them up through the floor. It cannot: tip_move checks every cell of every
+    // pose. What leaving them did do was hold them in the air at any angle with
+    // nothing but a corner under them, wherever one came to rest like that: a
+    // plank tipping off a post that could not get clear, a piece landing on a
+    // corner, fire eating the rest of a piece's footing away.
 
     const int ground_idx = py < height ? get_index(right ? max_sx : min_sx, py) : -1;
     start_tipping(px, py, ground_idx);
@@ -396,6 +403,19 @@ void Grid::step_tipping() {
         // so alpha = 2g(c*sx2 - s*sy2) / i4.
         const fx::SinCos sc = fx::sincos(b.theta);
         const int64_t lever = static_cast<int64_t>(sc.c) * b.sx2 - static_cast<int64_t>(sc.s) * b.sy2;
+
+        // Gravity now pulls against the spin: the centre of mass has swung through
+        // the bottom of its arc and is hanging straight down from the pivot. Only a
+        // body still turning below the pivot gets here (see the end of this loop);
+        // one going over the top gains lever arm the whole way down. It stops at
+        // the bottom rather than swinging up the far side, since nothing here loses
+        // energy and a pendulum would otherwise swing until TIP_MAX_STEPS froze it
+        // wherever it happened to be. Hanging plumb is balanced, so the support
+        // logic leaves it there, or drops it if it is no longer touching anything.
+        if (b.omega != 0 && lever != 0 && (lever > 0) != (b.omega > 0)) {
+            end_tipping(i, b.moved);
+            continue;
+        }
         b.omega += static_cast<fx::v>((2 * static_cast<int64_t>(TIP_GRAVITY) * lever) /
                                       (b.i4 * fx::ONE));
 
@@ -436,20 +456,73 @@ void Grid::step_tipping() {
         // onto its side, and is hanging off the corner. A real one would leave the
         // edge here, so it does: one cell outward, clear of the corner, which
         // leaves it standing on nothing and hands it to falling.
+        //
+        // Only once it has actually turned. A piece whose centre starts level with
+        // the pivot -- or a hair above it -- reads as "below" after the first sliver
+        // of a step, while every cell is still where it was. Releasing then hands
+        // back the very piece support has just judged, unchanged, and it is started
+        // again next step, for ever.
+        //
+        // And only if the cell outward really is clear: nothing in the way, and
+        // nothing left under it. A long plank tipping off the end of a post is
+        // "below" after about a degree -- its centre starts a cell or two above the
+        // corner and sixty cells out -- and one cell outward still leaves its end
+        // sitting on a post three cells wide. Released there, support found it
+        // held up, with its centre below the corner it was resting on, and left it
+        // where it was: tilted, and frozen in the air. That was the cantilever.
+        //
+        // A piece that cannot get clear is not done. It keeps turning about the
+        // corner, as a pendulum, until it hits something or reaches the bottom of
+        // its swing, trying the release again each step. The plank swings down
+        // until it meets the floor or hangs plumb beside the post with nothing
+        // under it, and either way support takes it from there.
         const fx::SinCos now = fx::sincos(b.theta);
-        if (static_cast<int64_t>(now.s) * b.sx2 + static_cast<int64_t>(now.c) * b.sy2 > 0) {
+        if (b.moved &&
+            static_cast<int64_t>(now.s) * b.sx2 + static_cast<int64_t>(now.c) * b.sy2 > 0) {
             const int dx = b.omega > 0 ? 1 : -1;
             tip_next.clear();
-            bool inside = true;
+            bool clear = true;
             for (const int idx : b.at) {
                 const int cy = idx / width;
                 const int cx = idx - cy * width + dx;
-                if (!is_within_bounds(cx, cy)) { inside = false; break; }
+                if (!is_within_bounds(cx, cy)) {
+                    clear = false;
+                    break;
+                }
                 tip_next.push_back(get_index(cx, cy));
             }
-            if (inside) tip_move(b);
-            end_tipping(i, true);
-            continue;
+
+            // Standing on nothing once it is there: no cell of the shifted pose is
+            // on the bottom of the world or on anything solid besides the body
+            // itself. Its own cells read as the body by its tag, wherever they are
+            // now, because the ones it is leaving are not there after the move.
+            if (clear) {
+                if (++tip_epoch == 0) {
+                    std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+                    tip_epoch = 1;
+                }
+                const uint8_t there = tip_epoch;
+                for (const int idx : tip_next) tip_visit[idx] = there;
+                for (const int idx : tip_next) {
+                    const int below = idx + width;
+                    if (below >= width * height) {
+                        clear = false;
+                        break;
+                    }
+                    if (tip_visit[below] == there) continue;
+                    const Element& e = cells[below];
+                    if (is_structural(e.type) && e.piece_tag == b.tag) continue;
+                    if (is_solid(e.type)) {
+                        clear = false;
+                        break;
+                    }
+                }
+            }
+
+            if (clear && tip_move(b)) {
+                end_tipping(i, true);
+                continue;
+            }
         }
 
         ++i;
