@@ -866,6 +866,9 @@ int main(int argc, char* argv[]) {
                 // A fish -- the bass -- likewise; B for bass, since F is the camera.
                 if (e.key.keysym.sym == SDLK_b && !repeat)
                     queue_command(Command::spawn(species::FISH));
+                // The angler -- the bass on tentacles; O for octopus.
+                if (e.key.keysym.sym == SDLK_o && !repeat)
+                    queue_command(Command::spawn(species::ANGLER));
                 // Enemies' animation style: continuous turn or held key poses, for
                 // comparing the two. A command for the spawn keys' reason -- the
                 // pose is where arrows hit -- and a function key for F9's. The notice

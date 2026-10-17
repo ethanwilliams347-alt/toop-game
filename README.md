@@ -228,6 +228,12 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   its eye heats, the arm goes back over its head and whips down in front for 20
   damage -- a hand, so it breaks no ground. Two shots through the shoulder take
   the arm off, and with it the attack; the eye takes two arrows, not one.
+- **Anglers** (experimental). The fish again, but its limbs are tentacles that
+  bend along their length: it walks on two octopus arms whose tips plant on the
+  ground and step in turn, and a thin lure tentacle arches out of its head with
+  a glowing bulb swaying on the end. To strike, it rears the lure back over its
+  head and whips it down in front for 20 damage. Not placed in any scene; spawn
+  one with `O`. Shoot a tentacle through and everything past the hole drops off.
 - **They are animated, and the animation is the body.** Legs stride in step
   with the ground they cover, arms swing, the body breathes, leans into a
   chase and rocks back when hit. A ghoul that has seen you reaches for you and
@@ -244,6 +250,8 @@ this pass by hand after any change to `src/physics/`, `src/game/` or
   the ground.
 - **`B`** (development tool): Spawn a fish -- the legged bass with the lure arm
   -- standing on the cursor.
+- **`O`** (development tool): Spawn an angler -- the same bass on tentacles --
+  standing on the cursor.
 - The HUD shows `FOES:` (alive) and `KILLS:`.
 
 **World (development tools)**

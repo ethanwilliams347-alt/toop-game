@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include "angler_art.h"
 #include "body_art.h"
 #include "box_body.h"
 #include "enemy_art.h"
@@ -9,6 +10,7 @@
 #include "grid.h"
 #include "player.h"
 #include "rig.h"
+#include "tentacle.h"
 #include "troll_art.h"
 
 // A body that comes apart where it is hit.
@@ -106,6 +108,12 @@ struct Species {
     // the same pixels in different places, so this changes where a body is drawn
     // and hit, never what it is made of.
     rig::Rig rig;
+
+    // Limbs that bend along their length instead of turning whole -- see
+    // tentacle.h. Each chain takes over one rig part: its pixels are placed by
+    // the chain's links, and the rig's angle for that part goes unused. Null
+    // for a species whose limbs are all rigid.
+    const tentacle::Set* tentacles = nullptr;
 
     constexpr int frame_w() const { return art->w; }
     constexpr int frame_h() const { return art->h; }
@@ -395,10 +403,134 @@ inline constexpr Species FISH{
         },
 };
 
+// The angler's tentacles: the chains its art was drawn along, and how they
+// move. The first species built on them, and an experiment in how far bending
+// limbs go toward making a body feel alive; see tentacle.h.
+inline constexpr tentacle::Set ANGLER_TENTACLES{
+    .chain = {{
+        tentacle::chain_of(rig::RearLeg, tentacle::Role::Leg, angler_art::REAR_CHAIN,
+                           angler_art::REAR_RADIUS),
+        tentacle::chain_of(rig::FrontLeg, tentacle::Role::Leg, angler_art::FRONT_CHAIN,
+                           angler_art::FRONT_RADIUS),
+        tentacle::chain_of(rig::FrontArm, tentacle::Role::Lure, angler_art::LURE_CHAIN,
+                           angler_art::LURE_RADIUS),
+    }},
+    .count = 3,
+    .motion =
+        tentacle::Motion{
+            // A slow wave, a cell and a half either side at its fullest, with
+            // about a third of a wavelength down each tentacle at once: enough
+            // that a tentacle standing still is visibly not still, not so much
+            // that a leg reads as wobbling under the weight.
+            .wave_steps = 110,
+            .wave_amplitude = fx::from_ratio(3, 2),
+            .wave_spread = rig::deg(45),
+            .iterations = 3,
+            // A quarter of the way to straight each step irons out a fold in a
+            // few steps without visibly stiffening a tentacle that is meant to
+            // curl. The bend limit is just over the sharpest joint of the
+            // lure's own hook at rest (34 degrees), so the art's pose is always
+            // one the limit allows; it is also what keeps a cell filled in at
+            // the outside of a bend within two cells of its pixel (tentacle.h).
+            .smoothing = fx::from_ratio(1, 4),
+            .max_bend = rig::deg(35),
+            .step_lift = 5,
+            .bow = fx::from_ratio(1, 3),
+            // About a third of a second to swing across to a new spot, and a
+            // little past it.
+            .lure_spring = fx::from_ratio(1, 12),
+            .lure_damp = fx::from_ratio(1, 5),
+            .lure_sway = 3,
+            .lure_reach = 10,
+            // Back over the head, high above the dorsal fin -- near the lure's
+            // full length from its root, because a tentacle drawn back short of
+            // its length has slack to fold -- and over the top forward of the
+            // snout on the way down.
+            .lure_raise = {32, -26},
+            .lure_arc = {88, -24},
+        },
+};
+
+// The angler: the fish, on tentacles. The bass body and its box, eye and heart
+// are the fish's, and so is everything about how it hunts -- the notice, the
+// chase, the cast built on the slam's rhythm. What differs is that its limbs
+// bend: it walks on two octopus arms whose tips plant on the ground and step
+// in turn, and strikes with a lure tentacle that arches out of its head, sways
+// in front of its mouth on a spring, rears back over its head in the wind-up
+// and whips over and down onto the ground in front of it.
+inline constexpr Species ANGLER{
+    .name = "angler",
+    .art = &angler_art::ART,
+    .pixel_count = angler_art::PIXEL_COUNT,
+    .width = 30,
+    .height = 66,
+    .patrol_speed = fx::from_int(18),
+    .chase_speed = fx::from_int(40),
+    .jump_speed = fx::from_int(140),
+    .max_step_height = 6,
+    .notice_x = 20 * Player::WIDTH,
+    .notice_y = 90,
+    .ledge_drop = 33,
+    .attack = Attack::Slam,
+    .damage = 20,
+    .attack_interval = 36,
+    .windup_steps = 36,
+    // Where the bulb lands past the front of the box, as the fish's hand does.
+    .reach = 18,
+    .crush_radius = 0,
+    .collapse_percent = 40,
+    .burn_pixels_per_tick = 4,
+    .wades = true,
+    .rig =
+        rig::Rig{
+            .hip_row = angler_art::HIP_ROW,
+            .leg_split = angler_art::LEG_SPLIT,
+            .neck_row = 0,
+            .waist = {47, 52},
+            .neck = {47, 0},
+            .rear_shoulder = {angler_art::SHOULDER_X, angler_art::SHOULDER_Y},
+            .front_shoulder = {angler_art::SHOULDER_X, angler_art::SHOULDER_Y},
+            .rear_hip = {38, 52},
+            .front_hip = {53, 52},
+            // A step cycle of 24 cells: each foot lands six cells ahead of where
+            // it stands at rest and is left six behind. Bounded by the first
+            // stance after standing still, which starts with the foot under the
+            // body rather than ahead and so ends twelve behind: at 32 that was
+            // past the tentacle's reach, and the foot was snapped forward.
+            .stride = 24,
+            // The legs and the lure are chains (ANGLER_TENTACLES), so the rig's
+            // swings and strike angles for them are never read. Zero, so the
+            // table does not claim a motion it does not make.
+            .leg_swing = 0,
+            .arm_swing = 0,
+            .bob = 1,
+            .chase_lean = rig::deg(5),
+            .chase_arms = 0,
+            .breathe_steps = 90,
+            .breathe = rig::deg(3),
+            .raise = 0,
+            .strike = 0,
+            // The strike: the last six steps of the wind-up, the bulb whipping
+            // from over the head to the ground in front.
+            .strike_steps = 6,
+            .windup_lean = rig::deg(-6),
+            .strike_lean = rig::deg(14),
+            .flinch_steps = 12,
+            .flinch = rig::deg(-6),
+            // The lure reared back over the head reaches about twenty cells
+            // above the frame and the strike sixty out from the shoulder; a
+            // tentacle bunched up can loop out from its root by half its
+            // length. Under the troll's 56, so the atlas slots stay the size
+            // they were.
+            .pad = 40,
+        },
+    .tentacles = &ANGLER_TENTACLES,
+};
+
 // Every species, in a fixed order. The order is an index the session log
 // records (Command::arg for SpawnEnemy), so a new species is appended, never
 // inserted: inserting would make old logs spawn the wrong body.
-inline constexpr const Species* ALL[] = {&GHOUL, &TROLL, &FISH};
+inline constexpr const Species* ALL[] = {&GHOUL, &TROLL, &FISH, &ANGLER};
 inline constexpr int COUNT = static_cast<int>(sizeof(ALL) / sizeof(ALL[0]));
 
 constexpr bool same_name(const char* a, const char* b) {
@@ -650,7 +782,61 @@ private:
     // See set_snapped_poses.
     bool snap = false;
 
+    // --- tentacles -------------------------------------------------------------
+    //
+    // One per chain of Species::tentacles, in the Set's order; unused by a
+    // species without them. The chain is the pose's memory: each step's solve
+    // starts from where the last one left it, which is what makes a tentacle
+    // trail and settle instead of snapping to its target. Where the tip is
+    // going -- a planted foot, the bulb -- is kept in the world rather than the
+    // frame, so a foot stays where it was put down however the body moves over
+    // it, and the bulb swings behind a body that turns or lunges.
+    //
+    // Snapped poses (set_snapped_poses) do not hold the chains still: a
+    // tentacle moves a cell or two a step, which never crawls the way a rigid
+    // limb turning a degree does.
+    struct Limb {
+        tentacle::Points joint{};  // the solved chain, in posed frame space
+        // The links as placed this step -- with the wave, which the remembered
+        // chain does not carry -- and the rectangle each can draw into.
+        std::array<rig::Affine, tentacle::MAX_LINKS> fwd{};
+        std::array<rig::Affine, tentacle::MAX_LINKS> bwd{};
+        std::array<rig::Box, tentacle::MAX_LINKS> box{};
+        // Backwards through each inner joint, turned halfway between the two
+        // links that meet there: what fills the notch at the outside of a bend
+        // (tentacle_pixel). Entry j - 1 is joint j.
+        std::array<rig::Affine, tentacle::MAX_LINKS> joint_bwd{};
+        rig::Point tip{};       // world fx: the foot, or the bulb
+        rig::Point vel{};       // world fx per step: the bulb's swing
+        rig::Point lift_off{};  // world fx: where a swinging foot left the ground
+        bool swinging = false;
+    };
+    std::array<Limb, tentacle::MAX_TENTACLES> limbs{};
+    // Steps into the current wave, [0, Motion::wave_steps).
+    int wave_clock = 0;
+    // The facing the chains were last solved in: on a turn they are mirrored
+    // with the frame, so they stay where they were in the world.
+    bool limbs_face_left = false;
+
+    // compute_pose, in the three pieces update() runs with the tentacles' step
+    // between: the rig's angles, then the chains (which root on the body the
+    // angles just placed), then the flattened maps and the bounds.
     void compute_pose();
+    void pose_parts();
+    void finish_pose();
+    void rest_tentacles();
+    void move_tentacles(const Grid& grid, int target_x, int target_y);
+    rig::Point leg_goal(const Grid& grid, int limb, rig::Point root);
+    rig::Point lure_goal(int limb, int target_x, int target_y);
+    void place_links(int limb, const tentacle::Points& chain);
+    int tentacle_pixel(int limb, int px, int py) const;
+    rig::Box pad_limit() const;
+    // Posed frame space to world and back, in fx, sub-cell remainder included:
+    // the body is drawn at its remainder (present::paint_enemies), so a foot
+    // held still in these coordinates is held still on screen.
+    rig::Point to_world(rig::Point frame) const;
+    rig::Point to_frame(rig::Point world) const;
+
     void advance_gait();
 
     // Frame column x lands on world column (left + W-1-x) when facing left. The
