@@ -65,6 +65,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     support_state.resize(width * height, 0);
     scratch_visit.resize(width * height, 0);
     balance_visit.resize(width * height, 0);
+    tip_visit.resize(width * height, 0);
 
     // The step loop allocates nothing in steady state: every scratch vector below
     // grows by push_back and is only ever .clear()ed, so its capacity survives
@@ -157,6 +158,8 @@ void Grid::reset(uint64_t seed) {
     std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
     balance_epoch = 0;
     balance_pass_start = 1;
+    std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+    tip_epoch = 0;
 
     frame_tag = 0;
     step_count = 0;
@@ -527,10 +530,9 @@ void Grid::settle_marks(SupportState state, int extra) {
     // way and landed would keep the speed it landed at, and digging it free a
     // minute later would have it leave at full pelt.
     //
-    // Adopting a neighbour's Moved verdict lands here too, and zeroes a piece that
-    // is genuinely still falling. That costs it its run-up, which is a visible but
-    // rare stutter -- it needs two separate pieces to touch mid-fall -- and erring
-    // towards slower is the direction every other guess in this file errs in.
+    // Only Supported. A fill that adopts a neighbour's Moved verdict is part of a
+    // piece still in the air and settles as Moved, keeping its clock (see the
+    // adoption in fall_if_unsupported).
     const bool at_rest = (state == SupportState::Supported);
 
     // Every cell this fill marked is either already filed in the component or still
@@ -558,6 +560,13 @@ void Grid::fall_if_unsupported(int x, int y) {
     // Read now, because settle_marks zeroes ticks the moment this concludes.
     const bool was_falling = cells[seed].ticks >= FRACTURE_MIN_TICKS;
     const bool was_moving = cells[seed].ticks > 0;
+
+    // Whether everything this fill has reached is the seed's own material. Kept
+    // per push rather than per cell visited, so it covers the stack as well as the
+    // trail -- a superset, which only ever errs towards asking the balance
+    // question. See the landing below for what it buys.
+    const ElementType seed_family = material_family(cells[seed].type);
+    bool one_family = true;
 
     support_stack.push_back(seed);
     support_visit[seed] = support_epoch;
@@ -599,17 +608,19 @@ void Grid::fall_if_unsupported(int x, int y) {
             // of a break are re-queued and get asked about balance on their own
             // next time round.
             //
-            // At rest, one case is skipped without asking: the fill came straight
-            // down through the seed's own material to the bottom of the world.
-            // That is terrain, or a piece standing on the world floor, and
-            // weighing it means walking it, which on a wide burning slab -- a
-            // seed queued every few cells, every step -- costs more than the
-            // fire. Crossing into another material on the way, or landing on
-            // something other than the floor, still gets asked.
-            const bool on_world_floor_alone =
-                !was_moving && cy + 1 >= height &&
-                material_family(cells[idx].type) == material_family(cells[seed].type);
-            const bool tipped = !on_world_floor_alone && topple_if_unbalanced(x, y, was_moving);
+            // At rest, one case is not asked at all: this fill came down to the
+            // bottom of the world through nothing but the seed's own material.
+            // topple_if_unbalanced would answer "standing" there anyway -- its
+            // walk follows the same material downhill and gives up the moment it
+            // reaches the world floor -- so asking would only repeat that walk,
+            // which on a wide burning slab is a seed every few cells, every step.
+            // This is that rule's cheap pre-check, not a second rule: it is
+            // keyed on every cell the fill reached, so a wooden post standing on
+            // stone that stands on the floor is still weighed. (An earlier copy
+            // looked only at the cell the fill ended on, and skipped that post.)
+            const bool down_own_material_to_floor = !was_moving && cy + 1 >= height && one_family;
+            const bool tipped =
+                !down_own_material_to_floor && topple_if_unbalanced(x, y, was_moving);
             if (!tipped && was_falling) fracture_landing(x, y);
 
             settle_marks(SupportState::Supported, idx);
@@ -655,18 +666,26 @@ void Grid::fall_if_unsupported(int x, int y) {
                     // that settled it has nearly always asked already. When it
                     // has not -- its trail crossed in from another material --
                     // the cost is a piece that stays standing, the harmless way.
-                    if (!was_moving &&
-                        static_cast<SupportState>(support_state[nidx]) == SupportState::Supported &&
+                    const auto verdict = static_cast<SupportState>(support_state[nidx]);
+                    if (!was_moving && verdict == SupportState::Supported &&
                         material_family(cells[nidx].type) != material_family(cells[seed].type)) {
                         topple_if_unbalanced(x, y, false);
                     }
-                    settle_marks(SupportState::Supported, idx);
+                    // Filed under the neighbour's own verdict, not always as held
+                    // up. A Moved neighbour is a piece still falling, and this half
+                    // is part of it from the next pass on -- the fill that runs from
+                    // the cells it requeued walks straight into this one -- so it
+                    // keeps its fall clock. Filing it Supported zeroed the clock of
+                    // a piece in mid-air, and the joined piece then fell at the
+                    // speed of a piece just come loose.
+                    settle_marks(verdict, idx);
                     return;
                 }
 
                 support_visit[nidx] = support_epoch;
                 support_state[nidx] = static_cast<uint8_t>(SupportState::Pending);
                 support_stack.push_back(nidx);
+                if (material_family(cells[nidx].type) != seed_family) one_family = false;
             }
         }
     }
@@ -1173,7 +1192,7 @@ bool Grid::vent_fluid(int fx, int fy) {
     // reach. Any-Empty reproduces the defect this was written to fix: the nearest
     // empty cell to a grain entering the water is very often the air just above the
     // sand pile, so the water is deposited back on top of the pile.
-    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::FluidDirection) ? -1 : 1;
+    const int dir = coin(static_cast<uint64_t>(idx), sim_random::Stream::VentMirror) ? -1 : 1;
 
     // The same clip expressed as offsets, in the mirrored frame: nx = fx + ox * dir,
     // and ox still runs low to high, so ties break in exactly the order they did
@@ -1204,8 +1223,9 @@ bool Grid::vent_fluid(int fx, int fy) {
         for (int ox = ox_lo; ox <= ox_hi; ++ox) {
             // `dir` mirrors the scan rather than steering it, so the choice between
             // two equally good cells either side of a grain is not always the left
-            // one. Same trick and same stream as the fluid direction pick: a fixed
-            // order here would comb every pour in one direction.
+            // one. Its own stream (VentMirror), so it is not the very coin this
+            // fluid cell's own sideways move draws: a fixed order here would comb
+            // every pour in one direction, and a shared coin would tie the two.
             const int nx = fx + ox * dir;
             if (row[nx].type != ElementType::Empty) continue;
 
@@ -1449,11 +1469,9 @@ bool Grid::emit_flame(int x, int y, const Material& mat) {
     // return does when a burning cell has no air beside it.
     if (n == 0) return false;
 
-    // Offset the index so that this draw and the yes/no draw above cannot be the
-    // same number. They are two decisions about one cell on one step, and the stream
-    // tag only separates different streams -- within one, the index is all that
-    // distinguishes them.
-    const int slot = pick(n, static_cast<uint64_t>(idx) + 0x9E3779B9ull, sim_random::Stream::Emission);
+    // Its own stream, not the yes/no draw's: two decisions about one cell on one
+    // step have to be two streams, or they are the same number.
+    const int slot = pick(n, static_cast<uint64_t>(idx), sim_random::Stream::EmissionSlot);
 
     set_element(free_x[slot], free_y[slot], mat.emits);
 

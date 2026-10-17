@@ -285,21 +285,22 @@ bool Grid::tip_move(TipBody& b) {
     // Most steps of a slow start round to the pose the body is already in.
     if (std::equal(tip_next.begin(), tip_next.end(), b.at.begin())) return true;
 
-    // Borrowing support_visit, which is free here: resolve_support() has finished
-    // for this step and starts its next pass on a fresh epoch, so nothing stamped
-    // below can be mistaken for one of its answers.
-    if (++support_epoch == 0) {
-        std::fill(support_visit.begin(), support_visit.end(), uint8_t{0});
-        support_epoch = 1;
+    // Its own marks, not the support fill's. They would be free to borrow here --
+    // resolve_support() has finished for the step -- but that is an ordering fact
+    // nothing enforces, and a borrowed array is how a later pass inserted between
+    // the two quietly reads the other's answers.
+    if (++tip_epoch == 0) {
+        std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+        tip_epoch = 1;
     }
-    const uint8_t here = support_epoch;
-    for (const int idx : b.at) support_visit[idx] = here;
+    const uint8_t here = tip_epoch;
+    for (const int idx : b.at) tip_visit[idx] = here;
 
     // Blocked by anything solid that is not the body itself. Fluids and gases are
     // not in the way: a piece tipping into a pool pushes the water aside, the
     // same way a falling one sinks through it.
     for (const int idx : tip_next) {
-        if (support_visit[idx] != here && is_solid(cells[idx].type)) return false;
+        if (tip_visit[idx] != here && is_solid(cells[idx].type)) return false;
     }
 
     tip_carry.clear();
@@ -307,16 +308,16 @@ bool Grid::tip_move(TipBody& b) {
 
     tip_displaced.clear();
     for (const int idx : tip_next) {
-        if (support_visit[idx] != here && cells[idx].type != ElementType::Empty)
+        if (tip_visit[idx] != here && cells[idx].type != ElementType::Empty)
             tip_displaced.push_back(cells[idx]);
     }
 
-    if (++support_epoch == 0) {
-        std::fill(support_visit.begin(), support_visit.end(), uint8_t{0});
-        support_epoch = 1;
+    if (++tip_epoch == 0) {
+        std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+        tip_epoch = 1;
     }
-    const uint8_t there = support_epoch;
-    for (const int idx : tip_next) support_visit[idx] = there;
+    const uint8_t there = tip_epoch;
+    for (const int idx : tip_next) tip_visit[idx] = there;
 
     const auto write = [&](int idx, Element e) {
         e.updated_tag = frame_tag;
@@ -333,7 +334,7 @@ bool Grid::tip_move(TipBody& b) {
     // most a cell at the rim, so in practice it is close.
     size_t d = 0;
     for (const int idx : b.at) {
-        if (support_visit[idx] == there) continue;
+        if (tip_visit[idx] == there) continue;
         write(idx, d < tip_displaced.size() ? tip_displaced[d++] : Element{});
 
         // Whatever was resting on this cell has just lost it.
