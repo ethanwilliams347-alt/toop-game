@@ -63,7 +63,7 @@ void Run::clear_objective() {
     goal_y = 0;
 }
 
-bool Run::step(const Input& input) {
+void Run::step(const Input& input) {
     // A filled circle of radius brush_size, painted before physics runs so a freshly
     // placed cell does not move on the same step it was placed.
     //
@@ -109,9 +109,6 @@ bool Run::step(const Input& input) {
     player_input.left = input.left;
     player_input.right = input.right;
     player_input.jump = input.jump;
-    player_input.aim_x = input.cursor_x;
-    player_input.aim_y = input.cursor_y;
-    player_input.dig = input.dig;
     const int health_before = player.health();
     player.update(grid, player_input);
     // Whatever the world did to the body this step -- a burn, a hard landing.
@@ -123,9 +120,9 @@ bool Run::step(const Input& input) {
     // Last, so the dig is aimed from where the body actually ended up this step.
     // Called every step whether or not the button is held, because that is what
     // advances the tool's cooldown.
-    const bool dug = dig_tool.update(grid, input.dig, player.center_x(), player.center_y(),
-                                     input.cursor_x, input.cursor_y);
-    if (dug) events_.push(Event{Event::Kind::Dug, input.cursor_x, input.cursor_y, 0, 0});
+    if (dig_tool.update(grid, input.dig, player.center_x(), player.center_y(), input.cursor_x,
+                        input.cursor_y))
+        events_.push(Event{Event::Kind::Dug, input.cursor_x, input.cursor_y, 0, 0});
 
     // The bow, then the arrows, then the bodies. Arrows before enemies so a shot is
     // tested against the enemy where it stood at the start of the step, which is
@@ -217,6 +214,4 @@ bool Run::step(const Input& input) {
             }
         }
     }
-
-    return dug;
 }

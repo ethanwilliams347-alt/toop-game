@@ -10,34 +10,15 @@ namespace {
 
 // --- the layers, one function each ----------------------------------------
 
-// Multiply one channel by a grade channel, the way SDL's own texture colour mod
-// does it: v * m / 255, truncating. Matching SDL rather than rounding half-up
-// matters because both paths are live in the same frame -- a graded rectangle
-// and a graded texture side by side must not land on different values for the
-// same grade. 255 is exactly identity either way.
-constexpr uint8_t graded(uint8_t v, uint8_t m) {
-    return static_cast<uint8_t>(v * m / 255);
-}
-
-// Apply a layer's grade to a texture, and always apply it, including when it is
-// identity. Colour mod is state that lives on the texture, not on the draw call,
-// so a layer that sets it only when it has something to say leaves the previous
-// layer's mod on a texture it shares -- and the props, the cell texture and the
-// player sheet all outlive the frame.
-void apply_grade(SDL_Texture* tex, const Grade& g) {
-    if (tex) SDL_SetTextureColorMod(tex, g.r, g.g, g.b);
-}
-
 // The clear matters because the authored sky is drawn behind an `if`: a
 // missing or unreadable BMP leaves the framebuffer holding whatever was
 // in it, which on a double-buffered renderer is two-frames-ago garbage.
 // Clearing to the darkest sky tone makes the failure mode "the backdrop
 // is flat" instead of "the window is full of noise". It is also the whole
 // background of a scene that names no backdrop -- the `empty` sandbox.
-void draw_clear(SDL_Renderer* renderer, const Params&, const Grade& g) {
+void draw_clear(SDL_Renderer* renderer, const Params&) {
     // Palette colour for darkest sky tone, matching tools/pixel_art.py.
-    SDL_SetRenderDrawColor(renderer, graded(0x38, g.r), graded(0x2C, g.g),
-                           graded(0x57, g.b), 255);
+    SDL_SetRenderDrawColor(renderer, 0x38, 0x2C, 0x57, 255);
     SDL_RenderClear(renderer);
 }
 
@@ -81,7 +62,6 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
     int tex_w = 0;
     SDL_QueryTexture(l.texture, nullptr, nullptr, &tex_w, nullptr);
     if (tex_w <= 0) return;
-    apply_grade(l.texture, l.grade);
 
     const Camera& camera = *p.camera;
     const Backdrop& b = *p.backdrop;  // non-null: only called from the two passes below
@@ -167,15 +147,14 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
     }
 }
 
-// The backdrop, in two passes either side of the world. Each layer brings its
-// own Grade, which is why these rows of the table carry PLAIN and ignore theirs.
-void draw_backdrop(SDL_Renderer* renderer, const Params& p, const Grade&) {
+// The backdrop, in two passes either side of the world.
+void draw_backdrop(SDL_Renderer* renderer, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
         if (!l.is_foreground) draw_layer(renderer, p, l);
 }
 
-void draw_foreground(SDL_Renderer* renderer, const Params& p, const Grade&) {
+void draw_foreground(SDL_Renderer* renderer, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
         if (l.is_foreground) draw_layer(renderer, p, l);
@@ -186,12 +165,11 @@ void draw_foreground(SDL_Renderer* renderer, const Params& p, const Grade&) {
 // buried by it with no depth test and no new code path, exactly the way
 // the cell texture already occludes the backdrop wherever a cell is not
 // Empty.
-void draw_props(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_props(SDL_Renderer* renderer, const Params& p) {
     if (!p.props) return;
     const Camera& camera = *p.camera;
     for (const Prop& prop : *p.props) {
         if (!prop.texture) continue;
-        apply_grade(prop.texture, g);
         const SDL_FRect dst{
             camera.world_to_screen_x(prop.anchor_x - prop.w / 2.0f),
             camera.world_to_screen_y(prop.anchor_y - static_cast<float>(prop.h)),
@@ -206,9 +184,8 @@ void draw_props(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // wherever the player usually is, so the player sits near screen centre
 // and it is the world that scrolls -- in whole cells that is a jerk of
 // everything on screen at once.
-void draw_cells(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_cells(SDL_Renderer* renderer, const Params& p) {
     const Camera& camera = *p.camera;
-    apply_grade(p.cells, g);
     const SDL_FRect world_dst{
         -camera.frac_x() * camera.scale(),
         -camera.frac_y() * camera.scale(),
@@ -233,7 +210,7 @@ void draw_cells(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // Three concentric squares rather than a sprite: no new asset, no
 // manifest entry, and the dark ring is what stops it disappearing
 // against sand, the same reason the reticle has an outline.
-void draw_objective(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_objective(SDL_Renderer* renderer, const Params& p) {
     if (!p.has_objective) return;
     const Camera& camera = *p.camera;
     const float gx = static_cast<float>(p.objective_x);
@@ -248,8 +225,7 @@ void draw_objective(SDL_Renderer* renderer, const Params& p, const Grade& g) {
         {  4, 0xFF, 0xFF, 0xFF },
     };
     for (const Ring& ring : rings) {
-        SDL_SetRenderDrawColor(renderer, graded(ring.r, g.r), graded(ring.g, g.g),
-                               graded(ring.b, g.b), 255);
+        SDL_SetRenderDrawColor(renderer, ring.r, ring.g, ring.b, 255);
         const SDL_FRect box{
             camera.world_to_screen_x(gx - ring.cells / 2.0f),
             camera.world_to_screen_y(gy - ring.cells / 2.0f),
@@ -268,7 +244,7 @@ void draw_objective(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // what anchoring to the box's bottom-centre works out to -- the sprite's
 // baseline lands on the box's baseline and its extra width is split
 // evenly either side.
-void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_player(SDL_Renderer* renderer, const Params& p) {
     const Camera& camera = *p.camera;
     const SDL_FRect body{
         camera.world_to_screen_x(p.player_x - player_sprite::OFFSET_X),
@@ -277,7 +253,6 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
         static_cast<float>(camera.scale_length(player_sprite::FRAME_H))
     };
     if (p.player_tex) {
-        apply_grade(p.player_tex, g);
         const SDL_RendererFlip flip =
             p.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
@@ -296,8 +271,7 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
         // load_art_texture already printed why it failed, and a game you can
         // still move around in is a better diagnostic than a world with nothing
         // in it.
-        SDL_SetRenderDrawColor(renderer, graded(235, g.r), graded(235, g.g),
-                               graded(245, g.b), 255);
+        SDL_SetRenderDrawColor(renderer, 235, 235, 245, 255);
         const SDL_FRect box{
             camera.world_to_screen_x(p.player_x),
             camera.world_to_screen_y(p.player_y),
@@ -316,10 +290,9 @@ void draw_player(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // The flip is SDL_FLIP_HORIZONTAL over the pose's rectangle, which the caller
 // anchors to match Enemy::pixel_at's flip, so a pixel drawn over a cell and the
 // pixel an arrow finds in that cell stay the same pixel.
-void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_enemies(SDL_Renderer* renderer, const Params& p) {
     if (!p.enemies || p.enemies->empty() || !p.enemy_atlas) return;
     const Camera& camera = *p.camera;
-    apply_grade(p.enemy_atlas, g);
     for (const EnemySprite& e : *p.enemies) {
         const SDL_FRect body{camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
                              camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
@@ -338,7 +311,7 @@ void draw_enemies(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // reads as a scratch on the glass; cell-sized squares are drawn in the world's
 // own unit, so an arrow is pixel art at the same resolution as everything it
 // flies past.
-void draw_arrows(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_arrows(SDL_Renderer* renderer, const Params& p) {
     if (!p.arrows || p.arrows->empty()) return;
     const Camera& camera = *p.camera;
     struct Part { int from, to; uint8_t r, gg, b; };
@@ -355,8 +328,7 @@ void draw_arrows(SDL_Renderer* renderer, const Params& p, const Grade& g) {
         float dx = a.dir_x, dy = a.dir_y;
         if (dx == 0.0f && dy == 0.0f) dy = 1.0f;
         for (const Part& part : parts) {
-            SDL_SetRenderDrawColor(renderer, graded(part.r, g.r), graded(part.gg, g.g),
-                                   graded(part.b, g.b), 255);
+            SDL_SetRenderDrawColor(renderer, part.r, part.gg, part.b, 255);
             for (int i = part.from; i <= part.to; ++i) {
                 const float wx = std::floor(a.tip_x - dx * static_cast<float>(i));
                 const float wy = std::floor(a.tip_y - dy * static_cast<float>(i));
@@ -366,38 +338,6 @@ void draw_arrows(SDL_Renderer* renderer, const Params& p, const Grade& g) {
             }
         }
     }
-}
-
-// --- the pass that can darken -------------------------
-//
-// One full-screen rectangle in SDL_BLENDMODE_MOD, which is dst = dst * src.
-// Everything before it can only add, so without this no biome, no time of day
-// and no depth band could be darker than the art as authored.
-//
-// It sits before the light pass and that ordering is the design. Multiply first,
-// add second, so a fire at night burns at the brightness the light pass computed
-// for it instead of being graded down with the rock it is standing on. The
-// reverse order dims the one thing in the frame that is supposed to survive a
-// dark grade, and it reads as the lighting having stopped working.
-//
-// No custom blend mode is composed for this and none is needed.
-// SDL_BLENDMODE_MOD is supported by both the accelerated and the software
-// backends -- the second matters, because the golden frame test rasterises in
-// software and would be blind to a custom blend mode.
-//
-// The alpha channel is deliberately 255 and MOD ignores it: MOD multiplies
-// colour and leaves destination alpha alone, so this cannot be used to fade
-// anything.
-void draw_grade(SDL_Renderer* renderer, const Params& p, const Grade&) {
-    if (p.world_grade.identity()) return;  // the common case: not one draw call
-
-    SDL_BlendMode prev = SDL_BLENDMODE_NONE;
-    SDL_GetRenderDrawBlendMode(renderer, &prev);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_MOD);
-    SDL_SetRenderDrawColor(renderer, p.world_grade.r, p.world_grade.g,
-                           p.world_grade.b, 255);
-    SDL_RenderFillRect(renderer, nullptr);  // null rect is the whole target
-    SDL_SetRenderDrawBlendMode(renderer, prev);
 }
 
 // One extra RenderCopy -- the whole cost of the lighting feature on the GPU
@@ -416,10 +356,9 @@ void draw_grade(SDL_Renderer* renderer, const Params& p, const Grade&) {
 // whole block, so each texel's centre lands on the centre of the cells it was
 // computed from. Sized to the padded extent instead, every texel would sit up to
 // half a block off and the glow would trail behind the flame that cast it.
-void draw_light(SDL_Renderer* renderer, const Params& p, const Grade& g) {
+void draw_light(SDL_Renderer* renderer, const Params& p) {
     if (!p.light || !p.light->any_light()) return;
     const Camera& camera = *p.camera;
-    apply_grade(p.light_texture, g);
     const SDL_FRect light_dst{
         -camera.frac_x() * camera.scale(),
         -camera.frac_y() * camera.scale(),
@@ -434,41 +373,14 @@ void draw_light(SDL_Renderer* renderer, const Params& p, const Grade& g) {
 // The order in this table is the feature: reading it top to bottom is reading
 // the frame back to front, and a band is a row here rather than an insertion
 // between two comments in a long function.
-constexpr Grade PLAIN{};  // 255,255,255 - drawn as authored
-
-// Every row is PLAIN. The per-layer multiply is live where it belongs, on
-// each backdrop layer's own Grade (frame::ParallaxLayer), and the shipped sets
-// leave it at identity because their art carries its own aerial perspective.
-// The backdrop rows carry PLAIN for that reason and not by oversight: a grade
-// here would multiply on top of the one the art was authored against and
-// neither number would say so.
-//
-// (There was one graded row: the generated mountains, at 0.60, to separate them
-// from a sky of nearly the same luminance. It went with the generated backdrop;
-// see render/backdrop_set.h.)
 constexpr Layer TABLE[] = {
-    {"clear", Lighting::Lit, PLAIN, draw_clear},
-    {"backdrop", Lighting::Lit, PLAIN, draw_backdrop},
-    {"props", Lighting::Lit, PLAIN, draw_props},
-    {"cells", Lighting::Lit, PLAIN, draw_cells},
-    {"objective", Lighting::Lit, PLAIN, draw_objective},
-    {"enemies", Lighting::Lit, PLAIN, draw_enemies},
-    {"player", Lighting::Lit, PLAIN, draw_player},
-    {"arrows", Lighting::Lit, PLAIN, draw_arrows},
-    {"foreground", Lighting::Lit, PLAIN, draw_foreground},
-    {"grade", Lighting::Grade, PLAIN, draw_grade},
-    {"light", Lighting::Light, PLAIN, draw_light},
-    // Nothing Unlit yet, and that is not an omission: the UI drawn after the
-    // light pass lives elsewhere. The value exists so that the first thing to
-    // cross the boundary declares which side it is on instead of inheriting a
-    // position.
-    //
-    // `grade` is a layer with no caller -- nothing sets Params::world_grade, so
-    // it returns before its first draw call on every frame the game currently
-    // composes. It ships because the per-layer half of the same mechanism is
-    // live on every backdrop layer, and because the pass and its ordering argument are the part that is
-    // expensive to add later. It becomes a defect the day it is still unset and
-    // the ordering claim above has stopped being checked by anything.
+    {"clear", Lighting::Lit, draw_clear},           {"backdrop", Lighting::Lit, draw_backdrop},
+    {"props", Lighting::Lit, draw_props},           {"cells", Lighting::Lit, draw_cells},
+    {"objective", Lighting::Lit, draw_objective},   {"enemies", Lighting::Lit, draw_enemies},
+    {"player", Lighting::Lit, draw_player},         {"arrows", Lighting::Lit, draw_arrows},
+    {"foreground", Lighting::Lit, draw_foreground}, {"light", Lighting::Light, draw_light},
+    // Nothing after the light pass: the UI drawn after it lives in
+    // render/overlay.cpp, outside the world and outside this table.
 };
 constexpr int TABLE_COUNT = static_cast<int>(sizeof(TABLE) / sizeof(TABLE[0]));
 
@@ -489,59 +401,24 @@ constexpr int count_of(Lighting want) {
 static_assert(count_of(Lighting::Light) == 1,
               "the layer table needs exactly one Lighting::Light entry - it is the "
               "boundary the other values are defined against, so zero of them makes "
-              "Lit and Unlit meaningless and two of them makes them ambiguous");
+              "Lit meaningless and two of them makes it ambiguous");
 
-// At most one, not exactly one. Two grade quads would multiply into a third
-// grade that nothing declares; zero is legal, because a build with no world-wide
-// grade is a coherent build.
-static_assert(count_of(Lighting::Grade) <= 1,
-              "at most one Lighting::Grade entry - two full-screen multiplies compose "
-              "into a third grade that nothing declares, and the second would be tuned "
-              "against the first without either row saying so");
-
-// A rank rather than a boundary index: with a grade pass there are three
-// positions in a fixed order, and the invariant is that the table never goes
-// backwards through them. Written as a rank rather than as pairwise comparisons
-// so the next value inserted into Lighting is one line here instead of a case
-// analysis.
-constexpr int rank(Lighting l) {
-    switch (l) {
-        case Lighting::Lit:   return 0;
-        case Lighting::Grade: return 1;
-        case Lighting::Light: return 2;
-        case Lighting::Unlit: return 3;
-    }
-    return -1;
-}
-
+// Every Lit layer before the light pass, which is what Lit means: the pass adds
+// light to everything already drawn, so a Lit layer after it would be drawn
+// unlit while declaring otherwise.
 constexpr bool lighting_matches_order() {
-    for (int i = 1; i < TABLE_COUNT; ++i) {
-        if (rank(TABLE[i].lighting) < rank(TABLE[i - 1].lighting)) return false;
-    }
-    return true;
-}
-static_assert(lighting_matches_order(),
-              "a layer's declared Lighting disagrees with where it sits in the table. "
-              "The order is Lit, then Grade, then Light, then Unlit, and it is not a "
-              "convention: the grade multiplies and the light pass adds, so putting the "
-              "grade after the light is the difference between a fire that survives "
-              "nightfall and one that gets dimmed by it");
-
-// The two mechanisms are separate fields and this is the guard on that. A grade
-// quad carrying a per-layer grade of its own would multiply twice -- once as a
-// property of the layer and once as its whole purpose -- and the second one is
-// invisible in the table, because it looks exactly like every other row.
-constexpr bool grade_layer_is_plain() {
+    bool past_light = false;
     for (int i = 0; i < TABLE_COUNT; ++i) {
-        if (TABLE[i].lighting == Lighting::Grade && !TABLE[i].grade.identity())
+        if (TABLE[i].lighting == Lighting::Light)
+            past_light = true;
+        else if (past_light)
             return false;
     }
     return true;
 }
-static_assert(grade_layer_is_plain(),
-              "the Lighting::Grade row must carry an identity per-layer grade - it "
-              "reads Params::world_grade and applies that. A grade on the grade row "
-              "multiplies twice and neither number says so");
+static_assert(lighting_matches_order(),
+              "a Lit layer sits after the light pass in the table, so it is drawn "
+              "unlit while declaring that it is lit");
 
 } // namespace
 
@@ -549,7 +426,7 @@ const Layer* const LAYERS = TABLE;
 const int LAYER_COUNT = TABLE_COUNT;
 
 void compose(SDL_Renderer* renderer, const Params& p) {
-    for (int i = 0; i < TABLE_COUNT; ++i) TABLE[i].draw(renderer, p, TABLE[i].grade);
+    for (int i = 0; i < TABLE_COUNT; ++i) TABLE[i].draw(renderer, p);
 }
 
 } // namespace frame

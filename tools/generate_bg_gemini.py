@@ -25,17 +25,16 @@ nested loops over 688x288, and that is the intended trade - this is an offline
 generator run by hand, and a one-to-one correspondence with the art it produces
 is worth more than the seconds.
 """
+import math
 import os
 import shutil
 import sys
-import math
 
 # Derived from this file's location rather than hardcoded: an absolute path
 # into one machine's home directory runs only there, and nothing says so.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'tools'))
-from pixel_art import (LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header,
-                       write_bmp, write_png)
+from pixel_art import LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header, write_bmp, write_png
 
 DST_DIR = os.path.join(REPO_ROOT, "assets", "bg_gemini")
 BUILD_DST_DIR = os.path.join(REPO_ROOT, "build", "Release", "assets", "bg_gemini")
@@ -151,9 +150,12 @@ def make_empty():
 def generate_sky():
     img = [[SKY_BASE for _ in range(TARGET_W)] for _ in range(TARGET_H)]
     for x in range(TARGET_W):
-        y_cloud = int(24 + 5.0 * math.sin(2 * math.pi * x / 340.0) + 
-                          3.0 * math.cos(2 * math.pi * x / 180.0 + 1.2) + 
-                          1.2 * math.sin(2 * math.pi * x / 75.0))
+        y_cloud = int(
+            24
+            + 5.0 * math.sin(2 * math.pi * x / 340.0)
+            + 3.0 * math.cos(2 * math.pi * x / 180.0 + 1.2)
+            + 1.2 * math.sin(2 * math.pi * x / 75.0)
+        )
         for y in range(0, y_cloud):
             img[y][x] = SKY_CLOUD
         for y in range(y_cloud, y_cloud + 3):
@@ -170,13 +172,13 @@ def generate_ground():
     y_water = [0] * TARGET_W
     y_olive = [0] * TARGET_W
     y_forest = [0] * TARGET_W
-    
+
     for x in range(TARGET_W):
         y_shore[x] = int(128 + 3.0 * math.sin(2 * math.pi * x / 240.0) + 1.5 * math.cos(2 * math.pi * x / 105.0))
         y_water[x] = int(142 + 2.5 * math.sin(2 * math.pi * x / 280.0 + 0.8) + 1.2 * math.cos(2 * math.pi * x / 120.0))
         y_olive[x] = int(188 + 3.0 * math.sin(2 * math.pi * x / 310.0 + 1.5) + 1.5 * math.cos(2 * math.pi * x / 135.0))
         y_forest[x] = int(210 + 2.0 * math.sin(2 * math.pi * x / 290.0 + 2.2) + 1.0 * math.cos(2 * math.pi * x / 145.0))
-        
+
         for y in range(y_shore[x], y_water[x]):
             img[y][x] = GND_SHORE
         for y in range(y_water[x], y_olive[x]):
@@ -205,7 +207,7 @@ def generate_ground():
 def generate_mountains():
     img = make_empty()
     base_y = 126
-    
+
     peaks = [
         (30, 8, 0.40, 0.35),
         (75, 2, 0.35, 0.42),
@@ -220,7 +222,7 @@ def generate_mountains():
         (610, 46, 0.38, 0.36),
         (660, 40, 0.36, 0.38),
     ]
-    
+
     ridge = [float(base_y)] * TARGET_W
     for px, py, ls, rs in peaks:
         for x in range(TARGET_W):
@@ -234,7 +236,7 @@ def generate_mountains():
         phase = rng.random() * 2.0 * math.pi
         for x in range(TARGET_W):
             noise[x] += a * math.sin(f * x + phase)
-    
+
     ridge_int = [0] * TARGET_W
     for x in range(TARGET_W):
         val = int(round(ridge[x] + noise[x]))
@@ -243,7 +245,7 @@ def generate_mountains():
         elif val > base_y:
             val = base_y
         ridge_int[x] = val
-    
+
     for x in range(TARGET_W):
         top = ridge_int[x]
         if top < base_y:
@@ -251,16 +253,16 @@ def generate_mountains():
                 img[y][x] = MTN_BODY
             for y in range(top, min(top + 2, base_y)):
                 img[y][x] = MTN_RIM
-            
+
     arete_origins = [(75, 2), (185, 28), (370, 34), (490, 42), (545, 36), (660, 40)]
-    for ox, oy in arete_origins:
+    for ox, _oy in arete_origins:
         cx, cy = ox, ridge_int[ox]
         while cy < base_y - 4 and 0 <= cx < TARGET_W - 1:
             img[cy][cx] = MTN_RIM
             img[cy+1][cx] = MTN_RIM
             cx += 1 if rng.random() > 0.35 else 0
             cy += 1
-            
+
     return img
 
 
@@ -270,13 +272,13 @@ def generate_mountains():
 def generate_hills_far():
     img = make_empty()
     base_y = 134
-    
+
     peaks = [
         (75, 74, 0.35, 0.32),
         (280, 42, 0.38, 0.44),
         (495, 56, 0.40, 0.34),
     ]
-    
+
     ridge = [float(base_y)] * TARGET_W
     for px, py, ls, rs in peaks:
         for x in range(TARGET_W):
@@ -285,7 +287,7 @@ def generate_hills_far():
             curve = py + slope * dist + 0.0004 * (dist ** 2)
             if curve < ridge[x]:
                 ridge[x] = curve
-                
+
     noise = [1.0 * math.sin(0.14 * x) + 0.6 * math.cos(0.32 * x) for x in range(TARGET_W)]
     ridge_int = [0] * TARGET_W
     for x in range(TARGET_W):
@@ -295,7 +297,7 @@ def generate_hills_far():
         elif val > base_y:
             val = base_y
         ridge_int[x] = val
-    
+
     for x in range(TARGET_W):
         top = ridge_int[x]
         if top < base_y:
@@ -303,15 +305,15 @@ def generate_hills_far():
                 img[y][x] = H_FAR_BODY
             for y in range(top, min(top + 2, base_y)):
                 img[y][x] = H_FAR_RIM
-            
-    for px, py in [(75, 74), (280, 42), (495, 56)]:
+
+    for px, _py in [(75, 74), (280, 42), (495, 56)]:
         cx, cy = px, ridge_int[px]
         while cy < base_y - 4 and cx < TARGET_W - 2:
             img[cy][cx] = H_FAR_RIM
             img[cy][cx+1] = H_FAR_RIM
             cy += 1
             cx += 1 if (cy % 2 == 0) else 2
-            
+
     return img
 
 
@@ -321,13 +323,13 @@ def generate_hills_far():
 def generate_hills_midfar():
     img = make_empty()
     base_y = 146
-    
+
     peaks = [
         (440, 66, 0.42, 0.52),
         (472, 68, 0.54, 0.38),
         (565, 84, 0.36, 0.34),
     ]
-    
+
     ridge = [float(base_y)] * TARGET_W
     for px, py, ls, rs in peaks:
         for x in range(320, 650):
@@ -336,7 +338,7 @@ def generate_hills_midfar():
             curve = py + slope * dist + 0.0006 * (dist ** 2)
             if curve < ridge[x]:
                 ridge[x] = curve
-                
+
     noise = [0.8 * math.sin(0.16 * x) for x in range(TARGET_W)]
     ridge_int = [0] * TARGET_W
     for x in range(TARGET_W):
@@ -346,7 +348,7 @@ def generate_hills_midfar():
         elif val > base_y:
             val = base_y
         ridge_int[x] = val
-    
+
     for x in range(TARGET_W):
         top = ridge_int[x]
         if top < base_y:
@@ -354,13 +356,13 @@ def generate_hills_midfar():
                 img[y][x] = H_MIDFAR_BODY
             for y in range(top, min(top + 2, base_y)):
                 img[y][x] = H_MIDFAR_RIM
-            
+
     cx, cy = 440, ridge_int[440]
     while cy < base_y - 4 and cx < 472:
         img[cy][cx] = H_MIDFAR_RIM
         cy += 1
         cx += 1
-        
+
     return img
 
 
@@ -370,13 +372,13 @@ def generate_hills_midfar():
 def generate_hills_mid():
     img = make_empty()
     base_y = 156
-    
+
     peaks = [
         (35, 90, 0.24, 0.28),
         (290, 116, 0.26, 0.30),
         (510, 108, 0.28, 0.26),
     ]
-    
+
     ridge = [float(base_y)] * TARGET_W
     for px, py, ls, rs in peaks:
         for x in range(TARGET_W):
@@ -385,7 +387,7 @@ def generate_hills_mid():
             curve = py + slope * dist + 0.0005 * (dist ** 2)
             if curve < ridge[x]:
                 ridge[x] = curve
-                
+
     noise = [0.8 * math.sin(0.18 * x) for x in range(TARGET_W)]
     ridge_int = [0] * TARGET_W
     for x in range(TARGET_W):
@@ -395,7 +397,7 @@ def generate_hills_mid():
         elif val > base_y:
             val = base_y
         ridge_int[x] = val
-    
+
     for x in range(TARGET_W):
         top = ridge_int[x]
         if top < base_y:
@@ -403,7 +405,7 @@ def generate_hills_mid():
                 img[y][x] = H_MID_BODY
             for y in range(top, min(top + 2, base_y)):
                 img[y][x] = H_MID_RIM
-            
+
     for sx, sy in [(35, 94), (290, 120), (510, 112)]:
         cx, cy = sx, sy
         while cy < base_y - 4 and cx < TARGET_W - 2:
@@ -420,12 +422,12 @@ def generate_hills_mid():
 def generate_hills_midnear():
     img = make_empty()
     base_y = 164
-    
+
     peaks = [
         (480, 128, 0.26, 0.24),
         (615, 106, 0.24, 0.20),
     ]
-    
+
     ridge = [float(base_y)] * TARGET_W
     for px, py, ls, rs in peaks:
         for x in range(370, TARGET_W):
@@ -434,7 +436,7 @@ def generate_hills_midnear():
             curve = py + slope * dist + 0.0005 * (dist ** 2)
             if curve < ridge[x]:
                 ridge[x] = curve
-                
+
     noise = [0.8 * math.sin(0.20 * x) for x in range(TARGET_W)]
     ridge_int = [0] * TARGET_W
     for x in range(370, TARGET_W):
@@ -444,7 +446,7 @@ def generate_hills_midnear():
         elif val > base_y:
             val = base_y
         ridge_int[x] = val
-    
+
     for x in range(370, TARGET_W):
         top = ridge_int[x]
         if top < base_y:
@@ -452,14 +454,14 @@ def generate_hills_midnear():
                 img[y][x] = H_MIDNEAR_BODY
             for y in range(top, min(top + 2, base_y)):
                 img[y][x] = H_MIDNEAR_RIM
-            
+
     for sx, sy in [(480, 132), (615, 110)]:
         cx, cy = sx, sy
         while cy < base_y - 4 and cx < TARGET_W - 1:
             img[cy][cx] = H_MIDNEAR_RIM
             cy += 1
             cx += 2
-            
+
     return img
 
 
@@ -469,7 +471,7 @@ def generate_hills_midnear():
 def generate_hills_near():
     img = make_empty()
     base_y = 178
-    
+
     # Left terraces: continuous natural stepped profile
     for x in range(0, 210):
         if x < 45:
@@ -487,7 +489,7 @@ def generate_hills_near():
         else:
             t = (x - 195) / 15.0
             local_top = int(167 + 10.0 * t)
-            
+
         if local_top < base_y:
             for y in range(local_top, base_y):
                 img[y][x] = H_NEAR_BODY
@@ -506,13 +508,13 @@ def generate_hills_near():
             local_top = int(162 - 8.0 * (3*t*t - 2*t*t*t))
         else:
             local_top = int(154 - 0.12 * (x - 645))
-            
+
         if local_top < base_y:
             for y in range(local_top, base_y):
                 img[y][x] = H_NEAR_BODY
             for y in range(local_top, min(local_top + 2, base_y)):
                 img[y][x] = H_NEAR_RIM
-                
+
     for y_step in [146, 158, 168]:
         for x in range(0, 185):
             if img[y_step][x] != MAGENTA and y_step + 1 < base_y:
@@ -531,7 +533,7 @@ def generate_hills_near():
 def generate_fg_rocks():
     img = make_empty()
     base_y = 288
-    
+
     boulders = [
         (110, 276, 42, 18),
         (165, 270, 58, 22),
@@ -540,7 +542,7 @@ def generate_fg_rocks():
         (505, 268, 55, 22),
         (560, 272, 45, 18),
     ]
-    
+
     for cx, cy, rx, ry in boulders:
         for x in range(max(0, cx - rx), min(TARGET_W, cx + rx)):
             dx = (x - cx) / rx
@@ -553,7 +555,7 @@ def generate_fg_rocks():
                         img[y][x] = ROCKS_BODY
                     for y in range(top_y, min(top_y + 2, base_y)):
                         img[y][x] = ROCKS_RIM
-                    
+
     for cx, cy, rx, ry in [(165, 270, 58, 22), (225, 266, 65, 24), (505, 268, 55, 22)]:
         facet_y = cy - int(ry * 0.3)
         for x in range(cx - int(rx * 0.5), cx + int(rx * 0.5)):
@@ -565,25 +567,23 @@ def generate_fg_rocks():
 
 # Draw order back to front (exact engine compositing order):
 LAYER_DEFS = [
-    ("09_sky",          "bg_gemini_09_sky.bmp",          "bg1_09_sky.bmp",          generate_sky),
-    ("08_ground",       "bg_gemini_08_ground.bmp",       "bg1_08_ground.bmp",       generate_ground),
-    ("07_mountains",    "bg_gemini_07_mountains.bmp",    "bg1_07_mountains.bmp",    generate_mountains),
-    ("06_hills_far",    "bg_gemini_06_hills_far.bmp",    "bg1_06_hills_far.bmp",    generate_hills_far),
-    ("05_hills_midfar", "bg_gemini_05_hills_midfar.bmp", "bg1_05_hills_midfar.bmp", generate_hills_midfar),
-    ("04_hills_mid",    "bg_gemini_04_hills_mid.bmp",    "bg1_04_hills_mid.bmp",    generate_hills_mid),
-    ("03_hills_midnear","bg_gemini_03_hills_midnear.bmp","bg1_03_hills_midnear.bmp",generate_hills_midnear),
-    ("02_hills_near",   "bg_gemini_02_hills_near.bmp",   "bg1_02_hills_near.bmp",   generate_hills_near),
-    ("01_fg_rocks",     "bg_gemini_01_fg_rocks.bmp",     "bg1_01_fg_rocks.bmp",     generate_fg_rocks),
+    ("09_sky", "bg_gemini_09_sky.bmp", generate_sky),
+    ("08_ground", "bg_gemini_08_ground.bmp", generate_ground),
+    ("07_mountains", "bg_gemini_07_mountains.bmp", generate_mountains),
+    ("06_hills_far", "bg_gemini_06_hills_far.bmp", generate_hills_far),
+    ("05_hills_midfar", "bg_gemini_05_hills_midfar.bmp", generate_hills_midfar),
+    ("04_hills_mid", "bg_gemini_04_hills_mid.bmp", generate_hills_mid),
+    ("03_hills_midnear", "bg_gemini_03_hills_midnear.bmp", generate_hills_midnear),
+    ("02_hills_near", "bg_gemini_02_hills_near.bmp", generate_hills_near),
+    ("01_fg_rocks", "bg_gemini_01_fg_rocks.bmp", generate_fg_rocks),
 ]
 
 
 def write_scene_maps(composite_rgb):
     assert_legend_matches_header()
-    mat_path = os.path.join(DST_DIR, "bg_gemini_material.bmp")
-    alb_path = os.path.join(DST_DIR, "bg_gemini_albedo.bmp")
     root_mat = os.path.join(REPO_ROOT, "assets", "bg_gemini_material.bmp")
     root_alb = os.path.join(REPO_ROOT, "assets", "bg_gemini_albedo.bmp")
-    
+
     mat_pixels = []
     alb_pixels = []
     solid = 0
@@ -595,17 +595,9 @@ def write_scene_maps(composite_rgb):
             else:
                 mat_pixels.append(LEGEND_EMPTY)
             alb_pixels.append(composite_rgb[y * TARGET_W + x])
-            
-    write_bmp(mat_path, TARGET_W, TARGET_H, mat_pixels)
-    write_bmp(alb_path, TARGET_W, TARGET_H, alb_pixels)
+
     write_bmp(root_mat, TARGET_W, TARGET_H, mat_pixels)
     write_bmp(root_alb, TARGET_W, TARGET_H, alb_pixels)
-    
-    if os.path.exists(BUILD_DST_DIR):
-        build_mat = os.path.join(BUILD_DST_DIR, "bg_gemini_material.bmp")
-        build_alb = os.path.join(BUILD_DST_DIR, "bg_gemini_albedo.bmp")
-        write_bmp(build_mat, TARGET_W, TARGET_H, mat_pixels)
-        write_bmp(build_alb, TARGET_W, TARGET_H, alb_pixels)
 
     print(f"Scene maps written: floor at row {FLOOR_ROW}, {solid} solid cells.")
 
@@ -650,42 +642,38 @@ Native resolution: 688 x 288 px (New generative pixel art extension of Backgroun
 def main():
     os.makedirs(DST_DIR, exist_ok=True)
     os.makedirs(BUILD_DST_DIR, exist_ok=True)
-    
+
     print("Generating newly generated 688x288 backdrop layers for bg_gemini...")
     composite_rgb = [MAGENTA] * (TARGET_H * TARGET_W)
-    
-    for tag, fname, alias_fname, gen_fn in LAYER_DEFS:
+
+    for _tag, fname, gen_fn in LAYER_DEFS:
         layer_arr = gen_fn()
-        
+
         # Save primary BMP
         dst_path = os.path.join(DST_DIR, fname)
         pixels = [layer_arr[y][x] for y in range(TARGET_H) for x in range(TARGET_W)]
         write_bmp(dst_path, TARGET_W, TARGET_H, pixels)
-        
-        # Save alias BMP (e.g. bg1_*.bmp in assets/bg_gemini/)
-        alias_path = os.path.join(DST_DIR, alias_fname)
-        shutil.copyfile(dst_path, alias_path)
-        
+
         # Copy to build dir if present
         if os.path.exists(BUILD_DST_DIR):
             shutil.copyfile(dst_path, os.path.join(BUILD_DST_DIR, fname))
-            shutil.copyfile(dst_path, os.path.join(BUILD_DST_DIR, alias_fname))
-            
+
         # Composite back-to-front
         for y in range(TARGET_H):
             for x in range(TARGET_W):
                 color = layer_arr[y][x]
                 if color != MAGENTA:
                     composite_rgb[y * TARGET_W + x] = color
-            
-        print(f"Generated {fname} ({alias_fname})")
-        
-    preview_path = os.path.join(DST_DIR, "composite_preview.png")
+
+        print(f"Generated {fname}")
+
+    # The preview is for people, not the game, so it lives with the source art
+    # rather than in assets/, which is staged next to the exe.
+    preview_path = os.path.join(REPO_ROOT, "art_src", "previews", "bg_gemini.png")
+    os.makedirs(os.path.dirname(preview_path), exist_ok=True)
     write_png(preview_path, TARGET_W, TARGET_H, composite_rgb)
-    if os.path.exists(BUILD_DST_DIR):
-        write_png(os.path.join(BUILD_DST_DIR, "composite_preview.png"), TARGET_W, TARGET_H, composite_rgb)
     print("Composite preview saved.")
-    
+
     write_scene_maps(composite_rgb)
     write_readme()
     print("Done! All assets in assets/bg_gemini/ successfully generated.")

@@ -175,8 +175,10 @@ void test_held_dig_cycles() {
     DigTool tool;
     State s;
 
-    // Long enough to contain several swings at any plausible swing length.
-    const int steps = 8 * ps::DIG.wait * ps::DIG.frames;
+    // Eight swings' worth. Sized off the tool's own swing length, which is what
+    // drives the dig frames -- not off DIG.wait, which the dig has no use for and
+    // the sheet table sets to 0.
+    const int steps = 8 * DigTool::SWING_STEPS;
     bool seen[16] = {false};
     int frames_seen = 0;
     int returns_to_start = 0;

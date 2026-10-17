@@ -43,10 +43,10 @@ public:
 
     // The same framing, told which of the two world paradigms this scene is -- as a
     // bool rather than the enum, because src/game/ must not depend on the scene
-    // loader to position a viewport. The caller reads SceneDef::is_infinite() and
+    // loader to position a viewport. The caller reads SceneDef::is_unclamped() and
     // hands over the answer.
     //
-    // Only the horizontal clamp is dropped, never the vertical one. An infinite
+    // Only the horizontal clamp is dropped, never the vertical one. An unclamped
     // scene is unbounded in travel, not in depth: the world still has a floor and a
     // ceiling, and the texture upload reads rows out of the grid, so a view that
     // scrolled off the top would be reading outside it. The horizontal case is
@@ -55,12 +55,10 @@ public:
     //
     // follow keeps its old signature and delegates here with false, so every
     // existing caller frames identically.
-    void follow_mode(float center_x, float center_y,
-                     int viewport_w, int viewport_h,
-                     int world_w, int world_h,
-                     bool is_infinite) {
+    void follow_mode(float center_x, float center_y, int viewport_w, int viewport_h, int world_w,
+                     int world_h, bool unclamped) {
         const float desired_y = center_y - static_cast<float>(viewport_h) * VERTICAL_ANCHOR;
-        if (is_infinite) {
+        if (unclamped) {
             view_fx_ = center_x - static_cast<float>(viewport_w) / 2.0f;
         } else {
             view_fx_ = clamp_view(center_x - static_cast<float>(viewport_w) / 2.0f, viewport_w, world_w);

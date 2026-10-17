@@ -410,15 +410,15 @@ void test_scene_resolve() {
               r.world_w == 500 && r.world_h == 144);
     }
 
-    // `infinite` is carried through from the row and is not inferred from anything
+    // `unclamped` is carried through from the row and is not inferred from anything
     // else.
     {
         scene_list::SceneDef inf = def;
-        inf.mode = scene_list::SceneMode::Infinite;
+        inf.mode = scene_list::SceneMode::Unclamped;
         check("resolve: the mode column is carried through, fixed",
-              !scene_activation::resolve(def, 0, 0, 1920, 1080, 4).infinite);
-        check("resolve: the mode column is carried through, infinite",
-              scene_activation::resolve(inf, 0, 0, 1920, 1080, 4).infinite);
+              !scene_activation::resolve(def, 0, 0, 1920, 1080, 4).unclamped);
+        check("resolve: the mode column is carried through, unclamped",
+              scene_activation::resolve(inf, 0, 0, 1920, 1080, 4).unclamped);
     }
 
     // scale_changed is false when the scale did not move, so apply_mode is not
@@ -460,16 +460,15 @@ void test_scene_resolve_shipped_rows() {
         const scene_activation::Resolved r = scene_activation::resolve(
             def, 0, 0, boot::GRID_WIDTH, boot::GRID_HEIGHT, def.scale);
         if (def.name == "empty") {
-            check("resolve: 'empty' is a 1920x1080 infinite world at 4x",
-                  r.world_w == 1920 && r.world_h == 1080 && r.infinite &&
-                      r.scale == 4);
+            check("resolve: 'empty' is a 1920x1080 unclamped world at 4x",
+                  r.world_w == 1920 && r.world_h == 1080 && r.unclamped && r.scale == 4);
         } else if (def.name == "bg1") {
             // One art pixel to one world cell, at the scale that makes the widest
             // window show exactly the reference frame. backdrop_set_test asserts the
             // art is that size; this asserts the world is.
             check("resolve: 'bg1' is a 344x144 fixed world at 10x, one art "
                   "pixel to one world cell",
-                  r.world_w == 344 && r.world_h == 144 && !r.infinite && r.scale == 10);
+                  r.world_w == 344 && r.world_h == 144 && !r.unclamped && r.scale == 10);
         } else if (def.name == "bg1_ext") {
             // The same mapping and the same scale, over twice the world. The scale is
             // the assertion worth having: a row that resized the world and rescaled it
@@ -478,10 +477,10 @@ void test_scene_resolve_shipped_rows() {
             // extension.
             check("resolve: 'bg1_ext' is a 688x288 fixed world at bg1's 10x, "
                   "still one art pixel to one world cell",
-                  r.world_w == 688 && r.world_h == 288 && !r.infinite && r.scale == 10);
+                  r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
         } else if (def.name == "bg_gemini") {
             check("resolve: 'bg_gemini' is a 688x288 fixed world at 10x",
-                  r.world_w == 688 && r.world_h == 288 && !r.infinite && r.scale == 10);
+                  r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
         }
     }
 }

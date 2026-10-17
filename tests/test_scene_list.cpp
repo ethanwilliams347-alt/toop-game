@@ -44,7 +44,7 @@ Result parse(const std::string& body) {
     return r;
 }
 
-const std::string GOOD =
+constexpr const char* GOOD =
     "# name    material           albedo           props           spawn\n"
     "fixture   test_material.bmp  test_albedo.bmp  test_props.txt  terrain\n"
     "empty     -                  -                -               floor\n";
@@ -106,13 +106,13 @@ int main() {
 
     // --- rejection is wholesale --------------------------------------------
     {
-        const Result r = parse(GOOD + "broken   test_material.bmp\n");
+        const Result r = parse(std::string(GOOD) + "broken   test_material.bmp\n");
         check("a short row costs the whole list, not just itself", r.rejected(), r.error);
         check("and the message names the line", r.error.find(":4:") != std::string::npos,
               r.error);
     }
     {
-        const Result r = parse(GOOD + "extra - - - floor sixth\n");
+        const Result r = parse(std::string(GOOD) + "extra - - - floor sixth\n");
         check("a sixth field that is not a mode is an error, not something to ignore",
               r.rejected(), r.error);
     }
@@ -126,21 +126,29 @@ int main() {
     {
         const Result r = parse("plain - - - floor\n");
         check("a row written before the mode column existed is fixed",
-              r.scenes.size() == 1 && !r.scenes[0].is_infinite(), r.error);
+              r.scenes.size() == 1 && !r.scenes[0].is_unclamped(), r.error);
         check("and states no size, rather than inventing one",
               r.scenes.size() == 1 && r.scenes[0].custom_width == 0 &&
               r.scenes[0].custom_height == 0);
     }
     {
+        const Result r = parse("far - - - floor unclamped\n");
+        check("a mode with no size parses",
+              r.scenes.size() == 1 && r.scenes[0].is_unclamped() && r.scenes[0].custom_width == 0,
+              r.error);
+    }
+    {
+        // The old spelling is refused rather than accepted as a synonym, with a
+        // message that says what it became: the mode never made a world infinite.
         const Result r = parse("far - - - floor infinite\n");
-        check("a mode with no size parses", r.scenes.size() == 1 &&
-              r.scenes[0].is_infinite() && r.scenes[0].custom_width == 0, r.error);
+        check("the old `infinite` spelling is refused, naming its replacement",
+              r.rejected() && r.error.find("unclamped") != std::string::npos, r.error);
     }
     {
         const Result r = parse("big test_material.bmp test_albedo.bmp - terrain fixed 3840 1440\n");
         check("a fixed row carries its own world size",
-              r.scenes.size() == 1 && !r.scenes[0].is_infinite() &&
-              r.scenes[0].custom_width == 3840 && r.scenes[0].custom_height == 1440,
+              r.scenes.size() == 1 && !r.scenes[0].is_unclamped() &&
+                  r.scenes[0].custom_width == 3840 && r.scenes[0].custom_height == 1440,
               r.error);
     }
     {

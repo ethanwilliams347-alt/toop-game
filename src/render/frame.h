@@ -53,29 +53,6 @@ struct ArrowSprite {
     float dir_x, dir_y;
 };
 
-// A multiply. 255 is unchanged, 128 is half, 0 is black -- the operation the
-// light pass cannot do.
-//
-// The light pass only ever adds, so every biome, every depth band and every time
-// of day is at least as bright as the art was authored, and nothing on screen
-// can be made darker than the pixel that was drawn. Night, underground, fog and
-// aerial perspective are all the same missing operation, and it is this one.
-//
-// A struct of three bytes rather than one exposure number because the useful
-// version is a tint: a distant band does not just dim, it drifts toward the
-// colour of the air between you and it. One number would have to be tuned three
-// times over as soon as anything wanted that.
-//
-// Applied by SDL_SetTextureColorMod for a textured layer, which is a multiply
-// the renderer already does for free -- a graded layer costs no extra draw call
-// and no extra texture. The world-wide grade in Params is the one that costs a
-// quad, and it is skipped entirely when it is identity.
-struct Grade {
-    unsigned char r = 255, g = 255, b = 255;
-
-    constexpr bool identity() const { return r == 255 && g == 255 && b == 255; }
-};
-
 // One layer of a backdrop, as the frame draws it: a texture plus how it moves.
 // Built by the caller from a backdrop_set::Layer (render/backdrop_set.h), which
 // is where every field below is argued; this is that record with the texture
@@ -94,7 +71,6 @@ struct ParallaxLayer {
     int tex_h = 0;
     float parallax_x = 1.0f;
     float parallax_y = 1.0f;
-    Grade grade{};
     bool is_foreground = false;  // drawn in front of the player and the cells
 
     // A painted surface scrolled as horizontal bands, each at its own factor;
@@ -147,18 +123,6 @@ struct Params {
     int padded_w = 0;
     int padded_h = 0;
 
-    // Which paradigm the loaded scene is, and how big its world is -- the two things
-    // the backdrop layout cannot be decided without.
-    //
-    // Here rather than read off the Camera because they are facts about the scene,
-    // not about the viewport, and the camera is deliberately stateless about which
-    // world it is looking at. The defaults are the engine's historical world size,
-    // so a caller built before this field existed composes exactly the frame it did
-    // before.
-    bool is_infinite = false;
-    int world_w = 1920;
-    int world_h = 1080;
-
     // Borrowed, and may be null for no backdrop. A pointer rather than a copy:
     // the caller owns the backdrop for the whole scene, and copying it into every
     // frame's Params copied each layer's band vector sixty times a second.
@@ -197,17 +161,6 @@ struct Params {
     const LightField* light = nullptr;
     SDL_Texture* light_texture = nullptr;
 
-    // The world-wide multiply -- night, underground, fog, per-biome grading.
-    // Applied to everything in the world after the last world layer and before the
-    // additive light pass, so a fire keeps its brightness in a graded scene instead
-    // of being dimmed by it.
-    //
-    // Identity by default, and identity means the quad is not drawn at all.
-    //
-    // Nothing sets this yet. It is a knob with no caller -- see the note at the
-    // layer table for why it ships anyway and what would make it a defect.
-    Grade world_grade;
-
     // Seconds of wall clock, for the backdrop's own motion -- drifting clouds and
     // rippling water. Render-only by construction: it is read nowhere but the rig's
     // draw path, and a frame composed at 0 (the default, and what golden_frame_test
@@ -222,43 +175,22 @@ struct Params {
 // with where it actually sits fails the build rather than shipping a comment
 // that has gone false.
 //
-// This says only what the composition can currently enforce, which is an
-// ordering.
-//
-// Grade is what makes Lit mean more than "earlier". The grade quad multiplies
-// everything drawn so far and the light pass then adds on top of the result,
-// which is why they are two entries and in that order: a fire at night must not
-// be dimmed by the night. Reverse them and the only light source in the frame
-// gets graded down with the rock it is sitting on.
-//
-// What it does not claim: that a layer can sit behind the world and be exempt
-// from the additive pass. The grade is a multiply over everything already drawn,
-// not a per-layer exemption, and expressing that needs a render target. The
-// per-layer Grade on a Layer is the piece that is per-layer, and it is a
-// separate field for exactly that reason -- one of these two is a property of a
-// layer and the other of the frame, and collapsing them is how a value that
-// means two things gets tuned for one of them.
+// The light pass is additive and lights everything drawn before it; the UI drawn
+// after it (render/overlay.cpp) is the part of the screen that is not in the
+// world and must not be lit. A layer that has to be in the world and yet unlit
+// would be a third value here, and the asserts would place it after Light.
 enum class Lighting : unsigned char {
-    Lit,  // in the world, drawn before the grade and the light pass
-    Grade,  // the world-wide multiply - at most one, and it may be absent
+    Lit,    // in the world, drawn before the light pass
     Light,  // the additive light pass - the boundary, and there is exactly one
-    Unlit,  // drawn after it and deliberately untouched by it
 };
 
 // One entry in the ordered list. `name` exists for the static_assert messages
 // and for anything that later wants to say which layer it is talking about; it
 // is not drawn.
-//
-// `grade` is this layer's own multiply, applied by whatever primitive the layer
-// draws with. A layer that ignores it is a lie the compiler cannot catch, so
-// every draw function below takes it as an argument rather than reading it from
-// the table -- a new layer cannot be written without the parameter being in
-// front of the person writing it.
 struct Layer {
     const char* name;
     Lighting lighting;
-    Grade grade;
-    void (*draw)(SDL_Renderer*, const Params&, const Grade&);
+    void (*draw)(SDL_Renderer*, const Params&);
 };
 
 // Clears and draws the world layers, in order. Presents nothing and leaves the

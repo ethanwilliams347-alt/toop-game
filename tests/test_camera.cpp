@@ -142,15 +142,15 @@ int main() {
               near(a.view_fx(), b.view_fx()) && near(a.view_fy(), b.view_fy()), "");
     }
 
-    // An infinite scene drops the horizontal clamp and only that one. Both halves
+    // An unclamped scene drops the horizontal clamp and only that one. Both halves
     // are checked at once, because the failure worth catching is the vertical clamp
     // being dropped along with it -- the texture upload reads rows out of the grid,
     // so a view above the world is a read outside it.
     {
         Camera far_left, far_right, high;
         far_left.follow_mode(-5000.0f, cy, VIEWPORT_W, VIEWPORT_H, WORLD_W, WORLD_H, true);
-        check("an infinite scene does not clamp at the left border",
-              far_left.view_fx() < 0.0f, std::to_string(far_left.view_fx()));
+        check("an unclamped scene does not clamp at the left border", far_left.view_fx() < 0.0f,
+              std::to_string(far_left.view_fx()));
 
         far_right.follow_mode(50000.0f, cy, VIEWPORT_W, VIEWPORT_H, WORLD_W, WORLD_H, true);
         check("nor at the right one",

@@ -325,40 +325,22 @@ int main() {
           SDL_GetError());
 
     // The layer table's shape, asserted here rather than only in the compiler.
-    // frame.cpp holds the Lit/Light/Unlit invariant with static_asserts, which is
+    // frame.cpp holds the Lit/Light invariant with static_asserts, which is
     // the stronger guard. What that cannot catch is the table silently becoming
     // empty or losing the light pass through some future edit that still compiles --
     // so the count and the one boundary entry are checked from the outside too.
-    int lit = 0, graded = 0, boundary = 0, unlit = 0;
+    int lit = 0, boundary = 0;
     for (int i = 0; i < frame::LAYER_COUNT; ++i) {
         switch (frame::LAYERS[i].lighting) {
             case frame::Lighting::Lit: ++lit; break;
-            case frame::Lighting::Grade: ++graded; break;
             case frame::Lighting::Light: ++boundary; break;
-            case frame::Lighting::Unlit: ++unlit; break;
         }
     }
     check("the layer table has exactly one light pass", boundary == 1,
-          "Lit and Unlit are defined against it; without it they mean nothing");
-    check("at most one world-wide grade", graded <= 1,
-          "two full-screen multiplies compose into a third grade nothing declares");
-    check("every world layer is lit", lit == frame::LAYER_COUNT - 1 - graded && unlit == 0,
+          "Lit is defined against it; without it it means nothing");
+    check("every world layer is lit", lit == frame::LAYER_COUNT - 1,
           "UI belongs in render/overlay.cpp, after the light pass - a layer arriving "
-          "here "
-          "unlit means the world/UI boundary has moved and B1 is reachable again");
-
-    // The world-wide grade gets its own check rather than riding on the golden
-    // number. Params::world_grade defaults to identity and draw_grade returns before
-    // its first draw call when it is, so the fixture below composes with the quad
-    // skipped -- the checksum covers the per-layer half of the multiply and not the
-    // world-wide half.
-    //
-    // So: compose once more with a non-identity grade and require the frame to move.
-    // Without it, draw_grade could early-return unconditionally and every check in
-    // this file would still pass.
-    check("the grade pass is skipped at identity", p.world_grade.identity(),
-          "the fixture is supposed to compose without the quad, so that the golden "
-          "checksum keeps meaning what it meant before step 3");
+          "here unlit means the world/UI boundary has moved");
 
     frame::compose(renderer, p);
     const uint64_t first = hash_surface(surface);
@@ -464,72 +446,24 @@ int main() {
           "a one-cell camera move left the frame identical - the checksum is not "
           "watching what it claims to");
 
-    // --- the grade pass has to actually darken ----------------
+    // --- the light pass has to actually add light ----------------
     //
-    // Two claims, and neither is covered by anything above. world_grade is identity
-    // in the fixture, so draw_grade returns immediately and the golden checksum has
-    // never seen the quad; an unconditional early return would pass every other
-    // check in this file.
-    //
-    // Measured as mean luminance rather than as a checksum, because "the frame
-    // changed" is not the claim -- the claim is that it got darker, which is the
-    // whole of what an additive pass cannot do. A hash cannot tell those apart, and
-    // a grade that brightened would satisfy one and not the other.
+    // Not covered by the checksum alone: a draw_light that returned before drawing
+    // would change the golden number once, be re-baselined, and pass from then on.
+    // Measured as mean luminance rather than as a hash, because the claim is that
+    // the frame got brighter, which a hash cannot tell from any other change.
     camera.follow(CAM_X, CAM_Y, PADDED_W, PADDED_H, WORLD_W, WORLD_H);
     frame::compose(renderer, p);
-    const double plain_mean = mean_luminance(surface);
-
-    p.world_grade = frame::Grade{128, 128, 128};
-    frame::compose(renderer, p);
-    const double graded_mean = mean_luminance(surface);
-
-    char graded_detail[192];
-    std::snprintf(graded_detail, sizeof(graded_detail),
-                  "mean luminance %.2f ungraded, %.2f at half grade",
-                  plain_mean, graded_mean);
-    check("a half grade darkens the composed frame", graded_mean < plain_mean * 0.75,
-          graded_detail);
-
-    // And the ordering, as a number rather than as a comment.
-    //
-    // Comparing peak luminance cannot do the job: the fixture's fire already
-    // saturates ungraded, so the number a correct ordering produces and the number a
-    // reversed one produces are both squeezed against the clip and land close
-    // together. "The brightest pixel stays bright" is a true statement about the
-    // design and a bad instrument for it.
-    //
-    // What discriminates cleanly is the light pass's contribution: compose with and
-    // without it and subtract. Drawn before the light, as declared, the grade cannot
-    // touch that difference and it comes out the same in both frames. Drawn after
-    // it, the difference is multiplied along with everything else and comes out at
-    // half. The threshold sits between the two, so it separates the two orderings
-    // and not two tunings.
-    //
-    // The static_assert in frame.cpp catches a reversed table first, so this is not
-    // the primary guard. It is the guard on the case the compiler cannot see:
-    // rank() and the table edited together, which is exactly what someone would do
-    // to "fix the build" after moving a row.
+    const double lit_mean = mean_luminance(surface);
     const LightField* saved_light = p.light;
-
     p.light = nullptr;  // draw_light returns before drawing
     frame::compose(renderer, p);
-    const double graded_unlit = mean_luminance(surface);
-    p.world_grade = frame::Grade{};
-    frame::compose(renderer, p);
-    const double plain_unlit = mean_luminance(surface);
+    const double unlit_mean = mean_luminance(surface);
     p.light = saved_light;
-
-    const double plain_contribution = plain_mean - plain_unlit;
-    const double graded_contribution = graded_mean - graded_unlit;
-
-    std::snprintf(graded_detail, sizeof(graded_detail),
-                  "the light pass adds %.3f ungraded and %.3f at half grade; drawn "
-                  "after the grade instead it would add about %.3f",
-                  plain_contribution, graded_contribution, plain_contribution * 0.5);
-    check("the light pass carries a fixture the grade can be measured against",
-          plain_contribution > 0.05, graded_detail);
-    check("the light pass is not dimmed by the grade",
-          graded_contribution > plain_contribution * 0.8, graded_detail);
+    char light_detail[128];
+    std::snprintf(light_detail, sizeof(light_detail), "mean luminance %.3f lit, %.3f without",
+                  lit_mean, unlit_mean);
+    check("the light pass brightens the frame", lit_mean - unlit_mean > 0.05, light_detail);
 
     // --- the screen-space layer -----------------------------------
     //

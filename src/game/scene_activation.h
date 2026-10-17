@@ -24,7 +24,7 @@ namespace scene_activation {
 struct Resolved {
     int world_w = 0;
     int world_h = 0;
-    bool infinite = false;
+    bool unclamped = false;
 
     // Screen pixels per world cell for this scene.
     int scale = 0;
@@ -52,7 +52,7 @@ inline Resolved resolve(const scene_list::SceneDef& def,
                         int default_w, int default_h,
                         int current_scale) {
     Resolved r;
-    r.infinite = def.is_infinite();
+    r.unclamped = def.is_unclamped();
     r.world_w = def.custom_width  > 0 ? def.custom_width
               : (art_w > 0 ? art_w : default_w);
     r.world_h = def.custom_height > 0 ? def.custom_height

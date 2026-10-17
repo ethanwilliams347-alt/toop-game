@@ -18,7 +18,7 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
         def, scene.width, scene.height, boot::GRID_WIDTH, boot::GRID_HEIGHT, def.scale);
     r.world_w = resolved.world_w;
     r.world_h = resolved.world_h;
-    r.infinite = resolved.infinite;
+    r.unclamped = resolved.unclamped;
 
     run.reset(seed, r.world_w, r.world_h);
 

@@ -79,7 +79,7 @@ public:
 
     // The brush's write path, and the only one that conserves what was already
     // standing in the cell. set_element overwrites, which is right for every other
-    // caller -- a reaction turning Wood into Fire means the wood is gone, worldgen
+    // caller -- a reaction turning Wood into Fire means the wood is gone, scene loading
     // writes into a grid nobody has filled yet, and the eraser's job is deletion --
     // but wrong for a player pushing sand into a pool, where it would delete the
     // water rather than move it.

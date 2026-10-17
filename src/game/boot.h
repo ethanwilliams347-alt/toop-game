@@ -254,9 +254,8 @@ inline constexpr int ENEMY_CLEARANCE = clearance_for(species::GHOUL);
 
 // What the planter did, for the launch line main.cpp prints.
 struct EnemyPlanting {
-    int placed = 0;   // every species
-    int trolls = 0;   // of which trolls
-    int skipped = 0;  // columns under water, or where the pool was full
+    int placed = 0;  // every species
+    int trolls = 0;  // of which trolls
 };
 
 // Where a body of `kind` would stand with its box's left column at x: the y of
@@ -322,10 +321,7 @@ inline EnemyPlanting plant_enemies(Run& run) {
             x < troll_x + troll.width + ghoul.width)
             continue;
         const int y = standing_y(run.grid, x, ghoul);
-        if (y < 0 || !run.spawn_enemy(x, y, ghoul)) {
-            ++report.skipped;
-            continue;
-        }
+        if (y < 0 || !run.spawn_enemy(x, y, ghoul)) continue;  // under water, or the pool is full
         ++report.placed;
     }
     return report;
