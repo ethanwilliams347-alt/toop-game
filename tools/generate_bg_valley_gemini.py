@@ -1,10 +1,10 @@
-"""Generates the extended 688x288 backdrop layer set for bg_gemini/.
+"""Generates the extended 688x288 backdrop layer set for bg_valley_gemini/.
 
 This is a newly generated, authored pixel art landscape extending the visual style
-and topology of assets/bg1/ to a 688x288 canvas:
+and topology of assets/bg_valley/ to a 688x288 canvas:
 - Native resolution: 688 x 288 px
-- 9 parallax layers matching bg1's depth breakdown, factor ladder, and back-to-front drawing order
-- Exact palette colors measured from assets/bg1/
+- 9 parallax layers matching bg_valley's depth breakdown, factor ladder, and back-to-front drawing order
+- Exact palette colors measured from assets/bg_valley/
 - Authentic matched topology:
   * Layer 09 (Sky): 3-tier atmospheric gradient with undulating cloud and shadow strata
   * Layer 08 (Ground): 4 receding surface bands (slate shore, teal lake, olive grass, forest meadow)
@@ -38,13 +38,13 @@ from pixel_art import COLOR_KEY, LEGEND_WALL, write_layered_backdrop
 TARGET_W = 688
 TARGET_H = 288
 
-# Floor row for material map: scaled 2x from bg1's row 132
+# Floor row for material map: scaled 2x from bg_valley's row 132
 FLOOR_ROW = 264
 
 # pixel_art's colour key: a layer is transparent wherever it is left this.
 MAGENTA = COLOR_KEY
 
-# Exact palette colors measured from assets/bg1/
+# Exact palette colors measured from assets/bg_valley/
 SKY_BASE = (161, 201, 199)
 SKY_CLOUD = (125, 161, 149)
 SKY_RIM = (124, 178, 187)
@@ -577,27 +577,27 @@ def scene_cell(_x, y):
     return (LEGEND_WALL, None) if y >= FLOOR_ROW else None
 
 
-README = """# Background Gemini (bg_gemini) Multi-Layer Extended Set
+README = """# Background Gemini (bg_valley_gemini) Multi-Layer Extended Set
 
-Native resolution: 688 x 288 px (New generative pixel art extension of Background_1 / bg1)
+Native resolution: 688 x 288 px (a generative repaint of the `bg_valley` set at twice its size)
 
 ## Layer Order & Depth Breakdown (Back to Front)
 
 | File | Layer Index | Name / Description | Parallax X | Parallax Y | Transparency |
 | :--- | :---: | :--- | :---: | :---: | :--- |
-| bg_gemini_09_sky.bmp | 9 | Sky & Atmosphere | 0.04x | 1.00x | Fully Opaque |
-| bg_gemini_08_ground.bmp | 8 | Ground / Water Plane | Banded | 1.00x | Magenta Key |
-| bg_gemini_07_mountains.bmp | 7 | Distant Mountains | 0.12x | 1.00x | Magenta Key |
-| bg_gemini_06_hills_far.bmp | 6 | Far Hills | 0.20x | 1.00x | Magenta Key |
-| bg_gemini_05_hills_midfar.bmp | 5 | Mid-Far Hills | 0.30x | 1.00x | Magenta Key |
-| bg_gemini_04_hills_mid.bmp | 4 | Mid Hills | 0.42x | 1.00x | Magenta Key |
-| bg_gemini_03_hills_midnear.bmp | 3 | Mid-Near Hills | 0.55x | 1.00x | Magenta Key |
-| bg_gemini_02_hills_near.bmp | 2 | Near Hills | 0.70x | 1.00x | Magenta Key |
-| bg_gemini_01_fg_rocks.bmp | 1 | Foreground Rocks (in front of player) | 1.00x | 1.00x | Magenta Key (Foreground) |
+| bg_valley_gemini_09_sky.bmp | 9 | Sky & Atmosphere | 0.04x | 1.00x | Fully Opaque |
+| bg_valley_gemini_08_ground.bmp | 8 | Ground / Water Plane | Banded | 1.00x | Magenta Key |
+| bg_valley_gemini_07_mountains.bmp | 7 | Distant Mountains | 0.12x | 1.00x | Magenta Key |
+| bg_valley_gemini_06_hills_far.bmp | 6 | Far Hills | 0.20x | 1.00x | Magenta Key |
+| bg_valley_gemini_05_hills_midfar.bmp | 5 | Mid-Far Hills | 0.30x | 1.00x | Magenta Key |
+| bg_valley_gemini_04_hills_mid.bmp | 4 | Mid Hills | 0.42x | 1.00x | Magenta Key |
+| bg_valley_gemini_03_hills_midnear.bmp | 3 | Mid-Near Hills | 0.55x | 1.00x | Magenta Key |
+| bg_valley_gemini_02_hills_near.bmp | 2 | Near Hills | 0.70x | 1.00x | Magenta Key |
+| bg_valley_gemini_01_fg_rocks.bmp | 1 | Foreground Rocks (in front of player) | 1.00x | 1.00x | Magenta Key (Foreground) |
 
 ## Color Palette & Visual Rules
 
-- **Palette**: Exact RGB colors measured from `assets/bg1/`.
+- **Palette**: Exact RGB colors measured from `assets/bg_valley/`.
 - **Composition**: Authoring of extended geological features (towering mountain massif on left with serrated aretes, crisp pyramid summits on far hills, shark-fin twin summits on midfar hills, stepped rock terraces framing open panoramic lake).
 - **Ground Banding**:
   * Band 0 (rows 0..164): 0.30x parallax factor.
@@ -612,4 +612,4 @@ Native resolution: 688 x 288 px (New generative pixel art extension of Backgroun
 
 
 if __name__ == "__main__":
-    write_layered_backdrop("bg_gemini", TARGET_W, TARGET_H, LAYERS, scene_cell, README)
+    write_layered_backdrop("bg_valley_gemini", TARGET_W, TARGET_H, LAYERS, scene_cell, README)

@@ -3,13 +3,13 @@
     python tools/generate_bg_tarn_wide.py
 
 Writes assets/bg_tarn_wide/ (thirteen layers, a composite preview and a README)
-and assets/bg_tarn_wide_material.bmp / bg_tarn_wide_albedo.bmp (the playable
+and assets/bg_tarn_wide/bg_tarn_wide_material.bmp / bg_tarn_wide_albedo.bmp (the playable
 scene).
 
 --- what it is ------------------------------------------------------------------
 
 The same place as bg_tarn -- a mountain lake at sunset under a far range -- but
-a world 2752 cells wide, eight screens at 3440x1440 and fourteen at 1920x1080,
+a world 2752 cells wide, 6.4 screens at 3440x1440 and 11.5 at 1920x1080 (scale 8),
 which the camera follows from one end to the other. Ethan asked for it in the
 style of Cast n Chill / Wild n Chill, which is a particular way of drawing a
 shore:
@@ -35,7 +35,7 @@ Two things are new.
 
   1. Layers are not all the set's width. backdrop_set.h ("why a layer may be
      narrower than its set") has the argument: over the whole walk a layer at
-     factor f shows V + f * (W - V) columns, so the sky needs 345 and the near
+     factor f shows V + f * (W - V) columns, so the sky needs 431 and the near
      shore nearly all 2752. The far layers are 688 or 1376 wide and say so with
      width= in backdrop.txt; backdrop_set_test checks each is wide enough that
      no 3440-wide window ever sees it twice.
@@ -108,15 +108,16 @@ FG_BASE = H - 1
 F_FAR_SHORE = factor_at(FAR_SHORE_FOOT)
 
 # Tile widths. Each is the smallest of 688 / 1376 / 2752 that is at least
-# 345 + f * (2752 - 345): the widest window the game offers (3440 / 10 + 1)
-# plus everything the walk pans past it.
-SKY_W = 688  # f 0.00 needs 345
+# 431 + f * (2752 - 431): the widest window the game offers at the scene's
+# scale (3440 / 8 + 1) plus everything the walk pans past it. The hills are the
+# tight one, three columns spare; any closer scale than 8 needs them at 1376.
+SKY_W = 688  # f 0.00 needs 431
 CLOUD_W = 688  # drifts; laps by design
-MOUNTAIN_W = 688  # f 0.031 needs 421
-RIDGE_W = 688  # 0.063 needs 496
-HILL_W = 688  # 0.109 needs 608
-FAR_SHORE_W = 1376  # 0.156 needs 721
-ISLET_W = 1376  # 0.375 needs 1248
+MOUNTAIN_W = 688  # f 0.031 needs 503
+RIDGE_W = 688  # 0.063 needs 576
+HILL_W = 688  # 0.109 needs 685
+FAR_SHORE_W = 1376  # 0.156 needs 794
+ISLET_W = 1376  # 0.375 needs 1301
 FG_W = 1376  # 1.30: faster than the world, so it repeats at any width
 
 LAKE_TOP = 211  # the far shoreline, straight: at this distance it is a ruled line

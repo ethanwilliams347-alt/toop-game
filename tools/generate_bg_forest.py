@@ -523,10 +523,10 @@ here; edits made to the BMPs by hand are overwritten on the next run. It is
 deterministic - two runs produce byte-identical output - so a diff in this
 directory is a real change to the generator and never a re-roll.
 
-**This is the first authored set that is not `bg1`'s landscape.** `bg1_ext` and
-`bg_gemini` are the same place as `bg1` at 688x288; this one is a different
+**This is the first authored set that is not `bg_valley`'s landscape.** `bg_valley_ext` and
+`bg_valley_gemini` are the same place as `bg_valley` at 688x288; this one is a different
 place at the same camera. The parallax ladder and the ground band table are
-`bg_gemini`'s unchanged, because a factor is one over a depth and the depths did
+`bg_valley_gemini`'s unchanged, because a factor is one over a depth and the depths did
 not move - only what stands at them did.
 
 ## Parallax Layer Table (Back-to-Front)

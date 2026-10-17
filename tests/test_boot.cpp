@@ -471,24 +471,24 @@ void test_scene_resolve_shipped_rows() {
         if (def.name == "empty") {
             check("resolve: 'empty' is a 1920x1080 unclamped world at 4x",
                   r.world_w == 1920 && r.world_h == 1080 && r.unclamped && r.scale == 4);
-        } else if (def.name == "bg1") {
+        } else if (def.name == "bg_valley") {
             // One art pixel to one world cell, at the scale that makes the widest
             // window show exactly the reference frame. backdrop_set_test asserts the
             // art is that size; this asserts the world is.
-            check("resolve: 'bg1' is a 344x144 fixed world at 10x, one art "
+            check("resolve: 'bg_valley' is a 344x144 fixed world at 10x, one art "
                   "pixel to one world cell",
                   r.world_w == 344 && r.world_h == 144 && !r.unclamped && r.scale == 10);
-        } else if (def.name == "bg1_ext") {
+        } else if (def.name == "bg_valley_ext") {
             // The same mapping and the same scale, over twice the world. The scale is
             // the assertion worth having: a row that resized the world and rescaled it
             // would keep the art filling the window and quietly halve the player
             // against the scene, which is the one way an extension stops being an
             // extension.
-            check("resolve: 'bg1_ext' is a 688x288 fixed world at bg1's 10x, "
+            check("resolve: 'bg_valley_ext' is a 688x288 fixed world at bg_valley's 10x, "
                   "still one art pixel to one world cell",
                   r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
-        } else if (def.name == "bg_gemini") {
-            check("resolve: 'bg_gemini' is a 688x288 fixed world at 10x",
+        } else if (def.name == "bg_valley_gemini") {
+            check("resolve: 'bg_valley_gemini' is a 688x288 fixed world at 10x",
                   r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
         }
     }

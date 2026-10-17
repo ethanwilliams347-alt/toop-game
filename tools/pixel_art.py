@@ -47,7 +47,7 @@ import zlib
 #
 # asset_path and src_path are for outputs. An input the caller names on the
 # command line stays relative to the caller, because that is what a shell user
-# means when they type a path -- see art_src/ in convert_background_layers.py,
+# means when they type a path -- see art_src/ in convert_bg_valley.py,
 # which is deliberately not routed through here.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -246,7 +246,7 @@ PALETTE = {
     # Its own group rather than a reuse of the backdrop group above, because that
     # group is a night palette with "zero warm colour in it" as a rule, and this
     # scene is lit by a low sun. The hues are taken from Ethan's
-    # art_src/Background_1, measured rather than copied: the teal mountain
+    # art_src/bg_valley, measured rather than copied: the teal mountain
     # (#0B4D5C there), the sage and pale-cyan sky bands, the taupe/sand/brown hill
     # ladder with a gold rim line, the red banded rock, the deep-teal lake and the
     # olive/bottle-green meadow. What is new is the light: a warm horizon and a
@@ -256,9 +256,9 @@ PALETTE = {
     # Far to near the body values fall and the rims brighten, the same ladder
     # bg_forest's README states: far is close to the sky, near is darker and more
     # contrasty.
-    'tarn_sky_top': (0x0B, 0x4D, 0x5C),  # bg1's mountain teal, at the zenith
+    'tarn_sky_top': (0x0B, 0x4D, 0x5C),  # bg_valley's mountain teal, at the zenith
     'tarn_sky_high': (0x2F, 0x6F, 0x7A),
-    'tarn_sky_mid': (0x7D, 0xA1, 0x95),  # bg1's sage sky band
+    'tarn_sky_mid': (0x7D, 0xA1, 0x95),  # bg_valley's sage sky band
     'tarn_sky_low': (0xC9, 0xB9, 0x8A),
     'tarn_sky_horizon': (0xE8, 0xA8, 0x62),  # the one warm band: under the sun
     'tarn_sun_halo': (0xF6, 0xD0, 0x80),
@@ -271,26 +271,26 @@ PALETTE = {
     'tarn_snow': (0xD8, 0xE2, 0xD6),
     'tarn_snow_shade': (0x9C, 0xB8, 0xB6),
     'tarn_peak_rim': (0xF4, 0xC8, 0x82),
-    'tarn_ridge': (0x58, 0x74, 0x6E),  # bg1's grey-green hill, hazed
+    'tarn_ridge': (0x58, 0x74, 0x6E),  # bg_valley's grey-green hill, hazed
     'tarn_ridge_shade': (0x45, 0x60, 0x5E),
-    'tarn_ridge_rim': (0x63, 0xA0, 0x84),  # bg1's green rim, lifted
-    'tarn_mesa': (0x8A, 0x5A, 0x46),  # bg1's red rock
+    'tarn_ridge_rim': (0x63, 0xA0, 0x84),  # bg_valley's green rim, lifted
+    'tarn_mesa': (0x8A, 0x5A, 0x46),  # bg_valley's red rock
     'tarn_mesa_band': (0x6E, 0x3E, 0x30),
     'tarn_mesa_shade': (0x5A, 0x38, 0x2E),
     'tarn_mesa_lit': (0xC0, 0x7E, 0x52),
-    'tarn_dune': (0xA4, 0x98, 0x80),  # bg1's sand hill
+    'tarn_dune': (0xA4, 0x98, 0x80),  # bg_valley's sand hill
     'tarn_dune_shade': (0x80, 0x6C, 0x47),
-    'tarn_dune_rim': (0xD6, 0xAE, 0x5E),  # bg1's gold rim, in sunlight
+    'tarn_dune_rim': (0xD6, 0xAE, 0x5E),  # bg_valley's gold rim, in sunlight
     'tarn_shore_far': (0x2C, 0x3E, 0x2E),
-    'tarn_lake_deep': (0x13, 0x34, 0x31),  # bg1's lake
+    'tarn_lake_deep': (0x13, 0x34, 0x31),  # bg_valley's lake
     'tarn_lake': (0x1E, 0x4A, 0x46),
     'tarn_lake_sky': (0x6F, 0x9A, 0x92),  # the sky, reflected
     'tarn_lake_warm': (0xB0, 0x8A, 0x5E),  # the horizon, reflected
     'tarn_glint': (0xFF, 0xE6, 0xA6),
     'tarn_glint_dim': (0xE2, 0xA6, 0x62),
     'tarn_meadow_far': (0x2C, 0x3A, 0x12),
-    'tarn_meadow': (0x1F, 0x2A, 0x0C),  # bg1's olive meadow
-    'tarn_meadow_near': (0x0C, 0x27, 0x14),  # bg1's bottle green
+    'tarn_meadow': (0x1F, 0x2A, 0x0C),  # bg_valley's olive meadow
+    'tarn_meadow_near': (0x0C, 0x27, 0x14),  # bg_valley's bottle green
     'tarn_meadow_lit': (0x5A, 0x62, 0x22),
     'tarn_flower': (0xC8, 0x9A, 0x48),
     'tarn_pine_far': (0x1E, 0x3C, 0x36),
@@ -936,7 +936,7 @@ def rgb(v):
 # --- writing a backdrop set ----------------------------------------------------
 #
 # A backdrop set is assets/<name>/<name>_<tag>.bmp per layer, plus the scene
-# pair assets/<name>_material.bmp and _albedo.bmp, plus a preview for people in
+# pair assets/<name>/<name>_material.bmp and _albedo.bmp, plus a preview for people in
 # art_src/previews/ (not assets/, which is staged next to the exe).
 
 
@@ -952,14 +952,14 @@ def stage(path, name):
 
 
 def write_scene(name, width, height, scene_cell, background=None):
-    """Writes assets/<name>_material.bmp and _albedo.bmp and returns the albedo.
+    """Writes assets/<name>/<name>_material.bmp and _albedo.bmp and returns the albedo.
 
     scene_cell(x, y) gives (legend colour, albedo colour) for a cell of the
     playable world, or None for air. Air is LEGEND_EMPTY in the material map.
     An albedo of None -- air's, or a cell's that returns None for it -- is the
     backdrop composite behind it when one is passed (`background`, row-major),
     else LEGEND_EMPTY: a floor that is the painted ground itself, as bg_forest's
-    and bg_gemini's are, says so with (LEGEND_WALL, None)."""
+    and bg_valley_gemini's are, says so with (LEGEND_WALL, None)."""
     assert_legend_matches_header()
     mat, alb = [], []
     for y in range(height):
@@ -969,8 +969,8 @@ def write_scene(name, width, height, scene_cell, background=None):
                 a = LEGEND_EMPTY if background is None else background[y * width + x]
             mat.append(m)
             alb.append(a)
-    write_bmp(asset_path(f'{name}_material.bmp'), width, height, mat)
-    write_bmp(asset_path(f'{name}_albedo.bmp'), width, height, alb)
+    write_bmp(asset_path(name, f'{name}_material.bmp'), width, height, mat)
+    write_bmp(asset_path(name, f'{name}_albedo.bmp'), width, height, alb)
     return alb
 
 

@@ -17,12 +17,13 @@ namespace {
 
 bool near_eq(float a, float b, float tol = 0.01f) { return std::fabs(a - b) < tol; }
 
-// The three display modes, as padded viewports at scale 10 (game/display.h).
-// Repeated rather than included: display.h pulls in camera.h and settings I/O,
-// and this suite is about the rig's numbers, not the shell's.
+// The three display modes, as padded viewports at scale 8, the rig scenes'
+// scale in assets/scenes.txt (game/display.h). Repeated rather than included:
+// display.h pulls in camera.h and settings I/O, and this suite is about the
+// rig's numbers, not the shell's.
 struct View { int w, h; };
-constexpr View VIEWS[] = {{193, 109}, {257, 145}, {345, 145}};
-constexpr int SCALE = 10;
+constexpr View VIEWS[] = {{241, 136}, {321, 181}, {431, 181}};
+constexpr int SCALE = 8;
 constexpr int BODY_H = 26;            // Player::HEIGHT
 constexpr float VERTICAL_ANCHOR = 0.80f;  // Camera::VERTICAL_ANCHOR
 
@@ -39,15 +40,15 @@ void test_pinhole() {
     check("a foreground below the contact row comes out nearer than the world",
           depth_rig::factor_at(rig, 280.0f) > 1.0f);
 
-    // The claim depth_rig.h makes about Ethan's bg1: its two hand-chosen contacts,
+    // The claim depth_rig.h makes about Ethan's bg_valley: its two hand-chosen contacts,
     // 0.30 at row 73 and 0.70 at row 89, are one pinhole camera with its horizon at
-    // row 61 -- two rows above where bg1_08_ground starts being painted.
-    const depth_rig::Rig bg1{61, 101, 1.0f};
-    check("bg1's hand-tuned contacts are a pinhole camera (horizon 61, contact 101)",
-          near_eq(depth_rig::factor_at(bg1, 73.0f), 0.30f) &&
-              near_eq(depth_rig::factor_at(bg1, 89.0f), 0.70f));
+    // row 61 -- two rows above where bg_valley_08_ground starts being painted.
+    const depth_rig::Rig bg_valley{61, 101, 1.0f};
+    check("bg_valley's hand-tuned contacts are a pinhole camera (horizon 61, contact 101)",
+          near_eq(depth_rig::factor_at(bg_valley, 73.0f), 0.30f) &&
+              near_eq(depth_rig::factor_at(bg_valley, 89.0f), 0.70f));
 
-    check("vertical strength 1 is the honest camera, 0 is bg1's locked vertical",
+    check("vertical strength 1 is the honest camera, 0 is bg_valley's locked vertical",
           depth_rig::vertical_factor(depth_rig::Rig{0, 1, 1.0f}, 0.3f) == 0.3f &&
               depth_rig::vertical_factor(depth_rig::Rig{0, 1, 0.0f}, 0.3f) == 1.0f);
 }
@@ -77,7 +78,7 @@ void test_placement() {
 
         // The glue, swept over every camera position the game can reach: a layer
         // standing on plane row r lands its feet on the plane's own row r, on both
-        // axes. This is the property the bg1 model had to give up the vertical
+        // axes. This is the property the bg_valley model had to give up the vertical
         // axis to keep.
         bool glued = true;
         std::string where;

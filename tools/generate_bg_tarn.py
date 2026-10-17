@@ -3,9 +3,9 @@
     python tools/generate_bg_tarn.py
 
 Writes assets/bg_tarn/ (eleven layers, a composite preview and a README) and
-assets/bg_tarn_material.bmp / bg_tarn_albedo.bmp (the playable scene).
+assets/bg_tarn/bg_tarn_material.bmp / bg_tarn_albedo.bmp (the playable scene).
 
-Inspired by art_src/Background_1 (Ethan's bg1): the same family of places -- a
+Inspired by art_src/bg_valley (Ethan's bg_valley): the same family of places -- a
 teal mountain range, a ladder of sand and red-rock hills with a gold rim line, a
 still lake, an olive meadow -- moved to the hour when the sun is low behind the
 range, so every far value leans toward the sky and every lit edge toward gold.
@@ -121,7 +121,7 @@ def sun_closeness(x, reach):
 
 # --- 11 sky (opaque) ---------------------------------------------------------
 #
-# bg1's sky is flat bands with soft, wavy edges rather than a smooth ramp, and
+# bg_valley's sky is flat bands with soft, wavy edges rather than a smooth ramp, and
 # that is kept: each stop is a band, and only the few rows between two bands are
 # dithered. The bands are anchored to HORIZON, the plane's own top edge, for the
 # reason bg_forest's README records -- anchored lower, the ramp is still passing
@@ -179,12 +179,12 @@ def gen_sky():
 
 # --- 10 clouds (drifting) ----------------------------------------------------
 #
-# Long flat stratus, bg1's cloud language, with a lit underside where the sun is
+# Long flat stratus, bg_valley's cloud language, with a lit underside where the sun is
 # under them. Drawn on their own layer so the renderer can drift it with time --
 # the one thing in the frame that moves when the camera does not.
 #
 # Most of them sit low, rows 168..186, in the band a standing camera sees above
-# the peaks; the rest are higher up for the flight. A cloud above row 164 is only
+# the peaks; the rest are higher up for the flight. A cloud above row 142 is only
 # ever on screen when the player is in the air.
 CLOUDS = [  # (centre x, row, half length, thickness)
     (40, 176, 110, 3),
@@ -260,7 +260,7 @@ def gen_plane():
         lt = lake_top(x)
         lb = lake_bottom(x)
         # Flat bands with wavy edges, and no ordered dither anywhere in the plane.
-        # The plane is the one layer the rig stretches vertically -- up to 2.9x with
+        # The plane is the one layer the rig stretches vertically -- up to 2.7x with
         # the camera at the ceiling -- and a dither stretched in one axis turns into
         # vertical stripes. A wavy edge stretched is just a taller wave.
         far_edge = HORIZON + 6 + int(round(1.5 * wsin(x, 11, W, 0.5)))
@@ -344,7 +344,7 @@ def gen_glint():
 
 # --- 07 far mountains --------------------------------------------------------
 #
-# bg1's teal range, hazed toward the sky, with snow and a rim of sunlight along
+# bg_valley's teal range, hazed toward the sky, with snow and a rim of sunlight along
 # the crest near the sun. A saddle sits under the sun so it sets into the range
 # rather than behind a peak.
 PEAKS = [  # (x, height above foot, slope)
@@ -359,9 +359,10 @@ PEAKS = [  # (x, height above foot, slope)
     (618, 24, 0.85),
 ]
 
-# The summits top out at row 170, six rows under where a standing 1080p camera's
-# window begins (view-y 163.8), so the peaks are in the frame the player actually
-# sees rather than only in the one they fly up to.
+# The summits top out at row 170, under where a standing 1080p camera's window
+# begins (view-y 142.2 at the scene's scale of 8; 163.8 at the 10 it was drawn
+# for), so the peaks are in the frame the player actually sees rather than only
+# in the one they fly up to.
 
 
 def mountain_form(x):
@@ -397,7 +398,7 @@ def paint_massif(
         # Which way the slope faces, read off `form` -- the crest without its
         # crags -- over nine columns. Read off the crest itself, every crag flips
         # a column between lit and shaded and the face turns to vertical stripes.
-        # Flat colours either side, the way bg1 paints a face; no dither inside a
+        # Flat colours either side, the way bg_valley paints a face; no dither inside a
         # mass, because a dithered field at this size reads as noise, not shade.
         rising = form(x + 4) - form(x - 4)  # rows: positive means falling right
         facing_sun = (rising > 0) == (x < SUN_X) if wdist(x, SUN_X) > 4 else True
@@ -409,7 +410,7 @@ def paint_massif(
         if rim_reach and rnd(x, 5) < sun_closeness(x, rim_reach) * 1.4:
             img[top][x] = rim
     # Ridge lines: a one-cell darker line from each peak down its shaded side,
-    # the way bg1 draws its rock faces.
+    # the way bg_valley draws its rock faces.
     for px, _ph, _sl in ridge_lines:
         direction = -1 if px > SUN_X else 1
         y = crest(px) + 1
@@ -443,7 +444,7 @@ def gen_mountains():
 
 # --- 06 ridge (grey-green foothills) -----------------------------------------
 def ridge_form(x):
-    # Rolling, not jagged: these are bg1's grey-green foothills. A dip under the
+    # Rolling, not jagged: these are bg_valley's grey-green foothills. A dip under the
     # sun so the foothills do not cut it.
     h = 5.0 + 11.0 * wnoise(x, 9, W, 31) + 3.0 * wnoise(x, 23, W, 32)
     h -= 9.0 * sun_closeness(x, 70)
@@ -457,7 +458,7 @@ def ridge_crest(x):
 def gen_ridge():
     # Not paint_massif's lit/shaded faces. Rolling hills have no faces to speak of,
     # and splitting them by slope direction turns a gentle hill into a row of
-    # vertical walls. bg1 shades its hills with contour lines instead -- a second
+    # vertical walls. bg_valley shades its hills with contour lines instead -- a second
     # crest line a few rows under the first, following its shape -- and so does
     # this: a lit cap, a contour, and the shaded body under it.
     img = blank()

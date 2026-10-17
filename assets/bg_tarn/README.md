@@ -1,18 +1,18 @@
 # bg_tarn: a mountain lake at golden hour
 
-Native resolution 688 x 288; one art pixel is one world cell, loaded at scale 10
+Native resolution 688 x 288; one art pixel is one world cell, loaded at scale 8
 by the `bg_tarn` row in `assets/scenes.txt`.
 
 **Generated, not drawn.** `python tools/generate_bg_tarn.py` writes every BMP
-here, plus `assets/bg_tarn_material.bmp` and `assets/bg_tarn_albedo.bmp`. It is
+here, plus `bg_tarn_material.bmp` and `bg_tarn_albedo.bmp`. It is
 deterministic, so a diff here is a change to the script. This README is the one
 hand-written file.
 
-Inspired by `art_src/Background_1` (bg1): its teal range, the sand / grey-green /
+Inspired by `art_src/bg_valley` (bg_valley): its teal range, the sand / grey-green /
 red-rock hill ladder with a gold rim line, the still lake and the olive meadow,
 re-lit by a low sun. Every colour is a `tarn_*` name in `tools/pixel_art.py`.
 
-## Drawn by the perspective rig, not the bg1 banding
+## Drawn by the perspective rig, not the bg_valley banding
 
 See `src/render/depth_rig.h`. In short: the horizon is art row 200 and the
 terrain surface row 264; a layer's parallax factor is `(foot - 200) / 64`, where

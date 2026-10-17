@@ -10,16 +10,20 @@
 #
 # The world is 2752 cells wide. Layers whose factor keeps them from ever
 # showing more than part of it are narrower tiles, stated with width=: a layer
-# at factor f shows 345 + f * (2752 - 345) columns over the whole walk through a
-# 3440-wide window, and backdrop_set_test holds each width to that.
+# at factor f shows 431 + f * (2752 - 431) columns over the whole walk through a
+# 3440-wide window at the scene's scale of 8, and backdrop_set_test holds each
+# width to that.
 #
-#     sky, glint     0.00   needs  345   width 688
-#     mountains      0.031  needs  421   width 688
-#     ridge          0.063  needs  496   width 688
-#     hills          0.109  needs  608   width 688
-#     far shore      0.156  needs  721   width 1376  (and its reflection)
-#     islets         0.375  needs 1248   width 1376
-#     shore, near    0.63+  needs 1850+  the set's 2752
+#     sky, glint     0.00   needs  431   width 688
+#     mountains      0.031  needs  503   width 688
+#     ridge          0.063  needs  576   width 688
+#     hills          0.109  needs  685   width 688
+#     far shore      0.156  needs  794   width 1376  (and its reflection)
+#     islets         0.375  needs 1301   width 1376
+#     shore, near    0.63+  needs 1882+  the set's 2752
+#
+# The hills have three columns to spare. Framing the scene any closer than
+# scale 8 means regenerating them 1376 wide first.
 #
 # The reflection is the far shore upside down, at the far shore's own factor
 # and width so the two stay aligned, and on the plane's rows vertically so it

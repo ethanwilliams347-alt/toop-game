@@ -130,10 +130,10 @@ void test_scene_list_level_field() {
     check("scene list: level= twice rejects the file", s.empty() && !err.empty(), err);
     s = load("a m.bmp a.bmp - terrain level=../x.txt\n", &err);
     check("scene list: a level= outside assets/ rejects the file", s.empty() && !err.empty(), err);
-    s = load("a m.bmp a.bmp - terrain backdrop=bg1 level=a_level.txt\n", &err);
+    s = load("a m.bmp a.bmp - terrain backdrop=bg_valley level=a_level.txt\n", &err);
     check("scene list: backdrop= names a folder, alongside level=",
-          s.size() == 1 && s[0].backdrop == "bg1" && s[0].level == "a_level.txt", err);
-    s = load("a m.bmp a.bmp - terrain backdrop=../bg1\n", &err);
+          s.size() == 1 && s[0].backdrop == "bg_valley" && s[0].level == "a_level.txt", err);
+    s = load("a m.bmp a.bmp - terrain backdrop=../bg_valley\n", &err);
     check("scene list: a backdrop= outside assets/ rejects the file", s.empty() && !err.empty(),
           err);
     s = load("a m.bmp a.bmp - terrain backdrop=a backdrop=b\n", &err);

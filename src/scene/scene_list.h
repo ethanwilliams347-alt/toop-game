@@ -15,7 +15,7 @@
 //     # name    material           albedo            props           spawn    named fields
 //     fixture   test_material.bmp  test_albedo.bmp   test_props.txt  terrain
 //     empty     -                  -                 -               floor    mode=unclamped size=1920x1080
-//     bg1       bg1_material.bmp   bg1_albedo.bmp    -               terrain  size=344x144 scale=10 backdrop=bg1
+//     bg_valley bg_valley/bg_valley_material.bmp  bg_valley/bg_valley_albedo.bmp  -  terrain  size=344x144 scale=10 backdrop=bg_valley
 //
 // Five positional fields, all required, `-` meaning none for the three
 // filenames. Blank lines are fine. Anything else is an error with a line number,
@@ -46,9 +46,10 @@
 // spelling in the message rather than read.
 //
 // Names and filenames are text_record::name_ok (util/text_record.h): letters,
-// digits, `_` and `-`, plus one dot before a filename's extension. Nothing else,
-// so no path separator and no `..`, and a scene list can never reach outside
-// assets/.
+// digits, `_` and `-`, plus one dot before a filename's extension. A filename may
+// sit in one folder, `<dir>/<file>`, and only in the scene's own backdrop= folder.
+// Nothing else, so no second separator, no backslash and no `..`, and a scene
+// list can never reach outside assets/ or into assets/wip/.
 //
 // Every field is read, which is why there is no `seed` column and no x/y spawn
 // column: a number the loader ignores is one an author eventually spends an

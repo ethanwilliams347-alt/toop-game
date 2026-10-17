@@ -223,7 +223,7 @@ int main() {
     }
     {
         const Result r = parse("old test_material.bmp test_albedo.bmp - terrain fixed 344 144 10 "
-                               "backdrop=bg1\n");
+                               "backdrop=bg_valley\n");
         check("so does a fixed one with a size, a scale and a named field after them",
               r.rejected() && r.error.find("positional") != std::string::npos, r.error);
     }
@@ -312,6 +312,32 @@ int main() {
     {
         const Result r = parse("bad wip/draft.bmp wip/draft.bmp - floor\n");
         check("including through a subdirectory", r.rejected(), r.error);
+    }
+    {
+        const Result r = parse("bad wip/draft.bmp wip/draft.bmp - floor backdrop=bg_x\n");
+        check("...even in a scene with a backdrop, when it is not that backdrop's folder",
+              r.rejected() && r.error.find("own backdrop= folder") != std::string::npos,
+              r.error);
+    }
+    {
+        // The one folder a scene's files may sit in: the naming rule in
+        // assets/scenes.txt keeps a backdrop scene's maps and level with its layers.
+        const Result r = parse("bg_x bg_x/bg_x_material.bmp bg_x/bg_x_albedo.bmp - terrain "
+                               "backdrop=bg_x level=bg_x/bg_x_level.txt\n");
+        check("a scene's files may sit in its own backdrop folder",
+              r.scenes.size() == 1 && r.scenes[0].material == "bg_x/bg_x_material.bmp" &&
+                  r.scenes[0].albedo == "bg_x/bg_x_albedo.bmp" &&
+                  r.scenes[0].level == "bg_x/bg_x_level.txt",
+              r.error);
+    }
+    {
+        const char* bad[] = {"bg_x/../a.bmp", "bg_x/sub/a.bmp", "/a.bmp", "bg_x/.bmp",
+                             "bg_x/", "bg_x\\a.bmp"};
+        for (const char* file : bad) {
+            const Result r = parse(std::string("bg_x ") + file + " - - terrain backdrop=bg_x\n");
+            check((std::string("...and only as one plain name: '") + file + "' is refused").c_str(),
+                  r.rejected(), r.error);
+        }
     }
     {
         const Result r = parse("bad noextension noextension - floor\n");

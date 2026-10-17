@@ -197,7 +197,7 @@ Set load(const std::string& path, const std::string& dir, std::string* error) {
             // Bands are cut on flat paint so that one image can scroll at three
             // rates without a visible step. Vertical parallax would also have to
             // stretch each band about the horizon, and the cut that was invisible
-            // sideways becomes a tear. The bg1 family is vertically locked for the
+            // sideways becomes a tear. The bg_valley family is vertically locked for the
             // same reason (one painted plane under every layer), so a banded layer
             // belongs to a locked set.
             if (!l.bands.empty() && set.has_rig && set.rig.vertical_strength != 0.0f)

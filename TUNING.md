@@ -169,10 +169,11 @@ factor moves together. The knobs are the camera and the motion.
 |---|---|---|---|
 | `rig` horizon | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 200 | Art row where the ground plane vanishes (factor 0). Must match `HORIZON` in `tools/generate_bg_tarn.py`. |
 | `rig` contact | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 264 | Art row where the plane meets the world (factor 1); the terrain surface. |
-| `rig` vertical strength | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 0.75 | Share of honest vertical parallax. 1.0 = true camera (plane magnifies 3.6x at the ceiling, 1080p); 0 = bg1's locked vertical. |
+| `rig` vertical strength | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 0.75 | Share of honest vertical parallax. 1.0 = true camera (plane magnifies 3.2x at the ceiling, 1080p); 0 = bg_valley's locked vertical. |
 | `ripple` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 0.6 cells | Sideways shimmer of lake rows and the sun glint. Keep under 1 cell or rows visibly tear. |
 | clouds `drift` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | -0.6 cells/s | Cloud drift with no camera motion. |
 | reeds `factor` | [backdrop.txt](assets/bg_tarn/backdrop.txt) | 1.30 | Foreground speed. Above 1.00 is legal only because rig layers wrap. |
+| scene `scale` | [scenes.txt](assets/scenes.txt) | 8 | Screen pixels per cell for `bg_tarn` and `bg_tarn_wide`: how close the camera frames the lake (430x180 cells at 3440x1440). 8 is as far out as the current art allows; at 7 `bg_tarn_wide`'s hills tile repeats on screen. |
 
 ---
 
@@ -318,7 +319,7 @@ Record adjustments to tuning parameters and their rationale here.
 - **2026-10-07, perspective rig (`bg_tarn`).** Added `vertical_strength` 0.75,
   `ripple_amplitude` 0.6, cloud `drift` -0.6, reeds 1.30. 0.75 because at 0.5 the
   valley drops out of a ceiling-height window and at 1.0 the plane smears at 3.6x;
-  see the header of `assets/bg_tarn/backdrop.txt`. Existing bg1-family sets are unchanged.
+  see the header of `assets/bg_tarn/backdrop.txt`. Existing bg_valley-family sets are unchanged.
 - **2026-10-08, `bg_tarn_wide`.** A second rig set, 2752 cells wide, with no
   new values: it takes bg_tarn's rig (horizon 200, contact 264, strength 0.75),
   ripple 0.6, cloud drift -0.6 and foreground 1.30 so the two read as the same
@@ -346,7 +347,7 @@ Record adjustments to tuning parameters and their rationale here.
   grades, `PLANE_TEXEL_SCALE`, `GROUND_STRIPS` and the surface-plane pass's
   `SKIN_CELLS` / `FULL_END` / `DEPTH_END` / `PLANE_FADE_END_T`. Its only user was
   the `empty` debug scene, which now draws the clear colour. The `bg_tarn` rows
-  moved to its backdrop.txt with the same values; bg1-family factors and bands
+  moved to its backdrop.txt with the same values; bg_valley-family factors and bands
   are unchanged.
 - **2026-10-08 -- fish added** (first-pass values). A largemouth bass on human
   legs with a lure arm out of the top of its head, a fifth taller than the troll
@@ -376,3 +377,11 @@ Record adjustments to tuning parameters and their rationale here.
   in 232 steps instead of 265, the tank settles in 778 instead of 1020, and two
   waves now reach the far wall where none did. Spread 7 and 8 were tried: faster
   still (223, 217) but sloshier, settling in 885 and 1226. Oil is unchanged.
+- **2026-10-17 -- the tarn scenes zoomed out, scale 10 -> 8.** A playtest found
+  `bg_tarn` and `bg_tarn_wide` framed too close. At 8 a 1080p window shows 240x135
+  cells instead of 192x108, and a player standing on the shore sees 58 rows above
+  the horizon instead of 36. No rig value moved: a taller window has less room to
+  climb, so the plane stretches less at the ceiling (2.7x at strength 0.75, was
+  2.9x), inside what was judged when 0.75 was picked. 8 is as far out as the art goes:
+  at 7 the 688-wide hills tile in `bg_tarn_wide` would show twice on a 3440
+  screen. The valley and forest scenes stay at 10.
