@@ -1,6 +1,6 @@
 // The step loop allocates nothing in steady state.
 //
-// CLAUDE.md states it as an invariant, and until this suite it was held by
+// ARCHITECTURE.md states it as an invariant, and until this suite it was held by
 // reading: a local std::vector, std::string or std::function anywhere under
 // Run::step compiles, passes every other test and costs a heap round trip per
 // step. This counts every global allocation the process makes and asserts that
