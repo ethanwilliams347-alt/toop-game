@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <sstream>
+#include "scene/number.h"
 
 bool prop_sprite_name_ok(const std::string& sprite) {
     if (sprite.empty()) return false;
@@ -54,9 +55,18 @@ std::vector<PropDef> load_prop_list(const std::string& path, std::string* error)
             return fail("'" + sprite + "' is not a usable sprite name "
                         "(letters, digits, _ and - only; no path separators)");
 
+        // Read as a whole field and then converted, rather than with >> into a
+        // float: >> stops at "120px" and leaves "px" for the extra-field check
+        // below, which then blames an authored y the author never wrote.
+        std::string x_raw;
+        if (!(fields >> x_raw)) return fail("'" + sprite + "' has no x coordinate");
         float x = 0.0f;
-        if (!(fields >> x))
-            return fail("'" + sprite + "' has no x coordinate");
+        if (!number::decimal(x_raw, x)) {
+            std::string why = "'" + sprite + "' has an x of '";
+            why += x_raw;
+            why += "', which is not a number (plain decimal, like 145 or 187.5)";
+            return fail(why);
+        }
 
         // A trailing field is a typo, or a y coordinate someone expected to be
         // read -- see props.h for why there is no y. Rejected rather than

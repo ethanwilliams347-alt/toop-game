@@ -50,9 +50,10 @@ struct Element {
     //    what a falling piece's speed and its fracture threshold are read from. It
     //    lives on the cell rather than on the piece because a piece has no identity
     //    between steps -- it is re-discovered by flood fill every time.
-    //  - For a Fire cell it is fuel remaining: steps of burning still owed by
-    //    whatever this flame came from, seeded at ignition out of the burning
-    //    material's burn_duration.
+    //  - For a Fire cell it is steps of flame left: drawn around
+    //    Grid::FLAME_LIFETIME_MEAN when the flame is thrown off a burning cell, and
+    //    read back by step_fire for the colour ramp. How long the fuel burns is not
+    //    here -- that is Charred's decay chance in REACTIONS.
     //  - For a Steam cell it is steps until it condenses. The same role as Fire's
     //    and deliberately not a third one: both are gases whose whole existence is
     //    a countdown, and neither can ever be structural.
@@ -60,8 +61,11 @@ struct Element {
     // Sharing is safe because the roles cannot occur in the same cell: a lifetime
     // belongs to a Gas and a Gas is never structural, which TickRole below asserts
     // rather than trusts. Every transition between roles goes through place(),
-    // which builds a fresh Element and so zeroes this -- a Wood cell that has been
-    // falling does not carry its fall ticks over as fuel when it ignites.
+    // which builds a fresh Element and so zeroes this -- an Oil cell that flashes
+    // to Fire starts its flame from zero, not from whatever the byte held. The one
+    // carry is within a role: try_react keeps the fall clock when a structural cell
+    // becomes another structural one (Wood catching into Charred), because there
+    // the byte means the same on both sides.
     //
     // Zero for everything else. Powders and fluids move one cell per step by their
     // own rules and have no use for a clock.

@@ -26,11 +26,13 @@ public:
     // step.
     //
     // Raising it is the obvious way to pay for a longer reach or a larger viewport,
-    // and it is the wrong trade: occlusion is averaged over a block, so a one-cell
-    // wall reads as 1/BLOCK opaque, and light leaking through a player-drawn
-    // one-cell wall is exactly that number being too small already. Doubling BLOCK
-    // halves it again. Reach is bought below instead, where it costs iterations
-    // rather than the sharpness of a wall.
+    // and it is the wrong trade: a block is the smallest thing light can stop at,
+    // so every shadow edge is quantised to BLOCK cells, and anything that covers
+    // only part of a block -- a short or diagonal wall, a single rock -- has its
+    // occlusion spread across the whole of it (light.cpp multiplies the cells'
+    // transmissions, so a straight one-cell wall still stops what a cell of rock
+    // stops). Doubling BLOCK doubles both. Reach is bought below instead, where it
+    // costs iterations rather than the sharpness of a wall.
     static constexpr int BLOCK = 4;
 
     // How far light carries, in propagation steps. Each step moves light one block --

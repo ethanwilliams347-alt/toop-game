@@ -21,6 +21,13 @@ namespace {
 
 const char* TMP = "test_level_tmp.txt";
 
+// The size main.cpp's activate_scene resolves for a scene, and hands to
+// level::start: the row, else the art, else the engine default.
+scene_activation::Resolved size_of(const scene_list::SceneDef& def, const Scene& scene) {
+    return scene_activation::resolve(def, scene.width, scene.height, boot::GRID_WIDTH,
+                                     boot::GRID_HEIGHT, def.scale);
+}
+
 level_list::LevelDef parse(const std::string& text, std::string* error) {
     {
         std::ofstream out(TMP);
@@ -37,15 +44,15 @@ void test_parser() {
     const level_list::LevelDef ok = parse("# a comment\n"
                                           "player 80\n"
                                           "\n"
-                                          "enemy ghoul 260.5   # trailing comment\n"
+                                          "enemy ghoul 260   # trailing comment\n"
                                           "enemy troll 560\n"
                                           "objective 636\n",
                                           &err);
     check("level: a well-formed file parses", err.empty(), err);
-    check("level: ...with its player column", ok.has_player && ok.player_x == 80.0f);
+    check("level: ...with its player column", ok.has_player && ok.player_x == 80);
     check("level: ...its objective", ok.has_objective && ok.objective_x == 636);
     check("level: ...and both enemies, in order, with their lines",
-          ok.enemies.size() == 2 && ok.enemies[0].species == "ghoul" && ok.enemies[0].x == 260.5f &&
+          ok.enemies.size() == 2 && ok.enemies[0].species == "ghoul" && ok.enemies[0].x == 260 &&
               ok.enemies[0].line == 4 && ok.enemies[1].species == "troll" &&
               ok.enemies[1].line == 5);
 
@@ -65,6 +72,17 @@ void test_parser() {
         {"a column with a unit glued on", "player 80px\n", 1},
         {"a negative column", "enemy ghoul -5\n", 1},
         {"an enemy with no column", "enemy troll\n", 1},
+        // Columns are whole cells. A fraction used to be rounded for the player
+        // and an enemy and truncated for the objective, so "player 120.6" and
+        // "objective 120.6" landed a cell apart.
+        {"a fractional player column", "player 120.6\n", 1},
+        {"a fractional objective column", "objective 120.6\n", 1},
+        {"a fractional enemy column", "enemy ghoul 260.5\n", 1},
+        {"an exponent", "player 1e2\n", 1},
+        {"a hex column", "objective 0x40\n", 1},
+        {"a signed column", "player +80\n", 1},
+        {"a column past int", "objective 99999999999\n", 1},
+        {"inf", "enemy troll inf\n", 1},
     };
     for (const Bad& b : bad) {
         const level_list::LevelDef d = parse(b.text, &err);
@@ -152,7 +170,8 @@ void test_start() {
     {
         const auto run_owner = std::make_unique<Run>(10, 10, 1);
         Run& run = *run_owner;
-        const level::Report r = level::start(run, def, sc, level_list::LevelDef{}, 7);
+        const level::Report r =
+            level::start(run, size_of(def, sc), def, sc, level_list::LevelDef{}, 7);
         check("start: the world takes the art's size",
               r.world_w == 400 && r.world_h == 200 && run.grid.get_width() == 400);
         check("start: every cell of the art is stamped", r.scene_cells == 400 * 20);
@@ -169,16 +188,16 @@ void test_start() {
 
     level_list::LevelDef lv;
     lv.has_player = true;
-    lv.player_x = 50.0f;
+    lv.player_x = 50;
     lv.has_objective = true;
     lv.objective_x = 300;
-    lv.enemies.push_back(level_list::EnemyDef{"troll", 200.0f, 3});
-    lv.enemies.push_back(level_list::EnemyDef{"ghoul", 120.0f, 4});
-    lv.enemies.push_back(level_list::EnemyDef{"ghoul", 1000.0f, 5});  // off the world
+    lv.enemies.push_back(level_list::EnemyDef{"troll", 200, 3});
+    lv.enemies.push_back(level_list::EnemyDef{"ghoul", 120, 4});
+    lv.enemies.push_back(level_list::EnemyDef{"ghoul", 1000, 5});  // off the world
 
     const auto run_owner = std::make_unique<Run>(10, 10, 1);
     Run& run = *run_owner;
-    const level::Report r = level::start(run, def, sc, lv, 7);
+    const level::Report r = level::start(run, size_of(def, sc), def, sc, lv, 7);
     check("start: an authored player column is the body's centre",
           run.player.center_x() == 50 && r.player_standing);
     check("start: an authored objective is planted at its column",
@@ -207,12 +226,12 @@ void test_start() {
     // whole claim a recording's start fingerprint relies on.
     const auto again_owner = std::make_unique<Run>(10, 10, 1);
     Run& again = *again_owner;
-    level::start(again, def, sc, lv, 7);
+    level::start(again, size_of(def, sc), def, sc, lv, 7);
     check("start: the same inputs build the same world",
           input_log::fingerprint(again) == input_log::fingerprint(run) &&
               again.player.cell_x() == run.player.cell_x() &&
               again.enemies_alive() == run.enemies_alive());
-    level::start(again, def, sc, lv, 7);
+    level::start(again, size_of(def, sc), def, sc, lv, 7);
     check("start: ...including into a run that already held a level",
           input_log::fingerprint(again) == input_log::fingerprint(run) &&
               again.enemies_alive() == run.enemies_alive());
@@ -232,7 +251,8 @@ void test_shipped_scenes() {
               loaded.errors.empty() ? "" : loaded.errors.front());
         const auto run_owner = std::make_unique<Run>(10, 10, 1);
         Run& run = *run_owner;
-        const level::Report r = level::start(run, def, loaded.scene, loaded.level, 1);
+        const level::Report r =
+            level::start(run, size_of(def, loaded.scene), def, loaded.scene, loaded.level, 1);
         if (def.declared_empty()) continue;
         check(("shipped: '" + def.name + "' has an objective, so it can be won").c_str(),
               r.objective_placed && run.has_objective());

@@ -1,24 +1,17 @@
 #include "game/level.h"
 
-#include <cmath>
 #include "game/boot.h"
-#include "game/scene_activation.h"
 
 namespace level {
 
 bool is_species(const char* name) { return species::find(name) != nullptr; }
 
-Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
-             const level_list::LevelDef& level, uint64_t seed) {
+Report start(Run& run, const scene_activation::Resolved& size, const scene_list::SceneDef& def,
+             const Scene& scene, const level_list::LevelDef& level, uint64_t seed) {
     Report r;
-
-    // The scale argument only decides Resolved::scale_changed, which is the
-    // renderer's business; the world's size does not depend on it.
-    const scene_activation::Resolved resolved = scene_activation::resolve(
-        def, scene.width, scene.height, boot::GRID_WIDTH, boot::GRID_HEIGHT, def.scale);
-    r.world_w = resolved.world_w;
-    r.world_h = resolved.world_h;
-    r.unclamped = resolved.unclamped;
+    r.world_w = size.world_w;
+    r.world_h = size.world_h;
+    r.unclamped = size.unclamped;
 
     run.reset(seed, r.world_w, r.world_h);
 
@@ -29,8 +22,7 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
     //
     // An authored column is the body's centre, like a prop's x, so the file does
     // not have to know the box is eight cells wide.
-    const int player_left =
-        level.has_player ? static_cast<int>(std::lround(level.player_x)) - Player::WIDTH / 2 : -1;
+    const int player_left = level.has_player ? level.player_x - Player::WIDTH / 2 : -1;
     if (def.spawn == scene_list::Spawn::Floor) {
         boot::stand_player_on_floor(run, player_left);
         r.player_on_floor = true;
@@ -66,7 +58,7 @@ Report start(Run& run, const scene_list::SceneDef& def, const Scene& scene,
                 r.enemy_lines_unplaced.push_back(e.line);
                 continue;
             }
-            const int left = static_cast<int>(std::lround(e.x)) - kind->width / 2;
+            const int left = e.x - kind->width / 2;
             const int y = boot::standing_y(run.grid, left, *kind);
             if (y < 0 || !run.spawn_enemy(left, y, *kind)) {
                 r.enemy_lines_unplaced.push_back(e.line);

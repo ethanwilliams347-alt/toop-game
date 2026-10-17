@@ -9,8 +9,8 @@ from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, write_bmp  # n
 #
 # It is a test fixture wearing art: each region below exists to exercise one
 # named system, not to look good, and anything that exercises no system belongs
-# in a drawn layer instead. Sized to GRID_WIDTH/HEIGHT in main.cpp; the two must
-# move together.
+# in a drawn layer instead. Sized to boot::GRID_WIDTH/HEIGHT (src/game/boot.h),
+# which test_boot builds its fixture world at; the two must move together.
 #
 # Albedo comes from the locked palette in tools/pixel_art.py plus a rim-light
 # pass, rather than from hand-picked shades close to the legend colours.
@@ -23,10 +23,11 @@ from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, write_bmp  # n
 # fixture scales with the body, and the scene units still mean what they meant.
 
 # The spawn stands on an open run of floor, and every region is placed to leave
-# it that way. The body spawns at GRID_WIDTH / 2 -- scene unit 384 -- and falls;
-# landing it on a small island high above the floor leaves almost none of the
-# world in frame and nearly all of the region below the player's feet showing the
-# backdrop plane.
+# it that way. The body starts at GRID_WIDTH / 2 -- scene unit 384 -- and is
+# stood on whatever is under that column (boot::stand_player_on_ground); standing
+# it on a small island high above the floor leaves almost none of the world in
+# frame and nearly all of the region below the player's feet showing the backdrop
+# plane.
 #
 # That is worth knowing before tuning anything about the junction between the
 # world's surface and the plane's near end: at a spawn like that there is no

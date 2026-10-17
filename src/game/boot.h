@@ -178,10 +178,11 @@ struct Planted {
 };
 
 // What the planting scan did with each record. Three outcomes, held apart,
-// because the count the launch check prints has to include both ways a prop can
-// be dropped -- a sprite that would not load, and a prop with no ground under
-// it. A count taken before the second of those can happen reports every prop
-// placed on a run that drew fewer.
+// because a count of placed props has to include both ways a prop can be
+// dropped -- a sprite that would not load, and a prop with no ground under it.
+// A count taken before the second of those can happen reports every prop placed
+// on a run that drew fewer. test_boot's fixture section asserts on this report;
+// main.cpp's "Props:" line is the same count, printed as a diagnostic.
 struct PlantingReport {
     std::vector<Planted> planted;
     std::vector<int> no_texture;  // def indices whose sprite did not load

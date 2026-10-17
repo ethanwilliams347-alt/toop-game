@@ -5,11 +5,6 @@
 #include "fixed.h"
 #include "grid.h"
 
-// One arrow: a point with a velocity, outside the grid like the player is.
-//
-// The tip is what matters, and it is a whole cell plus an `fx` remainder for the
-// reason Player's position is -- collision only ever asks about whole cells, so an
-// arrow is never a fraction of a cell into a wall.
 // Where an arrow ended its flight this step: in a body (enemy >= 0, with the
 // pixels its bite took) or stuck in terrain (enemy == -1). Recorded by the quiver
 // so the run can report it (game/events.h) without the physics knowing who is
@@ -21,6 +16,11 @@ struct ArrowImpact {
     int pixels = 0;
 };
 
+// One arrow: a point with a velocity, outside the grid like the player is.
+//
+// The tip is what matters, and it is a whole cell plus an `fx` remainder for the
+// reason Player's position is -- collision only ever asks about whole cells, so an
+// arrow is never a fraction of a cell into a wall.
 struct Arrow {
     bool live = false;
 

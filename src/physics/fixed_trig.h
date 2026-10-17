@@ -2,11 +2,14 @@
 #include <cstdint>
 #include "fixed.h"
 
-// Sine and cosine in 16.16, for the one part of the simulation that turns
-// things: a structure tipping over its own edge (see "toppling" in grid.h).
+// Sine and cosine in 16.16, for the parts of the simulation that turn things: a
+// structure tipping over its own edge (see "toppling" in grid.h), and an enemy's
+// rig -- its limbs' angles (rig.h) and the walk and breathing cycles that drive
+// them (enemy.cpp).
 //
-// Its own header rather than more of fixed.h because nothing else needs it, and
-// fixed.h is included by every file that touches a number.
+// Its own header rather than more of fixed.h because most of the simulation
+// never turns anything, and fixed.h is included by every file that touches a
+// number.
 //
 // Integer-only for the reason fixed.h gives: std::sin is allowed to differ in the
 // last bit between compilers, libms and /fp modes, and a rotation that differs by

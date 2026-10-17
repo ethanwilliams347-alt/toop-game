@@ -16,9 +16,9 @@
 // a pit the player has to bring down on it, ghouls on a bridge that burns -- needs
 // its contents written down.
 //
-// Like props, nothing has an authored y. Every record is a column, and the thing
-// is stood on the terrain actually under it when the level starts
-// (game/level.cpp). A y in the file would be a number the loader ignores once
+// Like props, nothing has an authored y. Every record is a column -- a whole,
+// non-negative number of cells, read by scene/number.h -- and the thing is stood
+// on the terrain actually under it when the level starts (game/level.cpp). A y in the file would be a number the loader ignores once
 // someone digs the ground away, and a number the loader ignores is one an author
 // eventually spends an afternoon tuning.
 //
@@ -43,13 +43,13 @@ namespace level_list {
 
 struct EnemyDef {
     std::string species;  // a species::find name; checked by the loader
-    float x = 0.0f;       // world cell, the body's centre column
+    int x = 0;            // world cell, the body's centre column
     int line = 0;         // 1-based source line, for diagnostics
 };
 
 struct LevelDef {
     bool has_player = false;
-    float player_x = 0.0f;  // world cell, the body's centre column
+    int player_x = 0;       // world cell, the body's centre column
     bool has_objective = false;
     int objective_x = 0;    // world cell
     std::vector<EnemyDef> enemies;

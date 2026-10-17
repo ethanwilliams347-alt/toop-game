@@ -433,21 +433,22 @@ int main(int argc, char* argv[]) {
             props.push_back(Prop{ prop_tex[p.def_index], prop_w[p.def_index], prop_h[p.def_index],
                                   prop_defs[p.def_index].x, static_cast<float>(p.anchor_y) });
         }
-        // Printed after planting, because this is the line the launch check reads
-        // and it has to count props that will actually be drawn. Printed
-        // immediately after the textures load instead -- before either way a prop
-        // can be dropped -- a run with an unplantable prop reports every prop
-        // placed on stdout while warning on stderr that one was not drawn. A
-        // check that asserts the wrong thing fails silently, because it passes.
-        // Both drops are in the count: a sprite that would not load, and a prop
-        // with no ground under it.
+        // A diagnostic for whoever is reading the console; nothing parses it. The
+        // check that every shipped prop plants is test_boot's fixture section.
+        // Printed after planting, so it counts props that will actually be drawn.
+        // Printed immediately after the textures load instead -- before either way
+        // a prop can be dropped -- a run with an unplantable prop would report
+        // every prop placed on stdout while warning on stderr that one was not
+        // drawn. Both drops are in the count: a sprite that would not load, and a
+        // prop with no ground under it.
         std::printf("Props: %d of %d placed\n", static_cast<int>(props.size()),
                     static_cast<int>(prop_defs.size()));
     };
 
-    // Centred, and deliberately not configurable from here. A moving vertical
-    // anchor was built and removed at the tester's request, and the whole mechanism
-    // went with it, so there is nothing left to hold.
+    // Centred across and held VERTICAL_ANCHOR of the way down (game/camera.h), and
+    // deliberately not configurable from here. A moving vertical anchor was built
+    // and removed at the tester's request; what is left is one constant on Camera,
+    // so there is nothing for main.cpp to hold.
     Camera camera;
 
     // Declared above the scene lambdas rather than below them, and that is a
@@ -519,7 +520,8 @@ int main(int argc, char* argv[]) {
         // The world itself: one call, shared with the replay bench and the tests,
         // so there is no second path that puts a world together. See game/level.h
         // for what it does and why it is not here.
-        const level::Report built = level::start(run, def, loaded.scene, loaded.level, world_seed);
+        const level::Report built =
+            level::start(run, resolved, def, loaded.scene, loaded.level, world_seed);
         for (const level::Line& line : level::describe(built, def)) {
             if (line.warning)
                 std::fprintf(stderr, "WARNING: %s\n", line.text.c_str());
@@ -609,7 +611,7 @@ int main(int argc, char* argv[]) {
     pacer::Pacer frame_pacer;
 
     int frames_this_second = 0;
-    double title_timer = 0.0;
+    double fps_timer = 0.0;
     int fps_display = 0;
 
     // Previous frame's sub-cell player position, for render interpolation. The
@@ -621,6 +623,42 @@ int main(int argc, char* argv[]) {
     // high refresh rate.
     float prev_player_x = present::player_visual(run.player).x;
     float prev_player_y = present::player_visual(run.player).y;
+
+    // --- the debug tooling ---------------------------------------------
+    //
+    // The state and every decision in it are in game/debug_view.h, which is SDL-free
+    // and has a suite; what is left here is the key bindings and the drawing.
+    //
+    // Above the two world rebuilds below, because putting the presentation back
+    // after one includes the free camera.
+    DebugView debug;
+
+    // What the screen holds about the world it was last drawing, put back after
+    // activate_scene has built a different one. One lambda for both callers, the
+    // restart and the scene key, because they are the same reset and two copies of
+    // it is how one of them comes to miss a line.
+    //
+    // The body is somewhere else entirely now, so last step's drawn position is not
+    // something to ease away from, and nothing else would stop it: interpolation
+    // snaps only on a step the body reports as a teleport (pacer::interpolate), and
+    // a rebuilt world is not a step. The walk cycle and the accumulator start over
+    // for the same reason: neither is about the new world.
+    //
+    // `new_scene` decides the free camera, and it is the one way the two callers
+    // differ. A detached camera after a scene switch is looking at a world that no
+    // longer exists, so it re-attaches: re-aiming it at the same coordinates would
+    // point a debug view at whatever happens to be at those cells now. A restart
+    // rebuilds the same scene on the same seed, so the same coordinates are the same
+    // cells, and a camera parked over the collapse being debugged stays there --
+    // Ctrl+R is a debugging key, and re-attaching would throw away where you were
+    // looking.
+    auto reset_presentation = [&](bool new_scene) {
+        prev_player_x = present::player_visual(run.player).x;
+        prev_player_y = present::player_visual(run.player).y;
+        anim_state = player_anim::State{};
+        frame_pacer.accumulator = 0.0;
+        if (new_scene && debug.free_camera) debug.attach_camera();
+    };
 
     // --- starting the run over ---
     //
@@ -645,22 +683,8 @@ int main(int argc, char* argv[]) {
         // it fall, which is exactly what boot::stand_player_on_ground removes at
         // launch. Two paths is how that gets fixed in one of them.
         activate_scene(active_scene);
-
-        // The body is somewhere else entirely now, so last step's drawn position
-        // is not something to ease away from. The interpolation clamp below would
-        // catch this on its own; setting them is the honest version of relying on
-        // that.
-        prev_player_x = present::player_visual(run.player).x;
-        prev_player_y = present::player_visual(run.player).y;
-        anim_state = player_anim::State{};
-        frame_pacer.accumulator = 0.0;
+        reset_presentation(false);
     };
-
-    // --- the debug tooling ---------------------------------------------
-    //
-    // The state and every decision in it are in game/debug_view.h, which is SDL-free
-    // and has a suite; what is left here is the key bindings and the drawing.
-    DebugView debug;
 
     // Exactly one fixed step, and the only place one happens.
     //
@@ -774,9 +798,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (e.type == SDL_MOUSEWHEEL) {
-                brush_size += e.wheel.y;
-                if (brush_size < 1) brush_size = 1;
-                if (brush_size > 32) brush_size = 32;
+                brush_size = std::clamp(brush_size + e.wheel.y, BRUSH_MIN, BRUSH_MAX);
             }
             else if (e.type == SDL_KEYDOWN) {
                 // The material keys are a loop over ui::HOTBAR rather than a switch
@@ -885,19 +907,7 @@ int main(int argc, char* argv[]) {
                 // there: nothing changed, so nothing is reported.
                 if (e.key.keysym.sym == SDLK_F7 && scenes.size() > 1) {
                     activate_scene((active_scene + 1) % static_cast<int>(scenes.size()));
-
-                    // The body is somewhere else entirely, so last frame's drawn
-                    // position is not something to ease away from.
-                    prev_player_x = present::player_visual(run.player).x;
-                    prev_player_y = present::player_visual(run.player).y;
-                    anim_state = player_anim::State{};
-                    frame_pacer.accumulator = 0.0;
-
-                    // A detached camera is looking at a world that no longer exists.
-                    // Re-attaching is the honest answer: re-aiming it at the same
-                    // coordinates would be pointing a debug view at whatever happens to
-                    // be at those cells now.
-                    if (debug.free_camera) debug.attach_camera();
+                    reset_presentation(true);
 
                     record_notice = "SCENE  " + scenes[static_cast<size_t>(active_scene)].name;
                     record_notice_timer = 2.0;
@@ -1045,8 +1055,8 @@ int main(int argc, char* argv[]) {
         // is already on W.
         input.shoot = !debug.free_camera && keys[SDL_SCANCODE_E];
 
-        // The camera is centred and stays centred; nothing per-frame is left to do to
-        // it besides the follow further down.
+        // The camera's framing is fixed -- centred across, VERTICAL_ANCHOR down -- so
+        // nothing per-frame is left to do to it besides the follow further down.
         //
         // Worth keeping the note a removed moving anchor leaves behind: it was updated
         // after the cursor was resolved, on purpose, so that the aim was read through
@@ -1295,8 +1305,8 @@ int main(int argc, char* argv[]) {
 
         // Surface the frame rate so performance regressions are visible while working.
         frames_this_second++;
-        title_timer += frame_time;
-        if (title_timer >= 1.0) {
+        fps_timer += frame_time;
+        if (fps_timer >= 1.0) {
             // Only the frame rate is cached -- it is a rate, and a rate needs an
             // interval to be measured over. The brush name and the awake-chunk count
             // are read straight from live state where the string is built above;
@@ -1304,7 +1314,7 @@ int main(int argc, char* argv[]) {
             // rate, and a count that lags by a second cannot.
             fps_display = frames_this_second;
             frames_this_second = 0;
-            title_timer = 0.0;
+            fps_timer = 0.0;
         }
     }
 

@@ -126,7 +126,7 @@ struct DebugView {
     //
     // Off by default and toggled, rather than a permanent extra line: a readout that
     // is always there is furniture within a minute and invisible by the time it
-    // matters, and this one would also push the line the launch check reads.
+    // matters.
     bool inspector = false;
 
 private:

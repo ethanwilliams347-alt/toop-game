@@ -17,6 +17,7 @@
 
 #include "physics/grid.h"
 #include "render/light.h"
+#include "game/boot.h"
 #include "game/display.h"
 #include "game/input_log.h"
 #include "game/level.h"
@@ -514,6 +515,8 @@ void take_sample(const Grid& g, SessionContents& c, bool dug_recently, bool is_b
 struct ReplayWorld {
     scene_list::SceneDef def;
     level_files::Loaded loaded;
+    // Resolved once, from the same inputs main.cpp's activate_scene gives it.
+    scene_activation::Resolved size;
 };
 
 bool load_replay_world(const input_log::Log& log, ReplayWorld& out, std::string& why) {
@@ -528,6 +531,8 @@ bool load_replay_world(const input_log::Log& log, ReplayWorld& out, std::string&
             why = out.loaded.errors.front();
             return false;
         }
+        out.size = scene_activation::resolve(d, out.loaded.scene.width, out.loaded.scene.height,
+                                             boot::GRID_WIDTH, boot::GRID_HEIGHT, d.scale);
         return true;
     }
     why = "the log was played in scene '" + log.header.scene +
@@ -541,7 +546,8 @@ bool load_replay_world(const input_log::Log& log, ReplayWorld& out, std::string&
 // started in: same terrain, same bodies, same objective (input_log::fingerprint
 // of the whole Run, not just the grid).
 bool rebuild_matches(Run& run, const input_log::Log& log, const ReplayWorld& world, int& placed) {
-    placed = level::start(run, world.def, world.loaded.scene, world.loaded.level, log.header.seed)
+    placed = level::start(run, world.size, world.def, world.loaded.scene, world.loaded.level,
+                          log.header.seed)
                  .scene_cells;
     return placed == log.header.scene_cells &&
            input_log::fingerprint(run) == log.header.start_fingerprint;
@@ -691,7 +697,8 @@ void run_replay(const char* log_path) {
     }
 
     Run census_run(log.header.grid_w, log.header.grid_h, log.header.seed);
-    level::start(census_run, world.def, world.loaded.scene, world.loaded.level, log.header.seed);
+    level::start(census_run, world.size, world.def, world.loaded.scene, world.loaded.level,
+                 log.header.seed);
 
     // Sample the world before the first step, and keep those counts as the baseline
     // the peaks are read against. See start_cells.
