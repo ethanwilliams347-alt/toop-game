@@ -10,7 +10,7 @@
 // A one-shot action, as against the held buttons in Input below.
 //
 // Each held verb is a bit in the log's button byte, and the dev keys used to be
-// bits too: N for a ghoul, T for a troll, the last free bit spent on the troll.
+// bits too: one for a ghoul, one for a troll, the last free bit spent on the troll.
 // Every new one-shot cost a bit and a log format bump. A command is one slot per
 // step instead -- a kind and an argument -- so a new one is a new enum value and
 // nothing else, and the log carries two bytes for it whatever the count.
@@ -221,7 +221,9 @@ public:
 
     // Whether enemies hold key poses rather than turning continuously -- the
     // comparison switch for the two animation styles, flipped by
-    // Command::TogglePoseSnap. Off in a fresh Run and after reset(): a recording
+    // Command::TogglePoseSnap. On in a fresh Run and after reset(): snapped is the
+    // style the game is meant to look like, and the continuous turn is the one
+    // kept for comparison. Reset rather than carried over because a recording
     // starts from a reset, so a replay has to start in the style the session did.
     bool snapped_poses() const { return snap_poses; }
 
@@ -242,7 +244,7 @@ private:
     // must not have the answer flicker back.
     Outcome run_outcome = Outcome::Playing;
     int kill_count = 0;
-    bool snap_poses = false;
+    bool snap_poses = true;
     EventLog events_;
 
     // The objective survives reset(), the one documented exception to "reset

@@ -1008,27 +1008,28 @@ int main() {
         return h;
     };
     {
-        // The command flips it, for bodies already there and bodies spawned after,
-        // and a reset puts it back -- a recording starts from a reset.
+        // Snapped from the start; the command flips it, for bodies already there
+        // and bodies spawned after, and a reset puts it back -- a recording starts
+        // from a reset.
         const auto run_owner = std::make_unique<Run>(WORLD_W, WORLD_H);
         Run& run = *run_owner;
         for (int y = FLOOR_Y; y < WORLD_H; ++y)
             for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
         run.spawn_enemy(60, FLOOR_Y - G.height);
-        check("a fresh run turns its enemies continuously",
-              !run.snapped_poses() && !run.enemies[0].snapped_poses());
+        check("a fresh run snaps its enemies' poses",
+              run.snapped_poses() && run.enemies[0].snapped_poses());
         Input in;
         in.command = Command{Command::Kind::TogglePoseSnap, 0};
         run.step(in);
         run.spawn_enemy(160, FLOOR_Y - G.height);
-        check("the toggle snaps the run, the body already in it, and one spawned after",
-              run.snapped_poses() && run.enemies[0].snapped_poses() &&
-                  run.enemies[1].snapped_poses());
+        check("the toggle unsnaps the run, the body already in it, and one spawned after",
+              !run.snapped_poses() && !run.enemies[0].snapped_poses() &&
+                  !run.enemies[1].snapped_poses());
         run.step(in);
-        check("and toggles back", !run.snapped_poses() && !run.enemies[0].snapped_poses());
+        check("and toggles back", run.snapped_poses() && run.enemies[0].snapped_poses());
         run.step(in);
         run.reset(Grid::DEFAULT_SEED);
-        check("a reset puts a snapped run back to continuous", !run.snapped_poses());
+        check("a reset puts a continuous run back to snapped", run.snapped_poses());
     }
     {
         // A ghoul wandering: snapped, it shows a few dozen poses at most -- walk
@@ -1055,12 +1056,8 @@ int main() {
     {
         // Snapped, every pose a wander, a chase, a swipe and a slam reach is still
         // sound, the ghoul's feet still swing, and the troll's club still goes up
-        // over its head and lands out in front.
-        const auto toggle = [](Run& run) {
-            Input in;
-            in.command = Command{Command::Kind::TogglePoseSnap, 0};
-            run.step(in);
-        };
+        // over its head and lands out in front. Snapped is a fresh Run's default,
+        // so these runs take no toggle.
         bool sound = true;
         std::string why;
         int ahead = 0, behind = 0;
@@ -1071,7 +1068,6 @@ int main() {
                 for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
             run.player = Player(240, FLOOR_Y - Player::HEIGHT);
             run.spawn_enemy(60, FLOOR_Y - G.height);
-            toggle(run);
             const int foot_x = 9, foot_y = G.frame_h() - 1;
             for (int i = 0; i < 400 && sound; ++i) {
                 run.step(Input{});
@@ -1097,7 +1093,6 @@ int main() {
                 for (int x = 0; x < WORLD_W; ++x) run.grid.set_element(x, y, ElementType::Wall);
             run.player = Player(100 + T.width + 4, FLOOR_Y - Player::HEIGHT);
             run.spawn_enemy(100, FLOOR_Y - T.height, T);
-            toggle(run);
             const int club_x = TA.w - 3, club_y = TA.h - 2;
             for (int i = 0; i < 200 && troll_sound; ++i) {
                 run.step(Input{});
@@ -1408,6 +1403,15 @@ int main() {
     {
         const auto run_owner = angler_arena(WORLD_W * 4);
         Run& run = *run_owner;
+        // In the continuous style, which this was written against. Snapped -- a
+        // fresh Run's default -- a planted foot slips a couple of cells now and
+        // then as the body's held pose changes under it, which is a known gap
+        // (see "snapped poses" in enemy.h) rather than what this checks.
+        {
+            Input in;
+            in.command = Command{Command::Kind::TogglePoseSnap, 0};
+            run.step(in);
+        }
         bool sound = true;
         std::string why;
         int skates = 0, rear_up = 0, front_up = 0, both_up = 0;

@@ -554,10 +554,10 @@ int main(int argc, char* argv[]) {
 
     ElementType current_brush = ElementType::Sand;
     int brush_size = 3;
-    // The one-shots key presses have asked for and no step has taken yet (N, T, B,
-    // F6), oldest first. A queue rather than one slot, because a slot keeps only
-    // the last request: N then T while paused spawned the troll and silently lost
-    // the ghoul. Each step takes at most one -- Input carries one command per step,
+    // The one-shots key presses have asked for and no step has taken yet (T, Y, U,
+    // I, F6), oldest first. A queue rather than one slot, because a slot keeps only
+    // the last request: a ghoul then a troll while paused spawned the troll and
+    // silently lost the ghoul. Each step takes at most one -- Input carries one command per step,
     // which is what the session log records -- so a burst drains over consecutive
     // steps in the order it was pressed.
     //
@@ -858,16 +858,22 @@ int main(int argc, char* argv[]) {
                 // request rather than a call on the Run: the spawn changes the world,
                 // so it has to arrive through Input and be in the recording. See
                 // command_queue for how it reaches a step.
-                if (e.key.keysym.sym == SDLK_n && !repeat)
+                //
+                // The spawn keys are a run along the top letter row from T -- ghoul,
+                // troll, fish, angler -- rather than one key per name's initial. A
+                // row is learned once and read off the keyboard; initials collided
+                // (F is the camera, so the fish had been B and the angler O) and
+                // scattered the four across the board.
+                if (e.key.keysym.sym == SDLK_t && !repeat)
                     queue_command(Command::spawn(species::GHOUL));
                 // A troll at the cursor, standing on it -- point at the ground.
-                if (e.key.keysym.sym == SDLK_t && !repeat)
+                if (e.key.keysym.sym == SDLK_y && !repeat)
                     queue_command(Command::spawn(species::TROLL));
-                // A fish -- the bass -- likewise; B for bass, since F is the camera.
-                if (e.key.keysym.sym == SDLK_b && !repeat)
+                // A fish -- the bass -- likewise.
+                if (e.key.keysym.sym == SDLK_u && !repeat)
                     queue_command(Command::spawn(species::FISH));
-                // The angler -- the bass on tentacles; O for octopus.
-                if (e.key.keysym.sym == SDLK_o && !repeat)
+                // The angler -- the bass on tentacles.
+                if (e.key.keysym.sym == SDLK_i && !repeat)
                     queue_command(Command::spawn(species::ANGLER));
                 // Enemies' animation style: continuous turn or held key poses, for
                 // comparing the two. A command for the spawn keys' reason -- the
@@ -879,7 +885,9 @@ int main(int argc, char* argv[]) {
 
                 if (e.key.keysym.sym == SDLK_p && !repeat) debug.toggle_pause();
                 if (e.key.keysym.sym == SDLK_PERIOD) debug.request_single_step();
-                if (e.key.keysym.sym == SDLK_i && !repeat) debug.inspector = !debug.inspector;
+                // F8 rather than I, which the angler's spawn key took: a function key
+                // beside F6, F7 and F9, the other toggles that only a developer wants.
+                if (e.key.keysym.sym == SDLK_F8 && !repeat) debug.inspector = !debug.inspector;
                 if (e.key.keysym.sym == SDLK_f && !repeat) {
                     if (debug.free_camera) {
                         debug.attach_camera();

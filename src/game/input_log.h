@@ -83,7 +83,13 @@ namespace input_log {
 //    of hanging there, and a tipping piece is released only once it has turned
 //    and has come clear (topple.cpp). A version-9 log replays into a different
 //    world from the first step anything tips off an edge.
-constexpr uint32_t FORMAT_VERSION = 10;
+//
+// 11: a fresh Run's enemies hold snapped key poses rather than turning
+//    continuously (Run::snapped_poses). The record layout is unchanged, but a
+//    version-10 log was recorded against the continuous turn, and the pose is
+//    where an arrow hits, so it replays into a different world from the first
+//    step an enemy is alive.
+constexpr uint32_t FORMAT_VERSION = 11;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt

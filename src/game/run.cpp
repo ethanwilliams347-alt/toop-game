@@ -20,7 +20,7 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
     quiver = Quiver();
     enemies.fill(Enemy{});
     kill_count = 0;
-    snap_poses = false;
+    snap_poses = true;
     events_.clear();
     run_outcome = Outcome::Playing;
     // objective_set, goal_x and goal_y are deliberately not cleared -- see the field
