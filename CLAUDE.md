@@ -3,6 +3,8 @@
 C++20 / SDL2 falling-sand engine. Windows x64, MSVC, CMake 3.14+. SDL2 2.30.0 is
 fetched and built statically by `FetchContent`; don't vendor or system-install it.
 
+**Read [ARCHITECTURE.md](ARCHITECTURE.md) before starting large code task. It can be wrong though, so use it as just a starting point.**
+
 ## Invariants
 
 These hold across the whole tree. Each exists for a reason given alongside it; if a
@@ -37,33 +39,6 @@ task seems to require breaking one, stop and say so rather than working around i
   `assets/wip/`) next to the exe. Bind sprites with
   `python tools/load_sprite.py <key> <file.bmp>`; don't hardcode asset paths.
 
-## Intentional designs that look like cruft
-
-Leave these as they are; each has a rationale comment at the definition.
-
-- `Element::ticks` is a union of three meanings (fall clock / fire fuel / steam
-  countdown), guarded by `lifetimes_are_never_structural()` in `element.h`.
-  Splitting it grows every cell.
-- `updated_tag` is a frame tag, not a bool, so there's no per-step reset pass.
-- `mark_dirty` wakes the full 3×3 per cell across chunk borders. Narrowing it
-  brings back floating piles and chunk seams. It applies the 3×3 as one box per
-  chunk it touches rather than nine cell includes — the same cells, and the
-  cheap form matters: the per-cell version was 63% of `cascading`.
-- `fx::trunc` truncates toward zero and isn't `>>`; flooring drifts left-moving
-  bodies.
-- `is_grounded` compares `piece_tag`, not material, so cracks survive movement.
-- An enemy's arm is geometry (pixels outside the box's columns) except where the
-  art names arm letters (`body_art::Art::arm`), which only the fish does. Its
-  lure arm grows out of the top of its head, where no column rule fits. Keep
-  geometry for any body whose arms do hang beside the box.
-- `MAX_SUPPORT_CELLS` assumes "supported" when it gives up — a missed collapse is
-  invisible, a wrong one is rubble.
-- Far backdrop layers in a long scene are narrower tiles than the set (`width=`
-  in backdrop.txt). Widening them to the world's width only adds bytes; the
-  width needed is `345 + f * (W - 345)`, and `backdrop_set_test` enforces it.
-- Cross-file invariants are `static_assert`s (`player.h`, `element.h`,
-  `reaction.h`). If a retuned constant trips one, its message explains the
-  constraint — address it rather than loosening the assert.
 
 ## Commands
 
