@@ -34,7 +34,8 @@ struct Material {
     uint8_t color_jitter; // per-cell brightness variation, 0 = flat
     MoveKind move;
     int16_t density;      // denser sinks through lighter; Empty is 0, gases negative
-    uint8_t spread;       // cells a liquid/gas may travel sideways per step
+    uint8_t spread;       // gas: cells it may travel sideways per step; liquid: how
+                          // runny -- its top speed and its share of a difference
 
     // Whether this material holds itself and its neighbours up, and therefore has
     // to fall as one piece when nothing holds it up.
@@ -94,7 +95,7 @@ inline constexpr Material MATERIALS[] = {
     // Water is teal rather than blue for compositing reasons: the backdrop behind
     // it is a cool blue, and a blue liquid seen through a gap read as a hole in the
     // world.
-    {  "Water",  0xFF2E7F96,      5,  MoveKind::Liquid,     100,      5,  false,      120,     0,      0,  ElementType::Count,      0 },
+    {  "Water",  0xFF2E7F96,      5,  MoveKind::Liquid,     100,      6,  false,      120,     0,      0,  ElementType::Count,      0 },
     // The two structural materials. Density is what lets an unsupported slab sink
     // through a fluid it lands in rather than perch on top of it. Wall conducts
     // poorly on purpose: a wall is usually the biggest connected body in a scene,
