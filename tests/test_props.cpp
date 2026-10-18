@@ -157,9 +157,9 @@ int main() {
     // run and a run from the build tree.
     {
         std::string err;
-        auto props = load_prop_list("assets/test_props.txt", &err);
+        auto props = load_prop_list("tests/fixtures/test_props.txt", &err);
         if (props.empty() && err.empty())
-            props = load_prop_list("../../assets/test_props.txt", &err);
+            props = load_prop_list("../../tests/fixtures/test_props.txt", &err);
         check("the shipped fixture parses", err.empty(), err);
         check("...and names nine props", props.size() == 9,
               "got " + std::to_string(props.size()));

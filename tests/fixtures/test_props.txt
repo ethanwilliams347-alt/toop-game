@@ -1,4 +1,4 @@
-# Props for the fixture scene (assets/test_material.bmp).
+# Props for the fixture scene (tests/fixtures/test_material.bmp).
 #
 # One record per line: <sprite> <x>. `sprite` names assets/<sprite>.bmp; `x` is
 # a world cell, the sprite's bottom-CENTRE column. Each prop is planted on

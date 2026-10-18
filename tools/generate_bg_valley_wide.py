@@ -1,4 +1,4 @@
-"""Builds `bg_valley_ext`, a 688x288 extension of the bg_valley scene, out of
+"""Builds `bg_valley_wide`, a 688x288 extension of the bg_valley scene, out of
 bg_valley's own measured pixels.
 
 Nothing here is an art direction decision that was not already made. Every
@@ -7,9 +7,9 @@ art_src/bg_valley/*.png and re-laid-out at the larger size. The generator
 holds two things the source cannot state for itself -- how the extra columns are
 filled, and where the extra rows go -- and both are argued below.
 
-    python tools/generate_bg_valley_ext.py
+    python tools/generate_bg_valley_wide.py
 
-Writes assets/bg_valley_ext/ (nine layer BMPs, colour-keyed exactly as
+Writes assets/bg_valley_wide/ (nine layer BMPs, colour-keyed exactly as
 convert_bg_valley.py writes assets/bg_valley/) plus the scene's material and
 albedo maps. Deterministic: the layout is driven by a fixed-seed xorshift, so a
 re-run is byte-identical and a diff in assets/ means a real change here.
@@ -120,10 +120,11 @@ from pixel_art import (
     assert_legend_matches_header,
     read_png,
     write_bmp,
+    write_preview,
 )
 
 SRC_DIR = os.path.join("art_src", "bg_valley")
-DST_DIR = os.path.join("assets", "bg_valley_ext")
+DST_DIR = os.path.join("assets", "bg_valley_wide")
 
 # The source's native size, and the extension's. Read as a pair: every offset
 # below is stated as a difference between them rather than as a bare number.
@@ -172,23 +173,23 @@ SEED = 0x62673165
 # paths it takes: "islands" is a keyed silhouette with gaps in it, "ridge" is a
 # keyed silhouette that spans the frame, "bands" is strata.
 LAYERS = [
-    ("bg_valley_01_fg_rocks.png", "bg_valley_ext_01_fg_rocks.bmp", "islands"),
-    ("bg_valley_02_hills_near.png", "bg_valley_ext_02_hills_near.bmp", "islands"),
-    ("bg_valley_03_hills_midnear.png", "bg_valley_ext_03_hills_midnear.bmp", "islands"),
-    ("bg_valley_04_hills_mid.png", "bg_valley_ext_04_hills_mid.bmp", "islands"),
-    ("bg_valley_05_hills_midfar.png", "bg_valley_ext_05_hills_midfar.bmp", "islands"),
-    ("bg_valley_06_hills_far.png", "bg_valley_ext_06_hills_far.bmp", "islands"),
-    ("bg_valley_07_mountains.png", "bg_valley_ext_07_mountains.bmp", "ridge"),
-    ("bg_valley_08_ground.png", "bg_valley_ext_08_ground.bmp", "bands"),
-    ("bg_valley_09_sky.png", "bg_valley_ext_09_sky.bmp", "bands"),
+    ("bg_valley_01_fg_rocks.png", "bg_valley_wide_01_fg_rocks.bmp", "islands"),
+    ("bg_valley_02_hills_near.png", "bg_valley_wide_02_hills_near.bmp", "islands"),
+    ("bg_valley_03_hills_midnear.png", "bg_valley_wide_03_hills_midnear.bmp", "islands"),
+    ("bg_valley_04_hills_mid.png", "bg_valley_wide_04_hills_mid.bmp", "islands"),
+    ("bg_valley_05_hills_midfar.png", "bg_valley_wide_05_hills_midfar.bmp", "islands"),
+    ("bg_valley_06_hills_far.png", "bg_valley_wide_06_hills_far.bmp", "islands"),
+    ("bg_valley_07_mountains.png", "bg_valley_wide_07_mountains.bmp", "ridge"),
+    ("bg_valley_08_ground.png", "bg_valley_wide_08_ground.bmp", "bands"),
+    ("bg_valley_09_sky.png", "bg_valley_wide_09_sky.bmp", "bands"),
 ]
 
 # Back to front -- the numeric-descending filename order, the same order
-# convert_bg_valley.DRAW_ORDER and assets/bg_valley_ext/backdrop.txt state.
+# convert_bg_valley.DRAW_ORDER and assets/bg_valley_wide/backdrop.txt state.
 DRAW_ORDER = [name for name, _, _ in reversed(LAYERS)]
 
-MATERIAL_PATH = os.path.join("assets", "bg_valley_ext", "bg_valley_ext_material.bmp")
-ALBEDO_PATH = os.path.join("assets", "bg_valley_ext", "bg_valley_ext_albedo.bmp")
+MATERIAL_PATH = os.path.join("assets", "bg_valley_wide", "bg_valley_wide_material.bmp")
+ALBEDO_PATH = os.path.join("assets", "bg_valley_wide", "bg_valley_wide_albedo.bmp")
 
 # The smallest hole left between two placed masses. Zero would let two islands
 # fuse into one wider island, which is the one way this layout can produce a
@@ -263,7 +264,7 @@ def read_layer(name):
 def palette_of(opaque, colour):
     """The layer's colours, most-used first.
 
-    **This is why `bg_valley_ext` cannot drift off bg_valley's palette.** Nothing downstream
+    **This is why `bg_valley_wide` cannot drift off bg_valley's palette.** Nothing downstream
     names a colour; every pixel written is one of the tuples this returns.
     """
     counts = collections.Counter()
@@ -689,7 +690,7 @@ def check_flat_cuts(grid, cuts):
 
 
 def build_scene_maps(composite):
-    """The material and albedo maps that give `bg_valley_ext` a floor.
+    """The material and albedo maps that give `bg_valley_wide` a floor.
 
     Same shape as `convert_bg_valley.build_scene_maps` and for the same
     reason - a backdrop set is a world the player has to stand in, and a `floor`
@@ -709,6 +710,7 @@ def build_scene_maps(composite):
             albedo.append(composite[y][x])
     write_bmp(MATERIAL_PATH, NATIVE_W, NATIVE_H, material)
     write_bmp(ALBEDO_PATH, NATIVE_W, NATIVE_H, albedo)
+    write_preview("bg_valley_wide", NATIVE_W, NATIVE_H, albedo)
     print(
         f"scene maps -> {MATERIAL_PATH}, {ALBEDO_PATH}  "
         f"({NATIVE_W}x{NATIVE_H}, floor at row {FLOOR_ROW}, {solid} solid cells)"

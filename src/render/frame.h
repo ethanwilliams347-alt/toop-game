@@ -71,6 +71,13 @@ struct HiddenCell {
     uint32_t fill;
 };
 
+// One drop of spray (Grid::Spray): where it is in world cells, already
+// interpolated, and its colour, alpha included. Drawn as a cell-sized square.
+struct SprayDrop {
+    float x, y;
+    uint32_t color;
+};
+
 // One arrow: where its tip is, in world cells, and which way it points as a
 // unit vector. A direction of (0, 0) -- an arrow at rest -- is drawn pointing
 // down, which is how a dropped arrow lies.
@@ -185,6 +192,9 @@ struct Params {
     // The loose bodies, the same way: null or empty draws nothing.
     SDL_Texture* body_atlas = nullptr;
     const std::vector<BodySprite>* bodies = nullptr;
+
+    // Spray in the air, the same way: null or empty draws nothing.
+    const std::vector<SprayDrop>* spray = nullptr;
 
     // The field is read for any_light() and its block extent; the texture is what
     // gets drawn, and the caller has already uploaded it.

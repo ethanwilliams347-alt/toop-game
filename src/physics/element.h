@@ -57,6 +57,11 @@ struct Element {
     //  - For a Steam cell it is steps until it condenses. The same role as Fire's
     //    and deliberately not a third one: both are gases whose whole existence is
     //    a countdown, and neither can ever be structural.
+    //  - For a liquid cell it is its upward velocity, a signed byte in
+    //    Grid::LIQUID_RISE_SCALE units of a cell per step, positive up -- the
+    //    vertical partner of `flow`, which has no room for a second byte. Zero in
+    //    any pool at rest: only a body pushing water aside, or spray landing, sets
+    //    it, and it dies away within a few steps. See Grid::step_rise.
     //
     // Sharing is safe because the roles cannot occur in the same cell: a lifetime
     // belongs to a Gas and a Gas is never structural, which TickRole below asserts
@@ -67,7 +72,7 @@ struct Element {
     // becomes another structural one (Wood catching into Charred), because there
     // the byte means the same on both sides.
     //
-    // Zero for everything else. Powders and fluids move one cell per step by their
+    // Zero for everything else. Powders and gases move one cell per step by their
     // own rules and have no use for a clock.
     uint8_t ticks = 0;
 
@@ -138,14 +143,16 @@ static_assert(Element{}.color == material_of(ElementType::Empty).color,
 // answer from. The cost is that a material with a lifetime is named here, which
 // is why Lifetime is written as an exception list rather than as the default.
 enum class TickRole : uint8_t {
-    None,      // powders and fluids: no clock, and the byte is unused
+    None,      // powders and other gases: no clock, and the byte is unused
     FallClock, // structural cells: steps of unbroken free fall
     Lifetime,  // gases that expire: steps left before they are gone
+    Rise,      // liquids: upward velocity, a signed byte
 };
 
 inline constexpr TickRole tick_role(ElementType type) {
     if (material_of(type).structural) return TickRole::FallClock;
     if (type == ElementType::Fire || type == ElementType::Steam) return TickRole::Lifetime;
+    if (material_of(type).move == MoveKind::Liquid) return TickRole::Rise;
     return TickRole::None;
 }
 

@@ -1759,37 +1759,145 @@ int main() {
     }
 
     // --- cuts ---
+    //
+    // Two shots through a leg at its middle joint, either side of the chain:
+    // everything below is cut off from the heart.
+    const auto cut_leg = [&](Enemy& e, Grid& g, const tentacle::Chain& c) {
+        const rig::Joint mid = c.rest[c.links() / 2];
+        e.shatter(g, world_x(e, mid.x - 1, mid.y), world_y(e, mid.x - 1, mid.y),
+                  Quiver::BITE_RADIUS);
+        e.shatter(g, world_x(e, mid.x + 2, mid.y), world_y(e, mid.x + 2, mid.y),
+                  Quiver::BITE_RADIUS);
+    };
+    const tentacle::Chain& front_chain = TS.chain[1];
     {
         Grid g = make_world();
         Enemy::Chains chains;
         Enemy e;
         e.spawn(100, FLOOR_Y - AN.height, AN, &chains);
         const int before = e.pixel_count();
-        // Through the rear tentacle at its middle joint: everything below is cut
-        // off from the heart, and the other tentacle still stands.
-        const rig::Joint mid = rear_chain.rest[rear_chain.links() / 2];
-        e.shatter(g, world_x(e, mid.x - 1, mid.y), world_y(e, mid.x - 1, mid.y),
-                  Quiver::BITE_RADIUS);
-        e.shatter(g, world_x(e, mid.x + 2, mid.y), world_y(e, mid.x + 2, mid.y),
-                  Quiver::BITE_RADIUS);
-        check("shot through, a tentacle drops everything past the hole",
-              e.is_alive() && !e.has_pixel(rear_tip.x, rear_tip.y) && e.has_feet());
+        cut_leg(e, g, rear_chain);
+        // What is cut off is not sand yet: it lies there as a piece, still
+        // drawn and still hit, and the body stands on what it has left.
+        check("shot through, a tentacle's piece past the hole comes off whole",
+              e.is_alive() && e.has_pixel(rear_tip.x, rear_tip.y) && e.has_feet());
+        const int hole = before - e.pixel_count();
+        check("only the hole is sand so far", count_sand(g) == hole,
+              "sand=" + std::to_string(count_sand(g)) + " hole=" + std::to_string(hole));
+        // It wriggles where it lies -- its tip drawn in a different place
+        // from one step to the next -- and is a pose as sound as any.
+        int moved = 0, last_x = world_x(e, rear_tip.x, rear_tip.y),
+            last_y = world_y(e, rear_tip.x, rear_tip.y);
+        bool sound = true;
+        std::string why;
+        for (int i = 0; i < TS.motion.piece_steps / 2 && sound; ++i) {
+            settle(g, e, 1);
+            sound = pose_is_sound(e, why);
+            const int x = world_x(e, rear_tip.x, rear_tip.y),
+                      y = world_y(e, rear_tip.x, rear_tip.y);
+            if (x != last_x || y != last_y) ++moved;
+            last_x = x;
+            last_y = y;
+        }
+        check("the piece wriggles", moved > 5, "moved=" + std::to_string(moved));
+        check("every pose with a piece off draws what is hit", sound, why);
+        settle(g, e, TS.motion.piece_steps);
+        check("then crumbles", e.is_alive() && !e.has_pixel(rear_tip.x, rear_tip.y));
         check("as sand, grain for pixel", count_sand(g) == before - e.pixel_count(),
               "sand=" + std::to_string(count_sand(g)) +
                   " lost=" + std::to_string(before - e.pixel_count()));
+    }
+    {
         // And the lure, through its stalk just above the head: three shots
-        // across it, since the stalk there is wider than a bite. Everything
-        // past the cut comes off, bulb and all; the stub on the head is still
-        // lure, as a fish shot through the forearm still has an upper arm.
+        // across it, since the stalk there is wider than a bite -- at rest,
+        // where the stalk stands upright. Everything past the cut comes off,
+        // bulb and all, and the stub left on the head has nothing to strike
+        // with: the bulb is the blow.
+        Grid g = make_world();
+        Enemy::Chains chains;
+        Enemy e;
+        e.spawn(100, FLOOR_Y - AN.height, AN, &chains);
+        const int before_lure = e.pixel_count();
+        const int sand_before = count_sand(g);
         const rig::Joint stalk = lure_chain.rest[2];
         const rig::Joint crown = lure_chain.rest[lure_chain.links() / 2];
         for (const int dx : {-3, 0, 3})
             e.shatter(g, world_x(e, stalk.x + dx, stalk.y), world_y(e, stalk.x + dx, stalk.y),
                       Quiver::BITE_RADIUS);
-        check("shots across its stalk drop the lure past the cut, bulb and all",
-              e.is_alive() && e.has_arms() && !e.has_pixel(crown.x, crown.y) &&
-                  !e.has_pixel(bulb_x, bulb_y));
-        check("as sand, grain for pixel", count_sand(g) == before - e.pixel_count());
+        check("shots across its stalk take the lure off past the cut, and the strike with it",
+              e.is_alive() && !e.has_arms());
+        settle(g, e, TS.motion.piece_steps + 1);
+        check("bulb and all", !e.has_pixel(crown.x, crown.y) && !e.has_pixel(bulb_x, bulb_y));
+        check("as sand, grain for pixel",
+              count_sand(g) - sand_before == before_lure - e.pixel_count(),
+              "sand=" + std::to_string(count_sand(g) - sand_before) +
+                  " lost=" + std::to_string(before_lure - e.pixel_count()));
+    }
+
+    // --- one leg: it hops ---
+    {
+        const auto run_owner = angler_arena(WORLD_W * 4);
+        Run& run = *run_owner;
+        for (int i = 0; i < 30; ++i) run.step(Input{});
+        cut_leg(run.enemies[0], run.grid, rear_chain);
+        const int start_x = run.enemies[0].cell_x();
+        const int stand_y = run.enemies[0].cell_y();
+        int hops = 0, ground_moves = 0;
+        bool was_up = false, sound = true;
+        std::string why;
+        for (int i = 0; i < 300 && sound; ++i) {
+            const Enemy& before = run.enemies[0];
+            const int x0 = before.cell_x();
+            const bool grounded = before.on_ground();
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            sound = pose_is_sound(e, why);
+            const bool up = e.cell_y() < stand_y - 2;
+            if (up && !was_up) ++hops;
+            was_up = up;
+            // On the ground the whole step, and moved: walking, not hopping.
+            if (grounded && e.on_ground() && e.cell_x() != x0) ++ground_moves;
+        }
+        const Enemy& e = run.enemies[0];
+        check("on one leg an angler still gets about",
+              e.is_alive() && e.has_feet() && std::abs(e.cell_x() - start_x) > 30,
+              "moved=" + std::to_string(e.cell_x() - start_x));
+        check("in hops", hops >= 5, "hops=" + std::to_string(hops));
+        check("and never walks along the ground", ground_moves == 0,
+              "ground_moves=" + std::to_string(ground_moves));
+        check("every hopping pose draws what is hit", sound, why);
+    }
+
+    // --- no legs: dragged along on the lure, which no longer strikes ---
+    {
+        const auto run_owner = angler_arena(100 + AN.width + 4);
+        Run& run = *run_owner;
+        for (int i = 0; i < 2; ++i) run.step(Input{});
+        cut_leg(run.enemies[0], run.grid, rear_chain);
+        cut_leg(run.enemies[0], run.grid, front_chain);
+        const Enemy& e = run.enemies[0];
+        check("with both legs off it lives on, on its lure",
+              e.is_alive() && e.has_feet() && !e.has_arms());
+        // A body pixel over the waist, which the lean turns about: how far it
+        // sits below where it would stand.
+        const int mid_row = AN.rig.hip_row - 20;
+        const int body_x = AN.rig.waist.x;
+        const int start_x = e.cell_x();
+        bool sound = true;
+        std::string why;
+        for (int i = 0; i < 300 && sound; ++i) {
+            run.step(Input{});
+            sound = pose_is_sound(run.enemies[0], why);
+        }
+        const int slump = world_y(e, body_x, mid_row) - rest_y(e, mid_row);
+        check("slumped down onto the ground", slump >= TS.motion.legless_sink - 3,
+              "slump=" + std::to_string(slump));
+        check("it drags itself after you", e.cell_x() != start_x,
+              "moved=" + std::to_string(e.cell_x() - start_x));
+        check("and lands nothing, standing in reach all along",
+              run.player.health() == Player::MAX_HEALTH,
+              "hp=" + std::to_string(run.player.health()));
+        check("every crawling pose draws what is hit", sound, why);
     }
 
     return report();

@@ -34,7 +34,7 @@ player_sheet            player_sheet.bmp            14 26
 # assets/<dir>/backdrop.txt (src/render/backdrop_set.h), named by its scene.
 
 # --- props ----------------------------------------------------------------
-# A prop's key is the name assets/test_props.txt already uses, so rebinding one
+# A prop's key is the name tests/fixtures/test_props.txt already uses, so rebinding one
 # here swaps the drawing without touching the scene's placements.
 tree_a                  tree_a.bmp
 tree_b                  tree_b.bmp

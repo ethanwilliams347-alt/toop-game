@@ -124,7 +124,7 @@ def sun_closeness(x, reach):
 # bg_valley's sky is flat bands with soft, wavy edges rather than a smooth ramp, and
 # that is kept: each stop is a band, and only the few rows between two bands are
 # dithered. The bands are anchored to HORIZON, the plane's own top edge, for the
-# reason bg_forest's README records -- anchored lower, the ramp is still passing
+# reason the old forest set found -- anchored lower, the ramp is still passing
 # through the mountains' value when it reaches them and the range disappears.
 SKY_STOPS = [  # (row the band is fully reached, colour)
     (40, 'tarn_sky_top'),

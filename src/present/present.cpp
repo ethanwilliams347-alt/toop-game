@@ -181,8 +181,10 @@ void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                 for (size_t k = 0; k < shape.size(); ++k) {
                     const float dx = static_cast<float>(shape[k].x) + 0.5f - lcx;
                     const float dy = static_cast<float>(shape[k].y) + 0.5f - lcy;
-                    tx += static_cast<float>(at[k] % grid_w) + 0.5f - (dx * c - dy * sn);
-                    ty += static_cast<float>(at[k] / grid_w) + 0.5f - (dx * sn + dy * c);
+                    // Cell index to column and row; the division is meant to truncate.
+                    const auto col = at[k] % grid_w, row = at[k] / grid_w;
+                    tx += static_cast<float>(col) + 0.5f - (dx * c - dy * sn);
+                    ty += static_cast<float>(row) + 0.5f - (dx * sn + dy * c);
                 }
                 tx /= static_cast<float>(shape.size());
                 ty /= static_cast<float>(shape.size());
@@ -270,6 +272,22 @@ void stand_backdrop_anchor(frame::Backdrop& backdrop, int padded_w, int padded_h
     backdrop.anchor_x = 0.5f * static_cast<float>(std::max(0, world_w - padded_w));
     backdrop.anchor_y = depth_rig::standing_anchor_y(backdrop.rig, Player::HEIGHT, padded_h,
                                                      Camera::VERTICAL_ANCHOR, world_h);
+}
+
+void paint_spray(const Run& run, float alpha, std::vector<frame::SprayDrop>& out) {
+    out.clear();
+    for (const Grid::Spray& d : run.grid.spray()) {
+        const float x =
+            fx::to_float(d.prev_x) + (fx::to_float(d.x) - fx::to_float(d.prev_x)) * alpha;
+        const float y =
+            fx::to_float(d.prev_y) + (fx::to_float(d.y) - fx::to_float(d.prev_y)) * alpha;
+        // The same floor as a thin cell, so a small drop still reads as wet.
+        constexpr int FLOOR_ALPHA = 48;
+        const int m = d.mass < Grid::LIQUID_FULL ? d.mass : Grid::LIQUID_FULL;
+        const uint32_t a =
+            static_cast<uint32_t>(FLOOR_ALPHA + m * (255 - FLOOR_ALPHA) / Grid::LIQUID_FULL);
+        out.push_back({x, y, (a << 24) | (d.color & 0x00FFFFFFu)});
+    }
 }
 
 } // namespace present

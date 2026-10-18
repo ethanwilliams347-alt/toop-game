@@ -13,7 +13,6 @@
 // Format, one record per line, `#` to end-of-line is a comment:
 //
 //     # name    material           albedo            props           spawn    named fields
-//     fixture   test_material.bmp  test_albedo.bmp   test_props.txt  terrain
 //     empty     -                  -                 -               floor    mode=unclamped size=1920x1080
 //     bg_valley bg_valley/bg_valley_material.bmp  bg_valley/bg_valley_albedo.bmp  -  terrain  size=344x144 scale=10 backdrop=bg_valley
 //

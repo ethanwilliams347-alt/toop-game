@@ -59,6 +59,9 @@ enum class Stream : uint64_t {
     // The small push a body is given as it comes loose: nothing real is perfectly
     // square, still, or balanced on a knife edge. One draw per body, per axis.
     BodyNudge = 0xE6546B64CC9E2D51ull,
+    // The small sideways scatter a drop of spray is thrown with, so a splash
+    // fans out instead of rising as a column (Grid::step_rise).
+    SprayScatter = 0x4CF5AD432745937Full,
 };
 
 // splitmix64's finalizer. Not cryptographic, and does not need to be: the
@@ -125,7 +128,7 @@ inline constexpr Stream SIM_STREAMS[] = {
     Stream::Emission,       Stream::FlameLifetime,   Stream::FlameRise,
     Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
     Stream::LiquidDisperse, Stream::LiquidFlowRound, Stream::SurfaceGrip,
-    Stream::BodyNudge,
+    Stream::BodyNudge,      Stream::SprayScatter,
 };
 
 // Two streams sharing a value are one stream, silently, with no assertion that

@@ -246,6 +246,28 @@ struct Motion {
     fx::v lure_flourish;
     int lure_live;
     int bulb_radius;
+
+    // --- after a sever ------------------------------------------------------
+    //
+    // A tentacle whose tip is gone -- cut through, or the foot shot off -- no
+    // longer stands, and the body walks on what it has left, deciding afresh
+    // each step. On one leg it hops: stands hop_rest steps gathering itself,
+    // then jumps at hop_speed cells a second and covers its ground in the air.
+    // On none it drags itself along on the lure: the lure becomes a leg (and
+    // so can no longer strike), the body slumps legless_sink cells down its box
+    // onto the ground, and it moves at crawl_share of its speed.
+    int hop_rest;
+    fx::v hop_speed;
+    int legless_sink;
+    fx::v crawl_share;
+
+    // A tentacle cut off does not turn straight to sand: the piece falls and
+    // lies where it lands, a chain of its own, wriggling for piece_steps --
+    // a wave piece_wriggle cells either side, one every piece_wriggle_steps,
+    // dying away with it -- and then it crumbles.
+    int piece_steps;
+    fx::v piece_wriggle;
+    int piece_wriggle_steps;
 };
 
 // A species' tentacles: up to three chains and how they move. The chains'

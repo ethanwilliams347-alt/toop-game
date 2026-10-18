@@ -649,11 +649,16 @@ bool Grid::tip_move(Body& b) {
     // resolve_support() has finished for the step -- but that is an ordering fact
     // nothing enforces, and a borrowed array is how a later pass inserted between
     // the two quietly reads the other's answers.
-    if (++tip_epoch == 0) {
+    //
+    // Two marks, and both have to hold to the end: `here` is what tells
+    // push_aside a cell the body is leaving, after `there` is taken. So the wrap
+    // is taken before either rather than between them, where it would wipe
+    // `here`.
+    if (tip_epoch >= 254) {
         std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
-        tip_epoch = 1;
+        tip_epoch = 0;
     }
-    const uint8_t here = tip_epoch;
+    const uint8_t here = ++tip_epoch;
     for (const int idx : b.at) tip_visit[idx] = here;
 
     // Blocked by anything solid that is not the body itself. Fluids and gases are
@@ -667,16 +672,15 @@ bool Grid::tip_move(Body& b) {
     for (const int idx : b.at) tip_carry.push_back(cells[idx]);
 
     tip_displaced.clear();
+    tip_displaced_at.clear();
     for (const int idx : tip_next) {
-        if (tip_visit[idx] != here && cells[idx].type != ElementType::Empty)
+        if (tip_visit[idx] != here && cells[idx].type != ElementType::Empty) {
             tip_displaced.push_back(cells[idx]);
+            tip_displaced_at.push_back(idx);
+        }
     }
 
-    if (++tip_epoch == 0) {
-        std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
-        tip_epoch = 1;
-    }
-    const uint8_t there = tip_epoch;
+    const uint8_t there = ++tip_epoch;
     for (const int idx : tip_next) tip_visit[idx] = there;
 
     const auto write = [&](int idx, Element e) {
@@ -688,15 +692,10 @@ bool Grid::tip_move(Body& b) {
         note_warm_if(idx - cy * width, cy, e.temperature);
     };
 
-    // The cells the body is leaving. Because the pose is a permutation there are
-    // exactly as many of these as there are cells it is entering, so every bit of
-    // fluid it pushes out of the way has somewhere to go -- conserved, though not
-    // necessarily put back next to where it was taken from; a sub-step is at most
-    // a cell at the rim, so in practice it is close.
-    size_t d = 0;
+    // The cells the body is leaving, emptied for now; what fills them is below.
     for (const int idx : b.at) {
         if (tip_visit[idx] == there) continue;
-        write(idx, d < tip_displaced.size() ? tip_displaced[d++] : Element{});
+        write(idx, Element{});
 
         // Whatever was resting on this cell has just lost it.
         const int cy = idx / width;
@@ -709,10 +708,209 @@ bool Grid::tip_move(Body& b) {
         write(tip_next[i], e);
     }
 
+    // What the body has moved into. Liquid goes aside first, out of the face it
+    // was in front of and carrying the body's momentum (push_aside); before
+    // that, all of it went straight into the cells the body was leaving, which
+    // moved water from in front of a body to behind it in no time, with no
+    // motion, and read as water teleporting. Whatever push_aside has no room for
+    // -- the middle of a wide body's leading face, with nothing beside it but
+    // more of the body -- still goes that way, and so does gas. Because the pose
+    // is a permutation there are exactly as many cells being left as entered, so
+    // there is always one for it: push_aside never writes to them, so each still
+    // empty one is free.
+    size_t spare = 0;
+    for (size_t k = 0; k < tip_displaced.size(); ++k) {
+        Element e = tip_displaced[k];
+        if (is_liquid(e.type)) {
+            const int gone = push_aside(tip_displaced_at[k], e, b.vx, b.vy);
+            e.mass = static_cast<uint16_t>(e.mass - gone);
+            if (e.mass == 0) continue;
+        }
+        while (spare < b.at.size() &&
+               (tip_visit[b.at[spare]] == there || cells[b.at[spare]].type != ElementType::Empty))
+            ++spare;
+        if (spare < b.at.size()) write(b.at[spare++], e);
+    }
+
+    // And the cells it has left that nothing has filled: the water beside them
+    // closes in behind it.
+    for (const int idx : b.at) {
+        if (tip_visit[idx] != there && cells[idx].type == ElementType::Empty) draw_in(idx, b.vx);
+    }
+
     // Same length, so this copies into the capacity already there.
     b.at.assign(tip_next.begin(), tip_next.end());
     b.moved = true;
     return true;
+}
+
+int Grid::push_aside(int from, const Element& e, int64_t vx, int64_t vy) {
+    // tip_move's marks: `there` the pose the body is entering, `here` the cells it
+    // is leaving. Neither takes liquid -- the first is the body, the second is
+    // where tip_move puts what does not fit here.
+    const uint8_t there = tip_epoch;
+    const uint8_t here = static_cast<uint8_t>(tip_epoch - 1);
+    const int fy = from / width;
+    const int fx = from - fy * width;
+    const int64_t speed = isqrt(vx * vx + vy * vy);
+    const auto takes = [&](int q) {
+        if (tip_visit[q] == there || tip_visit[q] == here) return false;
+        const Element& c = cells[q];
+        return c.type == ElementType::Empty || (c.type == e.type && c.mass < LIQUID_PUSH_CAP);
+    };
+
+    struct Side {
+        int idx, ox, oy;
+        int64_t dot;  // the body's velocity along this side, 16.16
+    };
+    static constexpr int OX[4] = {-1, 1, 0, 0};
+    static constexpr int OY[4] = {0, 0, -1, 1};
+    Side sides[4];
+    int n = 0;
+    for (int k = 0; k < 4; ++k) {
+        if (!is_within_bounds(fx + OX[k], fy + OY[k])) continue;
+        const int q = from + OY[k] * width + OX[k];
+        if (!takes(q)) continue;
+        // Not ahead of the body: water goes round a body, not in front of it, and
+        // what is pushed ahead is pushed again next sub-step until it is trapped
+        // against the floor under the body with no way up.
+        const int64_t dot = OX[k] * vx + OY[k] * vy;
+        if (2 * dot > speed) continue;
+        sides[n++] = {q, OX[k], OY[k], dot};
+    }
+
+    // Nothing beside it but more of the body: the middle of a leading face. The
+    // water there goes round the body too, so it comes out at the face's ends --
+    // along the row for a body moving mostly up or down, along the column for one
+    // moving mostly sideways, both ways, to the first cell past the body. That is
+    // what makes a plunge a crown at both sides instead of a mound on top; before
+    // it, all but the corners of a face went into the cells behind the body.
+    //
+    // And a face's end fills fast -- every cell of the face sends its water to
+    // the same two -- so from a full one it climbs back against the motion, up
+    // beside a plunging body, to the first cell with room: the water piling up
+    // beside the body, which is the crown, rather than going behind it.
+    //
+    // Only at splashing speed. A body slower than SPLASH_MIN_SPEED -- a raft
+    // bobbing -- has no business moving water the width of itself; the round
+    // trip it made, piled beside the raft and flowing back under it, was enough
+    // to keep a settled raft bobbing for good.
+    if (n == 0 && speed > SPLASH_MIN_SPEED) {
+        const bool along_row = abs64(vy) >= abs64(vx);
+        const int ax = along_row ? 1 : 0, ay = along_row ? 0 : 1;
+        const int bx = along_row ? 0 : (vx > 0 ? -1 : 1);
+        const int by = along_row ? (vy > 0 ? -1 : 1) : 0;
+        for (int dir = -1; dir <= 1; dir += 2) {
+            int cx = fx, cy = fy;
+            for (int d = 0; d < MAX_AROUND; ++d) {
+                cx += dir * ax;
+                cy += dir * ay;
+                if (!is_within_bounds(cx, cy)) break;
+                if (tip_visit[cy * width + cx] == there) continue;  // still the body
+                for (int up = 0; up < MAX_AROUND; ++up) {
+                    const int q = cy * width + cx;
+                    if (takes(q)) {
+                        sides[n++] = {q, dir * ax, dir * ay, dir * ax * vx + dir * ay * vy};
+                        break;
+                    }
+                    // Only on through liquid already pressed full; anything else
+                    // -- a wall, the body, a cell it is leaving -- ends the climb.
+                    if (cells[q].type != e.type || tip_visit[q] == here) break;
+                    cx += bx;
+                    cy += by;
+                    if (!is_within_bounds(cx, cy) || tip_visit[cy * width + cx] == there) break;
+                }
+                break;
+            }
+        }
+    }
+    if (n == 0) return 0;
+
+    // Square to the motion first, then behind it: the way water parts round a
+    // moving thing. Four at most, so an insertion sort.
+    for (int i = 1; i < n; ++i)
+        for (int j = i; j > 0 && abs64(sides[j].dot) < abs64(sides[j - 1].dot); --j)
+            std::swap(sides[j], sides[j - 1]);
+
+    // The share of the body's speed the water takes: SPLASH_SHARE of whatever
+    // is over SPLASH_MIN_SPEED, as a share of all of it.
+    const int64_t excess = speed - SPLASH_MIN_SPEED;
+    const int64_t splash = excess > 0 ? mulq(SPLASH_SHARE, excess * ONE / speed) : 0;
+
+    int left = e.mass;
+    for (int i = 0; i < n && left > 0; ++i) {
+        const Side& s = sides[i];
+        // An even share of what is left among the sides still to come, so the
+        // two sides of a plunge get the same.
+        const int share = (left + (n - i) - 1) / (n - i);
+        const Element& c = cells[s.idx];
+        const int room = c.type == ElementType::Empty ? LIQUID_FULL : LIQUID_PUSH_CAP - c.mass;
+        const int amount = share < room ? share : room;
+        if (amount <= 0) continue;
+
+        // Its velocity: out along this side at the body's speed, and back along
+        // the body's path -- the part of the body's velocity across this side,
+        // reversed. Out and up off the sides of a plunge; up and back over the
+        // top of a body crossing a pool; straight back off its tail.
+        const int64_t wx = mulq(splash, s.ox * speed - (vx - s.dot * s.ox));
+        const int64_t wy = mulq(splash, s.oy * speed - (vy - s.dot * s.oy));
+        const int flow = static_cast<int>(wx * LIQUID_FULL / (ONE * LIQUID_FLOW_SCALE));
+        const int rise = static_cast<int>(-wy * LIQUID_RISE_SCALE / ONE);
+        deposit_liquid(s.idx, e, amount, flow, rise);
+        left -= amount;
+    }
+    return e.mass - left;
+}
+
+void Grid::draw_in(int idx, int64_t vx) {
+    const int y = idx / width;
+    const int x = idx - y * width;
+
+    // Under the surface if there is liquid beside it. Only then is the water
+    // below drawn up into it: above the surface, a body lifting off a pool
+    // would otherwise pull a column of water up into the air after it.
+    ElementType type = ElementType::Empty;
+    for (int side = -1; side <= 1; side += 2) {
+        if (is_within_bounds(x + side, y) && is_liquid(cells[idx + side].type)) {
+            type = cells[idx + side].type;
+            break;
+        }
+    }
+    if (type == ElementType::Empty && y > 0 && is_liquid(cells[idx - width].type))
+        type = cells[idx - width].type;
+    if (type == ElementType::Empty) return;
+    const bool under = is_within_bounds(x - 1, y) && cells[idx - 1].type == type;
+    const bool under_r = is_within_bounds(x + 1, y) && cells[idx + 1].type == type;
+
+    // Half of what each neighbour holds, up to a cell in all: the hole closes at
+    // once, and the shortfall is the neighbours' to make up by flowing, which
+    // carries it out through the body of water to its surface -- the surface
+    // dropping where a body has risen out of it.
+    static constexpr int OX[4] = {0, -1, 1, 0};
+    static constexpr int OY[4] = {-1, 0, 0, 1};
+    int need = LIQUID_FULL;
+    for (int k = 0; k < 4 && need > 0; ++k) {
+        if (OY[k] == 1 && !(under || under_r)) continue;
+        const int sx = x + OX[k], sy = y + OY[k];
+        if (!is_within_bounds(sx, sy)) continue;
+        const Element& s = cells[idx + OY[k] * width + OX[k]];
+        if (s.type != type) continue;
+        int take = s.mass / 2;
+        if (take > need) take = need;
+        if (take <= 0) continue;
+        transfer_liquid(sx, sy, x, y, take);
+        mark_dirty(sx, sy);
+        need -= take;
+    }
+
+    // It moves sideways with the body it is following. Not up: the space above
+    // it is the body's, and step_rise would find the rise capped and drop it.
+    Element& c = cells[idx];
+    if (c.type == type) {
+        int flow = static_cast<int>(vx * LIQUID_FULL / (ONE * LIQUID_FLOW_SCALE));
+        flow = flow > 127 ? 127 : (flow < -127 ? -127 : flow);
+        c.flow = static_cast<int8_t>(flow);
+    }
 }
 
 bool Grid::square_pose(const Body& b, int64_t& cx, int64_t& cy, fx::v& theta) const {

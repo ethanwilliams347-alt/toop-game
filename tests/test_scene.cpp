@@ -10,7 +10,7 @@
 
 namespace {
 
-// What assets/test_material.bmp currently stamps into an empty world.
+// What tests/fixtures/test_material.bmp currently stamps into an empty world.
 //
 // Pinned deliberately, and a failure here is not necessarily a defect. The
 // fixture scene is the world the recorded session was played in, so this number
@@ -281,7 +281,7 @@ int main() {
         // rejects the file: the failure that once emptied the whole world and said
         // nothing.
         std::string error;
-        const Scene s = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp", &error);
+        const Scene s = bmp::load("tests/fixtures/test_material.bmp", "tests/fixtures/test_albedo.bmp", &error);
         check("the shipped fixture scene loads, every authored pixel in the legend", error.empty(),
               error);
         check("...at the size main.cpp simulates", s.width == 1920 && s.height == 1080,

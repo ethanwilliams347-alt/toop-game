@@ -114,6 +114,8 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     tip_next.reserve(MAX_SUPPORT_CELLS + 1);
     tip_carry.reserve(MAX_SUPPORT_CELLS + 1);
     tip_displaced.reserve(MAX_SUPPORT_CELLS + 1);
+    tip_displaced_at.reserve(MAX_SUPPORT_CELLS + 1);
+    spray_drops.reserve(SPRAY_MAX);
     contacts.reserve(2 * MAX_CONTACT_FACES);
     load_cells.reserve(3 * MAX_SUPPORT_CELLS + 2);
     load_stack.reserve(2 * MAX_SUPPORT_CELLS + 2);
@@ -175,6 +177,8 @@ void Grid::reset(uint64_t seed) {
     tip_next.clear();
     tip_carry.clear();
     tip_displaced.clear();
+    tip_displaced_at.clear();
+    spray_drops.clear();
     std::fill(balance_visit.begin(), balance_visit.end(), uint8_t{0});
     balance_epoch = 0;
     balance_pass_start = 1;
@@ -1205,6 +1209,12 @@ void Grid::transfer_liquid(int fx, int fy, int tx, int ty, int amount) {
     const int dm = d.mass;
     if (d.flow != s.flow)
         d.flow = static_cast<int8_t>((d.flow * dm + s.flow * amount) / (dm + amount));
+    // The rise (`ticks`) mixes the same way. Both zero in water at rest, which is
+    // nearly every transfer, so the compare is all it usually costs.
+    if (d.ticks != s.ticks)
+        d.ticks = static_cast<uint8_t>(static_cast<int8_t>(
+            (static_cast<int8_t>(d.ticks) * dm + static_cast<int8_t>(s.ticks) * amount) /
+            (dm + amount)));
     d.mass = static_cast<uint16_t>(dm + amount);
     s.mass = static_cast<uint16_t>(s.mass - amount);
     if (s.mass == 0) {
@@ -1340,6 +1350,11 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
             return true;
         }
     }
+
+    // Moving up by momentum, which only a push or a splash gives water; a pool
+    // at rest never takes this branch.
+    if (cells[idx].ticks != 0 && step_rise(x, y, static_cast<int8_t>(cells[idx].ticks)))
+        return true;
 
     // How much of this liquid cell n holds, 0 for empty space it could flow into,
     // or -1 when n is anything else and takes none.
@@ -1494,6 +1509,184 @@ bool Grid::step_liquid(int x, int y, const Material& mat) {
     // through somewhere flow cannot -- a tunnel of full cells -- needs the search.
     if (!moved) moved = level_liquid(x, y);
     return moved;
+}
+
+void Grid::deposit_liquid(int to, const Element& like, int amount, int flow, int rise) {
+    if (amount <= 0) return;
+    Element& d = cells[to];
+    if (d.type == ElementType::Empty) {
+        // New liquid, the way transfer_liquid makes it: its own spot's colour, the
+        // heat it came with, and still for the rest of this step.
+        d = Element{};
+        d.type = like.type;
+        d.color = jittered_color(material_of(like.type), static_cast<uint64_t>(to));
+        d.temperature = like.temperature;
+        d.updated_tag = frame_tag;
+    }
+    const auto clamp_byte = [](int v) { return v > 127 ? 127 : (v < -127 ? -127 : v); };
+    const int dm = d.mass;
+    flow = clamp_byte(flow);
+    rise = clamp_byte(rise);
+    d.flow = static_cast<int8_t>((d.flow * dm + flow * amount) / (dm + amount));
+    d.ticks = static_cast<uint8_t>(
+        static_cast<int8_t>((static_cast<int8_t>(d.ticks) * dm + rise * amount) / (dm + amount)));
+    d.mass = static_cast<uint16_t>(dm + amount);
+    pixels[to] = pixel_of(d);
+    const int ty = to / width;
+    mark_dirty(to - ty * width, ty);
+    note_warm_if(to - ty * width, ty, d.temperature);
+}
+
+bool Grid::step_rise(int x, int y, int rise) {
+    const int idx = get_index(x, y);
+    Element& c = cells[idx];
+
+    // Damped every step, toward zero either way. A push downward has nothing to
+    // do -- the down rule already moves water down as fast as there is room --
+    // so a negative rise is only ever dying away. Truncating division, so the
+    // last of it reaches zero and the cell can sleep.
+    rise = rise * LIQUID_RISE_DAMP / 256;
+    if (rise <= 0 || y == 0) {
+        c.ticks = static_cast<uint8_t>(static_cast<int8_t>(rise));
+        if (rise != 0) mark_dirty(x, y);
+        return false;
+    }
+
+    Element& up = cells[idx - width];
+    if (up.type == c.type) {
+        // Buried: the push is pressure, and goes up the column to the surface in
+        // this sweep (rows run bottom to top). Moved, not copied -- this cell
+        // keeps none of it -- so one push heaves the surface once.
+        const int ra = up.ticks >= 128 ? up.ticks - 256 : up.ticks;  // the byte as signed
+        if (ra < rise) up.ticks = static_cast<uint8_t>(static_cast<int8_t>(rise));
+        c.ticks = 0;
+        mark_dirty(x, y - 1);
+        return false;
+    }
+    if (up.type != ElementType::Empty) {
+        c.ticks = 0;  // capped by something it cannot lift
+        return false;
+    }
+
+    // At the surface, gravity: it rises against it, like anything thrown up.
+    rise -= LIQUID_RISE_GRAVITY;
+    if (rise <= 0) {
+        c.ticks = 0;
+        return false;
+    }
+    c.ticks = static_cast<uint8_t>(static_cast<int8_t>(rise));
+    mark_dirty(x, y);
+
+    if (rise >= SPRAY_MIN_RISE && spray_drops.size() < static_cast<size_t>(SPRAY_MAX)) {
+        // Too fast for the grid: a drop, from the empty cell above, at the cell's
+        // velocity and a little scatter so a splash fans out.
+        const int take = c.mass < SPRAY_MASS ? c.mass : SPRAY_MASS;
+        Spray d;
+        d.x = x * fx::ONE + fx::ONE / 2;
+        d.y = (y - 1) * fx::ONE + fx::ONE / 2;
+        d.vx = c.flow * LIQUID_FLOW_SCALE * (fx::ONE / LIQUID_FULL) +
+               spread(fx::ONE / 16, static_cast<uint64_t>(idx), sim_random::Stream::SprayScatter);
+        d.vy = -rise * (fx::ONE / LIQUID_RISE_SCALE);
+        d.prev_x = d.x;
+        d.prev_y = d.y;
+        d.color = c.color;
+        d.mass = static_cast<uint16_t>(take);
+        d.type = c.type;
+        d.temperature = c.temperature;
+        spray_drops.push_back(d);  // within the reserve: never allocates
+        c.mass = static_cast<uint16_t>(c.mass - take);
+        if (c.mass == 0) {
+            c = Element{};
+            c.updated_tag = frame_tag;
+        }
+        pixels[idx] = pixel_of(c);
+        return true;
+    }
+
+    // Slower: a heave, the share of the cell that would climb a whole cell this
+    // step. It carries the rise up with it (transfer_liquid mixes it), so the
+    // water keeps going until gravity has it, then falls back by the down rule.
+    int amount = c.mass * rise / LIQUID_RISE_SCALE;
+    if (amount > c.mass) amount = c.mass;
+    if (amount <= 0) return false;
+    transfer_liquid(x, y, x, y - 1, amount);
+    return true;
+}
+
+void Grid::step_spray() {
+    // Faster than this, a drop crosses more cells in a step than are worth
+    // marching; a splash never throws one near it, so it is only a bound.
+    constexpr fx::v MAX_SPEED = 8 * fx::ONE;
+    for (size_t i = 0; i < spray_drops.size();) {
+        Spray& d = spray_drops[i];
+        d.prev_x = d.x;
+        d.prev_y = d.y;
+        d.vy += BODY_GRAVITY;
+        d.vx = d.vx > MAX_SPEED ? MAX_SPEED : (d.vx < -MAX_SPEED ? -MAX_SPEED : d.vx);
+        d.vy = d.vy > MAX_SPEED ? MAX_SPEED : (d.vy < -MAX_SPEED ? -MAX_SPEED : d.vy);
+
+        // March the step in pieces no longer than a cell, so a fast drop cannot
+        // pass through a wall one cell thick. A drop is only ever inside the
+        // world: one that would leave it lands where it is.
+        const int64_t ax = d.vx < 0 ? -int64_t{d.vx} : d.vx;
+        const int64_t ay = d.vy < 0 ? -int64_t{d.vy} : d.vy;
+        const int n = static_cast<int>((ax > ay ? ax : ay) / fx::ONE) + 1;
+        const int64_t sx = d.x, sy = d.y;
+        int at = get_index(d.x / fx::ONE, d.y / fx::ONE);
+        bool stopped = cells[at].type != ElementType::Empty;
+        bool landed = stopped && land_spray(d, at, -1);
+        for (int k = 1; k <= n && !stopped; ++k) {
+            const int64_t nx = sx + int64_t{d.vx} * k / n;
+            const int64_t ny = sy + int64_t{d.vy} * k / n;
+            const bool inside = nx >= 0 && ny >= 0 && nx < int64_t{width} * fx::ONE &&
+                                ny < int64_t{height} * fx::ONE;
+            const int h =
+                inside ? get_index(static_cast<int>(nx / fx::ONE), static_cast<int>(ny / fx::ONE))
+                       : -1;
+            if (h != at && (h < 0 || cells[h].type != ElementType::Empty)) {
+                stopped = true;
+                landed = land_spray(d, at, h);
+                break;
+            }
+            at = h;
+            d.x = static_cast<fx::v>(nx);
+            d.y = static_cast<fx::v>(ny);
+        }
+        if (landed) {
+            d = spray_drops.back();
+            spray_drops.pop_back();
+            continue;
+        }
+        if (stopped) d.vx = d.vy = 0;  // nowhere to go yet: wait in place
+        ++i;
+    }
+}
+
+bool Grid::land_spray(const Spray& d, int at, int hit) {
+    Element like;
+    like.type = d.type;
+    like.temperature = d.temperature;
+    // Its motion goes into the water it lands in: sideways as flow, and the
+    // fall as a downward rise, which only damps away -- the impact is the
+    // splash already thrown, not a second one.
+    const int flow =
+        static_cast<int>(int64_t{d.vx} * LIQUID_FULL / (int64_t{fx::ONE} * LIQUID_FLOW_SCALE));
+    const int rise = static_cast<int>(-int64_t{d.vy} * LIQUID_RISE_SCALE / fx::ONE);
+    constexpr int ROOM = 65535;
+    if (hit >= 0 && cells[hit].type == d.type && cells[hit].mass + d.mass <= ROOM) {
+        deposit_liquid(hit, like, d.mass, flow, rise);
+        return true;
+    }
+    // Into the empty cell it was flying through, or, if something has moved in
+    // under it since, the first place up its column that will take it.
+    for (int c = at; c >= 0; c -= width) {
+        const ElementType t = cells[c].type;
+        if (t == ElementType::Empty || (t == d.type && cells[c].mass + d.mass <= ROOM)) {
+            deposit_liquid(c, like, d.mass, flow, rise);
+            return true;
+        }
+    }
+    return false;
 }
 
 bool Grid::level_liquid(int x, int y) {
@@ -2060,6 +2253,10 @@ void Grid::update() {
     // After support, so a piece that started tipping during this step's resolve
     // turns for the first time on this step rather than sitting out one first.
     step_tipping();
+
+    // After the bodies, which throw water aside as they move, and before the
+    // sweep, so what lands flows on this step.
+    step_spray();
 
     ++frame_tag;
 

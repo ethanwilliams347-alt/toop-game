@@ -132,8 +132,8 @@ int main(int argc, char** argv) {
 
     int mw = 0, mh = 0, aw = 0, ah = 0;
     std::vector<uint32_t> mat_px, alb_px;
-    if (!read_bmp24("assets/test_material.bmp", mw, mh, mat_px)) return 1;
-    if (!read_bmp24("assets/test_albedo.bmp", aw, ah, alb_px)) return 1;
+    if (!read_bmp24("tests/fixtures/test_material.bmp", mw, mh, mat_px)) return 1;
+    if (!read_bmp24("tests/fixtures/test_albedo.bmp", aw, ah, alb_px)) return 1;
     if (mw != aw || mh != ah) { std::fprintf(stderr, "scene BMP sizes differ\n"); return 1; }
 
     Scene scene;

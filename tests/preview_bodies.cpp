@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> atlas_pixels;
     std::vector<frame::BodySprite> sprites;
     std::vector<frame::HiddenCell> hidden;
+    std::vector<frame::SprayDrop> spray;
     std::vector<uint32_t> view(static_cast<size_t>(W) * H);
     std::vector<unsigned char> img(static_cast<size_t>(W) * SCALE * SHOT_COUNT * H * SCALE * 3);
 
@@ -107,6 +108,18 @@ int main(int argc, char** argv) {
         run.step(Input{});
         // Halfway between the last two steps, as a frame usually is.
         present::paint_bodies(run, 0.5f, atlas_pixels, sprites, hidden);
+        present::paint_spray(run, 0.5f, spray);
+        if (water) {
+            // Liquid is conserved across the grid and the spray together, and a
+            // splash shows as drops in the air for a few steps.
+            int64_t liquid = g.spray_mass();
+            for (int i = 0; i < W * H; ++i)
+                if (is_liquid(g.get_element(i % W, i / W).type))
+                    liquid += g.get_element(i % W, i / W).mass;
+            if (step == 1 || !spray.empty() || step == last_step)
+                std::printf("step %d: %zu drop(s) in the air, liquid %lld\n", step, spray.size(),
+                            static_cast<long long>(liquid));
+        }
         for (const frame::BodySprite& s : sprites)
             SDL_UpdateTexture(atlas, &s.src,
                               atlas_pixels.data() +
@@ -123,6 +136,7 @@ int main(int argc, char** argv) {
         p.cells = cells;
         p.body_atlas = atlas;
         p.bodies = &sprites;
+        p.spray = &spray;
         frame::compose(renderer, p);
 
         const auto* px = static_cast<const uint32_t*>(surface->pixels);
@@ -139,8 +153,9 @@ int main(int argc, char** argv) {
             std::memcpy(&last_frame[static_cast<size_t>(y) * row], px + y * pitch,
                         row * sizeof(uint32_t));
         if (g.tipping_count() < bodies_before)
-            std::printf("step %d: a body went back to cells; %d pixels changed (the step before: %d)\n",
-                        step, changed, prev_changed);
+            std::printf(
+                "step %d: a body went back to cells; %d pixels changed (the step before: %d)\n",
+                step, changed, prev_changed);
         prev_changed = changed;
 
         if (shot >= SHOT_COUNT || step != shots[shot]) continue;

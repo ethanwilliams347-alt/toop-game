@@ -293,6 +293,7 @@ int main(int argc, char* argv[]) {
         static_cast<size_t>(present::BODY_ATLAS_W) * present::BODY_ATLAS_H, 0u);
     std::vector<frame::BodySprite> body_sprites;
     std::vector<frame::HiddenCell> body_hidden;
+    std::vector<frame::SprayDrop> spray_drops;
     enemy_sprites.reserve(Run::MAX_ENEMIES);
     arrow_sprites.reserve(Quiver::CAPACITY);
 
@@ -1181,6 +1182,7 @@ int main(int argc, char* argv[]) {
         }
         shell::upload_cells(targets.cells, run.grid, camera, visible_w, visible_h, cell_window,
                             &body_hidden);
+        present::paint_spray(run, alpha, spray_drops);
 
         // Computed against the same view origin the cell upload just used, and after
         // camera.follow for the same reason that upload is: a light field built from
@@ -1242,6 +1244,7 @@ int main(int argc, char* argv[]) {
         fp.arrows = &arrow_sprites;
         fp.body_atlas = body_atlas;
         fp.bodies = &body_sprites;
+        fp.spray = &spray_drops;
         fp.light = &targets.light;
         fp.light_texture = targets.light_texture;
 

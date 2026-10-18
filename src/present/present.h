@@ -79,6 +79,11 @@ inline constexpr int SETTLE_STEPS = 10;
 void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                   std::vector<frame::BodySprite>& out, std::vector<frame::HiddenCell>& hidden);
 
+// One drop per drop of spray in the air, `alpha` of the way from where it was at
+// the start of the last step to where it is, drawn as translucent as a cell
+// holding that much liquid would be (Grid::pixel_of's rule).
+void paint_spray(const Run& run, float alpha, std::vector<frame::SprayDrop>& out);
+
 // One sprite per arrow in flight or at rest, interpolated like the enemies but
 // never snapped: an arrow is never relocated, only moved.
 void arrows(const Run& run, float alpha, std::vector<frame::ArrowSprite>& out);

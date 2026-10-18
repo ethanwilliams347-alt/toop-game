@@ -131,6 +131,15 @@ cooldown, governed by three constants:
 | `LIQUID_LEVEL_HEAD` | [grid.h](src/physics/grid.h) | 1024 | The smallest difference between two surfaces of one body that pressure moves water across. |
 | `LIQUID_LEVEL_RATE` | [grid.h](src/physics/grid.h) | 1024 | The most pressure moves from one surface cell per step: how fast a U-tube is seen to flow. |
 | `LIQUID_DISPERSE_RADIUS` | [grid.h](src/physics/grid.h) | 3 | How far a sinking grain reaches to press its water into the pool. Smaller lets a pour lift water out of the pool. |
+| `LIQUID_RISE_SCALE` | [grid.h](src/physics/grid.h) | 32 | Steps per cell of a liquid cell's one-byte upward velocity (kept in `ticks`), so it tops out near four cells a step. Zero in any pool at rest. |
+| `LIQUID_RISE_GRAVITY` | [grid.h](src/physics/grid.h) | 7 | Taken off a surface cell's upward velocity each step: `BODY_GRAVITY` at that scale, so heaved water falls back like a thrown body. |
+| `LIQUID_RISE_DAMP` | [grid.h](src/physics/grid.h) | 224 | Upward velocity kept per step, /256, including as it is handed up a buried column to the surface. Higher carries a deep push further. |
+| `SPRAY_MIN_RISE` | [grid.h](src/physics/grid.h) | 24 | A surface cell rising at least this fast (3/4 cell a step) throws a drop of spray instead of heaving. Lower splashes more and sooner. |
+| `SPRAY_MASS` | [grid.h](src/physics/grid.h) | 2048 | Most a single drop takes from its cell: half a cell. Bigger drops read as blocks. |
+| `SPRAY_MAX` | [grid.h](src/physics/grid.h) | 2048 | Most drops in the air at once; a fixed pool, so past it water heaves instead. |
+| `SPLASH_SHARE` | [grid.h](src/physics/grid.h) | 1 | Share of a body's speed (over `SPLASH_MIN_SPEED`) the water it pushes aside is given: out from the body and back along its path. Lower makes a plunge quieter. |
+| `SPLASH_MIN_SPEED` | [grid.h](src/physics/grid.h) | 1/4 cell/step | Below this a body displaces water without moving it. At 0 a floating raft's bobs fed waves that kept it bobbing for ever. |
+| `MAX_AROUND` | [grid.h](src/physics/grid.h) | 24 cells | How far along a fast body's leading face, and then up beside it, the water in front of the face's middle looks for room. Past it, that water goes behind the body. |
 
 ---
 
@@ -164,7 +173,13 @@ what each scene does in numbers and pictures; run it after turning any of these.
 | `BOUNCE_MIN_SPEED` | [grid.h](src/physics/grid.h) | 3/4 cell/step | Impacts slower than this do not bounce. Lower makes landings livelier and resting bodies jitter. |
 | `WAKE_SPEED` | [grid.h](src/physics/grid.h) | 3/8 cell/step | How fast a body must strike a piece at rest to wake it and push it. |
 | `PUSH_WAKE` | [grid.h](src/physics/grid.h) | 1/64 cell/step | How hard a body must lean sideways on a piece at rest to wake it -- a domino gone over onto the next. |
-| `LIQUID_DRAG` | [grid.h](src/physics/grid.h) | 96 | Share of a fully submerged body's velocity lost per step, /256. At 48 a floating raft bobbed on its own waves for ever; at 96 it settles in about three seconds and stone sinks at about 24 cells/s. |
+| `LIQUID_DRAG` | [grid.h](src/physics/grid.h) | 40 | Viscous share of a fully submerged body's velocity lost per step, /256. Only the settling now: it damps the last of a bob. `LIQUID_FORM_DRAG` does the work at speed. |
+| `LIQUID_SPIN_DRAG` | [grid.h](src/physics/grid.h) | 40 | The same for spin, /256. Higher stops a piece turning in water sooner. |
+| `LIQUID_FORM_DRAG` | [grid.h](src/physics/grid.h) | 5 | Speed-squared drag in liquid, applied as v / (1 + k v). Sets terminal speed: an 8x6 stone sinks at about 0.6 cells/step. Higher sinks slower and slaps harder into a pool. |
+| `LIQUID_ADDED_MASS` | [grid.h](src/physics/grid.h) | 1 | Share of the displaced liquid's weight a body must move along with itself. Why stone gathers speed instead of starting at it, and wood held under rises gently instead of popping. |
+| `FLOAT_SLEEP_DRIFT` | [grid.h](src/physics/grid.h) | 1/8 cell | `BODY_SLEEP_DRIFT` for a body held only by liquid. At 1/2 a floater was stopped mid-bob, found floating and relaunched -- the pop. |
+| `REST_SQUARE_ANGLE` | [grid.h](src/physics/grid.h) | 1/10 rad | A body coming to rest within about six degrees of a quarter turn is set down exactly square, so its cells match its sprite and the hand-back does not jump. 0 leaves every rest at its own angle. |
+| `SETTLE_STEPS` | [present.h](src/present/present.h) | 10 | Steps over which a body's sprite eases onto the pose its cells will take. Shorter snaps; longer looks like sliding into place. Presentation only. |
 | `LOAD_SCAN` | [grid.h](src/physics/grid.h) | 48 | Tallest column of sand counted as load on a piece. Taller is a ceiling that holds itself. |
 | `BODY_MAX_STEPS` | [grid.h](src/physics/grid.h) | 1800 | Safety cap: a body still moving after this many steps is frozen where it is. |
 
@@ -316,6 +331,9 @@ moved by `ANGLER_TENTACLES` in [enemy.h](src/physics/enemy.h):
 | lure hold | [enemy.h](src/physics/enemy.h) | 6 | Steps the bulb is held, trembling, at the top of the wind-up before the whip. |
 | lure crack / flourish | [enemy.h](src/physics/enemy.h) | 4 / 3 | Cells across of the bend rolled down the stalk through the whip, and extra wave of the thrash after it lands. |
 | lure live / bulb radius | [enemy.h](src/physics/enemy.h) | 3 / 3 | The bulb hurts through the whip and this many steps after it lands, and only what its swept path (this many cells round) touches. The strike is aimed when the wind-up starts, at the target's spot within `reach`. An arrow in the bulb calls a wind-up off and doubles the recovery. |
+| hop rest / hop speed | [enemy.h](src/physics/enemy.h) | 30 / 90 | On one leg (the other's foot cut or shot off) it moves only in hops: this many steps stood gathering itself, then a jump at this many cells a second -- about seven cells high, six along at a wander. |
+| legless sink / crawl share | [enemy.h](src/physics/enemy.h) | 26 / 1/3 | With no leg left it walks on its lure, which can then no longer strike: the body slumps this many cells down its box onto the ground and moves at this share of its speed. |
+| piece steps / wriggle / wriggle steps | [enemy.h](src/physics/enemy.h) | 60 / 2 / 12 | A tentacle cut off falls and lies as a chain of its own for this many steps, wriggling this many cells either side (dying away) once every this many steps, then crumbles to sand. |
 | `pad` | [enemy.h](src/physics/enemy.h) | 40 | Under the troll's 56, so the renderer's atlas slots are unchanged. |
 
 ### Animation (`Species::rig`, see [src/physics/rig.h](src/physics/rig.h))
@@ -465,7 +483,7 @@ Record adjustments to tuning parameters and their rationale here.
   climb, so the plane stretches less at the ceiling (2.7x at strength 0.75, was
   2.9x), inside what was judged when 0.75 was picked. 8 is as far out as the art goes:
   at 7 the 688-wide hills tile in `bg_tarn_wide` would show twice on a 3440
-  screen. The valley and forest scenes stay at 10.
+  screen. The valley scenes stay at 10.
 - **2026-10-17 -- loose bodies replace toppling.** `TIP_GRAVITY` and
   `TIP_MAX_STEPS` are gone with the hinge they tuned. A piece that topples is
   now a rigid body with momentum, friction and restitution, so it flies off a
@@ -486,3 +504,36 @@ Record adjustments to tuning parameters and their rationale here.
   balance. Overhangs snap by bending strength (material `strength`,
   `IMPACT_LOAD_MAX` 6), which replaces fracture-on-landing for bodies.
   `WARM_START` 1/4 added for stacks.
+- **2026-10-18 -- water feel, stage 1.** A playtest found floating wood
+  popping, sinking linear and snappy, a jump when a body went back to cells and
+  a gap around stone sinking through water. `LIQUID_DRAG` 96 -> 40: at 96 a body
+  hit terminal speed within a few steps of going under and fell in a straight
+  line, with the drag switching on all at once at the surface. New
+  `LIQUID_FORM_DRAG` 5 (speed-squared) takes over at speed and `LIQUID_ADDED_MASS`
+  1 makes stone gather speed and wood rise gently; `LIQUID_SPIN_DRAG` 40 splits
+  spin out of the old shared drag. `FLOAT_SLEEP_DRIFT` 1/8 stops floaters being
+  frozen mid-bob and relaunched. `REST_SQUARE_ANGLE` 1/10 and `SETTLE_STEPS` 10
+  remove the hand-back jump (0 pixels change on hand-back in `preview_bodies post`).
+- **2026-10-18 -- angler: after a sever** (first-pass values, not playtested).
+  Phase 5 of the procedural-animation plan. A tentacle whose tip link has
+  nothing attached no longer stands: on one leg the angler hops (`hop rest /
+  hop speed`), on none it slumps and drags itself on its lure (`legless sink /
+  crawl share`), and it dies only with nothing whole left to stand on. A lure
+  without its bulb, or walked on, strikes nothing. The piece cut off lies as a
+  Verlet chain that wriggles before it crumbles (`piece steps / wriggle /
+  wriggle steps`). The values are guesses checked only in enemy_test (six
+  hops in 300 steps, a slump of 26, a piece that moves 24 of 30 steps).
+- **2026-10-18 -- water, stage 2: momentum, vertical velocity, spray.** A
+  playtest found displacement looked wrong: a moving body swapped the water it
+  entered straight into the cells it left, so water teleported from in front of
+  a body to behind it with no motion. Now a body pushes that water out beside
+  itself with its own momentum, around to the ends of its leading face and up
+  over full cells there (`SPLASH_SHARE` 1, `MAX_AROUND` 24), and water closes in
+  behind it. Liquid cells gained an upward velocity in the otherwise unused
+  `ticks` byte (`LIQUID_RISE_SCALE` 32, `LIQUID_RISE_GRAVITY` 7,
+  `LIQUID_RISE_DAMP` 224), and water rising past `SPRAY_MIN_RISE` 24 leaves the
+  grid as drops (`SPRAY_MASS` 2048, `SPRAY_MAX` 2048) that land back in it. A
+  12x6 wooden block dropped 22 cells now throws a crown each side instead of
+  heaping water on its own top. `SPLASH_MIN_SPEED` 1/4 came out of the body
+  probe's float scene: without it every slow bob pushed a wave that came back
+  and the raft never settled; with it the raft settles in 191 steps (was 255).

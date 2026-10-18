@@ -428,19 +428,19 @@ void test_rig_set(const Shipped& sh) {
 // file makes that is not about its own art. A factor that drifts makes it a
 // different landscape in the same palette, and nothing about a wrong ladder
 // fails to load.
-void test_bg_valley_ext_is_bg_valley(const std::vector<Shipped>& sets) {
+void test_bg_valley_wide_is_bg_valley(const std::vector<Shipped>& sets) {
     const Shipped* base = nullptr;
     const Shipped* ext = nullptr;
     for (const Shipped& s : sets) {
         if (s.name == "bg_valley") base = &s;
-        if (s.name == "bg_valley_ext") ext = &s;
+        if (s.name == "bg_valley_wide") ext = &s;
     }
-    check("bg_valley_ext: both sets are shipped", base && ext);
+    check("bg_valley_wide: both sets are shipped", base && ext);
     if (!base || !ext) return;
     const backdrop_set::Set& a = base->set;
     const backdrop_set::Set& b = ext->set;
 
-    check("bg_valley_ext: the world is exactly twice bg_valley's on both axes",
+    check("bg_valley_wide: the world is exactly twice bg_valley's on both axes",
           b.native_w == a.native_w * 2 && b.native_h == a.native_h * 2);
     bool same = a.layers.size() == b.layers.size();
     for (size_t i = 0; same && i < a.layers.size(); ++i) {
@@ -449,7 +449,7 @@ void test_bg_valley_ext_is_bg_valley(const std::vector<Shipped>& sets) {
         same = la.factor == lb.factor && la.opaque == lb.opaque && la.foreground == lb.foreground &&
                la.bands.empty() == lb.bands.empty();
     }
-    check("bg_valley_ext: every layer carries bg_valley's factor and bg_valley's flags", same);
+    check("bg_valley_wide: every layer carries bg_valley's factor and bg_valley's flags", same);
 
     // The bands moved down by the frame's growth and did not change shape: the
     // vertical rule the art was generated under, which makes the extension's
@@ -464,7 +464,7 @@ void test_bg_valley_ext_is_bg_valley(const std::vector<Shipped>& sets) {
             shifted = bb[k].parallax_x == ba[k].parallax_x && bb[k].row1 == ba[k].row1 + shift &&
                       (k == 0 ? bb[k].row0 == 0 : bb[k].row0 == ba[k].row0 + shift);
     }
-    check("bg_valley_ext: the ground bands are bg_valley's, at the same factors, moved down by the "
+    check("bg_valley_wide: the ground bands are bg_valley's, at the same factors, moved down by the "
           "frame's growth",
           shifted);
 
@@ -483,7 +483,7 @@ void test_bg_valley_ext_is_bg_valley(const std::vector<Shipped>& sets) {
             !bmp::read((b.dir + b.layers[i].file).c_str(), ib, nullptr))
             continue;  // the read itself is checked per set
         const std::set<uint32_t> want = palette_of(ia), got = palette_of(ib);
-        check(("bg_valley_ext: " + b.layers[i].file + " is painted in exactly the colours of " +
+        check(("bg_valley_wide: " + b.layers[i].file + " is painted in exactly the colours of " +
                a.layers[i].file)
                   .c_str(),
               want == got,
@@ -501,6 +501,6 @@ int main() {
         if (s.set.anchor == backdrop_set::Anchor::Corner) test_corner_set(s);
         if (s.set.has_rig) test_rig_set(s);
     }
-    test_bg_valley_ext_is_bg_valley(sets);
+    test_bg_valley_wide_is_bg_valley(sets);
     return report();
 }

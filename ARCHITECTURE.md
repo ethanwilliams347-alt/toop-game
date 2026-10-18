@@ -150,6 +150,11 @@ Arrows point from includer to included.
   second-order follower (`Response`, `follow`) the bulb and the body's lean
   and sink move on, and the swept test (`sweep_touches`) a lure strike hits by.
   Feet step from a planned home (`Enemy::plan_steps`), not on the stride.
+  After a sever (`Limb::intact`, `Limb::role`) the body hops on one leg or
+  drags itself on its lure. The piece cut off stays in the body's own mask,
+  posed by its own Verlet chain held in the same `Limb` (`Enemy::move_pieces`),
+  so it is drawn and hit like any tentacle with no pool or render path of its
+  own, and crumbles to sand when it times out or leaves the pad.
 - `body_art.h`, `enemy_art.h`, `troll_art.h`, `fish_art.h`, `angler_art.h` --
   enemy bodies as character grids. Here, not in `assets/`, because the picture
   *is* the body: which pixels exist decides where an arrow hits. `troll_art.h`,
@@ -239,10 +244,14 @@ Arrows point from includer to included.
 4. **Interpolate** -- player draw position blended by the pacer's alpha; camera
    follows.
 5. **Present** -- `present::paint_bodies` (loose bodies, drawn as turned
-   sprites with their cells left out of the cell upload), `present::paint_enemies`, `present::arrows`,
+   sprites; their cells go out as `frame::HiddenCell`s, each carrying the
+   colour of the nearest liquid or powder within 2 cells so the space a turned
+   sprite doesn't cover reads as the water around it instead of a gap; over its
+   last `SETTLE_STEPS` a body eases onto the pose its cells will take),
+   `present::paint_spray`, `present::paint_enemies`, `present::arrows`,
    `present::run_readout` read the `Run` const.
 6. **Draw** -- `shell::upload_cells`; `frame::compose` walks `frame::LAYERS`
-   (backdrop, props, cells, bodies, objective, enemies, player, arrows, foreground,
+   (backdrop, props, cells, bodies, spray, objective, enemies, player, arrows, foreground,
    grade, light pass); `overlay::draw`; `SDL_RenderPresent`.
 
 Only step 3 changes the world; 4-6 read the `Run` const.
@@ -252,7 +261,10 @@ Only step 3 changes the world; 4-6 read the `Run` const.
 Water and oil are the one part of the grid that doesn't move as whole cells.
 
 - **State:** `Element::mass` (amount; `Grid::LIQUID_FULL` = 4096 is a full
-  cell) and `Element::flow` (sideways velocity).
+  cell), `Element::flow` (sideways velocity) and, in `Element::ticks`, an
+  upward velocity (`TickRole::Rise`). The upward velocity is zero in any pool at
+  rest; only a body pushing water or spray landing sets it, so it costs a
+  sleeping pool nothing.
 - **Conservation:** liquid moves only by amounts passing between two cells
   (`Grid::transfer_liquid`). A cell left with none becomes Empty; Empty that
   receives some becomes liquid. Moves between *unlike* materials (water through
@@ -273,6 +285,22 @@ Water and oil are the one part of the grid that doesn't move as whole cells.
   rides up with the swap. That's why pouring sand raises a pool instead of
   lifting its water up the stream. Steam carries the amount across boiling and
   condensing.
+- **Rise (`Grid::step_rise`):** a cell with upward velocity skips the rest of
+  `step_liquid` while it climbs. Buried, it hands the velocity to the cell on
+  top (pressure carries a push up the column in one sweep); at the surface it
+  heaves part of itself into the empty cell above, under gravity, or past
+  `SPRAY_MIN_RISE` throws a drop of spray.
+- **Spray (`Grid::Spray`, `Grid::step_spray`):** drops fly as points in a
+  fixed pool (`SPRAY_MAX`, reserved in the constructor) until they meet
+  anything that is not empty, then go back into the grid as an amount. Stepped
+  after the bodies and before the sweep. A world's liquid is the cells' plus
+  `Grid::spray_mass()`.
+- **Bodies push water (`Grid::tip_move`):** liquid in the cells a body enters
+  goes out beside it with the body's momentum (`push_aside`): to the side
+  cells, else around to the ends of its leading face and up past full cells
+  there. Cells it leaves draw water in from beside them (`draw_in`). What has
+  no room still goes into the cells it left, as before, so liquid is conserved.
+  Below `SPLASH_MIN_SPEED` a body gives the water no motion.
 - **Incompressible on purpose:** a full cell holds `LIQUID_FULL` regardless of
   depth. A compressible model was tried and dropped: U-tubes need it stiff,
   deep bodies need it soft, and no value served both (at 3%/cell a U-tube took

@@ -75,6 +75,10 @@ turn them into `add_test()`.
   surrounding density.
 - `/W4 /permissive-` with zero warnings; keep it that way.
 - Tests are plain C++ executables returning non-zero on failure — no framework.
+- Adding, moving or renaming anything under `assets/`: follow
+  [assets/README.md](assets/README.md) (one folder per backdrop set, prefixed
+  files, layers numbered front to back, fixtures in `tests/fixtures/`). It is a
+  convention, not a check — deviate with a reason written in that folder's README.
 
 ## Responses
 

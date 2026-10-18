@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from pixel_art import LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header, read_png, write_bmp
+from pixel_art import LEGEND_EMPTY, LEGEND_WALL, assert_legend_matches_header, read_png, write_bmp, write_preview
 from png_to_bmp import convert
 
 # (source, destination, keys transparency). Listed front to back, the order the
@@ -125,6 +125,7 @@ def build_scene_maps():
 
     write_bmp(MATERIAL_PATH, NATIVE_W, NATIVE_H, material)
     write_bmp(ALBEDO_PATH, NATIVE_W, NATIVE_H, albedo)
+    write_preview("bg_valley", NATIVE_W, NATIVE_H, albedo)
     print(f"scene maps -> {MATERIAL_PATH}, {ALBEDO_PATH}  "
           f"({NATIVE_W}x{NATIVE_H}, floor at row {FLOOR_ROW}, {solid} solid cells)")
     return 0

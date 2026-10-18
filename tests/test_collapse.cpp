@@ -1016,6 +1016,70 @@ int main() {
         check("and both come to rest", !g.has_pending_support_checks());
     }
 
+    // --- a plunge splashes, and the splash is water like any other ---
+    // The same drop, watched every step. A body pushes the water it enters out
+    // beside itself with its own momentum, and water thrown up fast enough
+    // leaves the grid as spray for a few steps (Grid::Spray). Neither may make
+    // or lose any, the splash has to settle back to a still pool with no
+    // velocity left in it, and it has to be the same splash every time.
+    {
+        const auto make = [] {
+            Grid g(80, 50);
+            fill(g, 0, 45, 79, 49, ElementType::Wall);
+            fill(g, 0, 20, 0, 44, ElementType::Wall);
+            fill(g, 79, 20, 79, 44, ElementType::Wall);
+            fill(g, 1, 25, 78, 44, ElementType::Water);
+            fill(g, 15, 5, 26, 10, ElementType::Wood);
+            fill(g, 50, 5, 57, 10, ElementType::Wall);
+            nudge(g, 20, 4);
+            nudge(g, 53, 4);
+            return g;
+        };
+        Grid g = make();
+        const int64_t water = liquid::total(g, ElementType::Water);
+        bool conserved = true;
+        size_t most_spray = 0;
+        int first_off = -1;
+        for (int i = 1; i <= 900; ++i) {
+            g.update();
+            most_spray = std::max(most_spray, g.spray().size());
+            if (conserved && liquid::total(g, ElementType::Water) + g.spray_mass() != water) {
+                conserved = false;
+                first_off = i;
+            }
+        }
+        check("a plunge throws spray", most_spray > 0,
+              std::to_string(most_spray) + " drops at most");
+        check("and the pool and the spray together hold the same water every step", conserved,
+              "first off at step " + std::to_string(first_off));
+        int moving = 0;
+        for (int y = 0; y < 50; ++y)
+            for (int x = 0; x < 80; ++x) {
+                const Element& e = g.get_element(x, y);
+                if (e.type == ElementType::Water && e.ticks != 0) ++moving;
+            }
+        check("and it all lands, and stops rising", g.spray().empty() && moving == 0,
+              std::to_string(g.spray().size()) + " drops, " + std::to_string(moving) +
+                  " cells still rising");
+
+        Grid a = make(), b = make();
+        bool same = true;
+        for (int i = 0; i < 40 && same; ++i) {
+            a.update();
+            b.update();
+            same = a.spray().size() == b.spray().size();
+            for (size_t k = 0; same && k < a.spray().size(); ++k)
+                same = a.spray()[k].x == b.spray()[k].x && a.spray()[k].y == b.spray()[k].y &&
+                       a.spray()[k].mass == b.spray()[k].mass;
+            for (int y = 0; same && y < 50; ++y)
+                for (int x = 0; same && x < 80; ++x)
+                    same = a.get_element(x, y).type == b.get_element(x, y).type &&
+                           a.get_element(x, y).mass == b.get_element(x, y).mass &&
+                           a.get_element(x, y).ticks == b.get_element(x, y).ticks;
+        }
+        check("and the same splash every time", same);
+    }
+
     // --- a stack that leans past its base comes down ---
     // Every block is balanced on the one under it; the stack as a whole is not.
     // Only weighing each block with everything resting on it finds that.

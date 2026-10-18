@@ -185,6 +185,12 @@ inline std::string describe_cell(const Grid& grid, int x, int y) {
         case TickRole::Lifetime:
             s += " LIFE:" + std::to_string(static_cast<int>(e.ticks));
             break;
+        case TickRole::Rise:
+            // Signed, and zero in water at rest, so only a cell a body or a splash
+            // has just pushed shows it.
+            if (e.ticks)
+                s += " RISE:" + std::to_string(static_cast<int>(static_cast<int8_t>(e.ticks)));
+            break;
         case TickRole::None:
             // Only ever printed when something is wrong. A material with no role for
             // `ticks` should carry zero in it forever -- place() builds a fresh

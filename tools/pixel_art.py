@@ -57,6 +57,12 @@ def asset_path(*parts):
     return os.path.join(ROOT, 'assets', *parts)
 
 
+def fixture_path(*parts):
+    """Path under the repo's tests/fixtures/: test-only scenes kept out of the
+    shipped assets/."""
+    return os.path.join(ROOT, 'tests', 'fixtures', *parts)
+
+
 def src_path(*parts):
     """Path under the repo's src/. Used by the generator that writes a
     header (`player_sheet.py`); that header is overwritten wholesale, so writing one to the wrong tree is real damage."""
@@ -254,7 +260,7 @@ PALETTE = {
     # sky (aerial perspective), so depth reads from value as well as from motion.
     #
     # Far to near the body values fall and the rims brighten, the same ladder
-    # bg_forest's README states: far is close to the sky, near is darker and more
+    # the valley sets follow: far is close to the sky, near is darker and more
     # contrasty.
     'tarn_sky_top': (0x0B, 0x4D, 0x5C),  # bg_valley's mountain teal, at the zenith
     'tarn_sky_high': (0x2F, 0x6F, 0x7A),
@@ -958,8 +964,8 @@ def write_scene(name, width, height, scene_cell, background=None):
     playable world, or None for air. Air is LEGEND_EMPTY in the material map.
     An albedo of None -- air's, or a cell's that returns None for it -- is the
     backdrop composite behind it when one is passed (`background`, row-major),
-    else LEGEND_EMPTY: a floor that is the painted ground itself, as bg_forest's
-    and bg_valley_gemini's are, says so with (LEGEND_WALL, None)."""
+    else LEGEND_EMPTY: a floor that is the painted ground itself says so with
+    (LEGEND_WALL, None)."""
     assert_legend_matches_header()
     mat, alb = [], []
     for y in range(height):

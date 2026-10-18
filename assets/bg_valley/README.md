@@ -10,7 +10,7 @@ writes `bg_valley_material.bmp` and `bg_valley_albedo.bmp`, the floor the player
 stands on. Edit the PNGs and re-run it rather than editing the BMPs. This README
 is the one hand-written file.
 
-`bg_valley_ext` and `bg_valley_gemini` are the same place at 688 x 288.
+`bg_valley_wide` is the same place at 688 x 288.
 
 ## Layers
 

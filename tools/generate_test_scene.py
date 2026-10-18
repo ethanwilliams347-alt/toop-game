@@ -1,8 +1,8 @@
 import random
 
-from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, asset_path, write_bmp
+from pixel_art import PALETTE, apply_depth_ramp, apply_rim_light, fixture_path, write_bmp
 
-# Generates the fixture scene (assets/test_material.bmp, test_albedo.bmp):
+# Generates the fixture scene (tests/fixtures/test_material.bmp, test_albedo.bmp):
 #
 #     python tools/generate_test_scene.py
 #
@@ -216,5 +216,5 @@ def rim_for(x, y):
 # proportion, not as a pixel count.
 alb = apply_rim_light(mat, alb, WIDTH, HEIGHT, EMPTY, rim_for, rim_depth=s(2))
 
-write_bmp(asset_path('test_material.bmp'), WIDTH, HEIGHT, mat)
-write_bmp(asset_path('test_albedo.bmp'), WIDTH, HEIGHT, alb)
+write_bmp(fixture_path('test_material.bmp'), WIDTH, HEIGHT, mat)
+write_bmp(fixture_path('test_albedo.bmp'), WIDTH, HEIGHT, alb)

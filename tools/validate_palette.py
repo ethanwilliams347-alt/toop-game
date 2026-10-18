@@ -4,7 +4,7 @@ Audit tool for checking palette conformance. Generated layers (backdrops,
 trees, terrain) are built from PALETTE, so this catches hardcoded colors.
 
 Usage:
-    python tools/validate_palette.py assets/test_albedo.bmp
+    python tools/validate_palette.py tests/fixtures/test_albedo.bmp
     python tools/validate_palette.py assets/tree_a.bmp --colorkey
 
 --colorkey allows pixels equal to pixel_art.COLOR_KEY through unchecked for

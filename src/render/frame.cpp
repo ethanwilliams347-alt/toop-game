@@ -217,6 +217,27 @@ void draw_bodies(SDL_Renderer* renderer, const Params& p) {
     }
 }
 
+// --- spray ---
+//
+// Over the bodies, because a splash is thrown up in front of what made it, and
+// in the world, so it is lit with the water it came from. A cell-sized square
+// each, at the drop's own colour: a drop is liquid that has left the grid for a
+// few steps, and drawn as anything but a cell of it the landing would show.
+void draw_spray(SDL_Renderer* renderer, const Params& p) {
+    if (!p.spray || p.spray->empty()) return;
+    const Camera& camera = *p.camera;
+    const float scale = static_cast<float>(camera.scale_length(1));
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (const SprayDrop& d : *p.spray) {
+        const SDL_FRect dst{camera.world_to_screen_x(d.x - 0.5f),
+                            camera.world_to_screen_y(d.y - 0.5f), scale, scale};
+        SDL_SetRenderDrawColor(renderer, static_cast<uint8_t>(d.color >> 16),
+                               static_cast<uint8_t>(d.color >> 8), static_cast<uint8_t>(d.color),
+                               static_cast<uint8_t>(d.color >> 24));
+        SDL_RenderFillRectF(renderer, &dst);
+    }
+}
+
 // --- the objective marker ---
 //
 // Drawn in world cells, not screen pixels, which is the opposite choice
@@ -396,12 +417,12 @@ void draw_light(SDL_Renderer* renderer, const Params& p) {
 // the frame back to front, and a band is a row here rather than an insertion
 // between two comments in a long function.
 constexpr Layer TABLE[] = {
-    {"clear", Lighting::Lit, draw_clear},     {"backdrop", Lighting::Lit, draw_backdrop},
-    {"props", Lighting::Lit, draw_props},     {"cells", Lighting::Lit, draw_cells},
-    {"bodies", Lighting::Lit, draw_bodies},   {"objective", Lighting::Lit, draw_objective},
-    {"enemies", Lighting::Lit, draw_enemies}, {"player", Lighting::Lit, draw_player},
-    {"arrows", Lighting::Lit, draw_arrows},   {"foreground", Lighting::Lit, draw_foreground},
-    {"light", Lighting::Light, draw_light},
+    {"clear", Lighting::Lit, draw_clear},           {"backdrop", Lighting::Lit, draw_backdrop},
+    {"props", Lighting::Lit, draw_props},           {"cells", Lighting::Lit, draw_cells},
+    {"bodies", Lighting::Lit, draw_bodies},         {"spray", Lighting::Lit, draw_spray},
+    {"objective", Lighting::Lit, draw_objective},   {"enemies", Lighting::Lit, draw_enemies},
+    {"player", Lighting::Lit, draw_player},         {"arrows", Lighting::Lit, draw_arrows},
+    {"foreground", Lighting::Lit, draw_foreground}, {"light", Lighting::Light, draw_light},
     // Nothing after the light pass: the UI drawn after it lives in
     // render/overlay.cpp, outside the world and outside this table.
 };

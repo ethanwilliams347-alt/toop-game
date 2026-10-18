@@ -477,6 +477,19 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             .lure_flourish = fx::from_int(3),
             .lure_live = 3,
             .bulb_radius = 3,
+            // A hop every half second, about seven cells high: slow enough
+            // that it reads as a struggle, high enough to clear a step. The
+            // slump puts the belly about on the ground, and the drag goes at a
+            // third of the walk.
+            .hop_rest = 30,
+            .hop_speed = fx::from_int(90),
+            .legless_sink = 26,
+            .crawl_share = fx::from_ratio(1, 3),
+            // A second of wriggling, quick and wide at first -- a wave every
+            // fifth of a second, two cells either side -- and still by the end.
+            .piece_steps = 60,
+            .piece_wriggle = fx::from_int(2),
+            .piece_wriggle_steps = 12,
         },
 };
 
@@ -879,6 +892,28 @@ private:
         rig::Point drawn_now{};
         fx::v crack = -1;
         fx::v flourish = 0;
+
+        // After a sever (Motion's "after a sever"). What this tentacle does
+        // now -- the chain's own role, until a legless body makes its lure a
+        // leg -- and whether its tip link still has a pixel attached to the
+        // body, which is what standing on it, or striking with it, needs.
+        tentacle::Role role = tentacle::Role::Leg;
+        bool intact = true;
+        // The piece cut off it, while it wriggles: rest links from `cut` to
+        // the tip, whose pixels stay in the mask -- drawn and hit like any
+        // other, through these links' turns -- but are no longer the body's.
+        // Its joints are a Verlet chain in the world (this step and last),
+        // free of the body. -1 when there is none.
+        int cut = -1;
+        // The joint the last cut was at, which is not filled across until
+        // the whole chain has been placed again: a piece that crumbles
+        // between the stump's placing and the next leaves the joint's halfway
+        // turn from before the cut. -1 once it has been.
+        int seam = -1;
+        int piece_left = 0;
+        int piece_pixels = 0;
+        tentacle::Points piece{};
+        tentacle::Points piece_was{};
     };
 
 public:
@@ -916,6 +951,8 @@ private:
     // The facing the chains were last solved in: on a turn they are mirrored
     // with the frame, so they stay where they were in the world.
     bool limbs_face_left = false;
+    // On one leg: steps until the next hop.
+    int hop_wait = 0;
 
     // compute_pose, in the three pieces update() runs with the tentacles' step
     // between: the rig's angles, then the chains (which root on the body the
@@ -930,8 +967,26 @@ private:
     rig::Point foot_home(const Grid& grid, int limb, rig::Point root, bool& grounded) const;
     rig::Point leg_goal(const Grid& grid, int limb, rig::Point root);
     rig::Point lure_goal(int limb, int target_x, int target_y);
-    void place_links(int limb, const tentacle::Points& chain);
+    // Places links [from, to) of the chain, and the joints between them.
+    void place_links(int limb, const tentacle::Points& chain, int from, int to);
     int tentacle_pixel(int limb, int px, int py) const;
+
+    // --- after a sever ---
+    // Whether pixel `index` belongs to a cut-off piece rather than the body,
+    // and whether it is the body's: there, and not in a piece.
+    int piece_of(int index) const;  // the tentacle whose piece it is, or -1
+    bool in_piece(int index) const { return piece_of(index) >= 0; }
+    bool attached(int index) const { return pixel(index) != 0 && !in_piece(index); }
+    // Settle's part for tentacles: what it cut off becomes pieces (marked in
+    // `seen`, so they are not crumbled), then which tentacles are still whole.
+    void cut_pieces(std::array<uint8_t, MAX_FRAME_PIXELS>& seen);
+    void mark_intact();
+    // Tentacles standing as legs, and whether the lure has become one.
+    int legs_standing() const;
+    bool crawling() const;
+    // The pieces' step: fall, wriggle, and crumble at the end.
+    void move_pieces(Grid& grid);
+    void crumble_piece(Grid& grid, int limb);
     rig::Box pad_limit() const;
     // Posed frame space to world and back, in fx, sub-cell remainder included:
     // the body is drawn at its remainder (present::paint_enemies), so a foot

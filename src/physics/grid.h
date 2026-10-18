@@ -195,6 +195,32 @@ public:
         return is_within_bounds(x, y) && is_tipping(get_index(x, y));
     }
 
+    // A drop of liquid thrown clear of the grid: water heaved up fast enough to
+    // leave the surface (see step_rise) flies as a point until it meets anything
+    // that is not empty space, and then goes back into the grid as an amount. The
+    // Noita-style hybrid -- the grid is good at pools and bad at anything moving
+    // faster than a cell a step, and a splash is all that.
+    //
+    // Its amount is out of the grid while it flies, so a count of a world's
+    // liquid is the cells' plus spray_mass(). Positions and velocities are 16.16
+    // cells and cells per step, like a body's; (prev_x, prev_y) is where it was at
+    // the start of the step, for drawing it between steps.
+    struct Spray {
+        fx::v x = 0, y = 0;
+        fx::v vx = 0, vy = 0;
+        fx::v prev_x = 0, prev_y = 0;
+        uint32_t color = 0;
+        uint16_t mass = 0;
+        ElementType type = ElementType::Empty;
+        uint8_t temperature = AMBIENT_TEMPERATURE;
+    };
+    const std::vector<Spray>& spray() const { return spray_drops; }
+    int64_t spray_mass() const {
+        int64_t m = 0;
+        for (const Spray& d : spray_drops) m += d.mass;
+        return m;
+    }
+
     // --- liquids ---
     //
     // A full cell's worth of liquid, in Element::mass units. Every amount of liquid
@@ -459,6 +485,70 @@ private:
     static constexpr int LIQUID_LEVEL_HEAD = LIQUID_FULL / 4;
     static constexpr int LIQUID_LEVEL_RATE = LIQUID_FULL / 4;
 
+    // --- vertical velocity and spray ---
+    //
+    // A liquid cell's upward velocity (its `ticks`, see element.h) is in steps of
+    // 1/LIQUID_RISE_SCALE of a cell a step, so the signed byte reaches about four
+    // cells a step. Nothing in a pool at rest has any: the down and up rules above
+    // are what move water vertically, and they are instant, so a velocity would
+    // add nothing to them. It exists for what they cannot do -- water thrown
+    // upward by a body pushing it aside, which rises against gravity for a few
+    // steps and falls back, or leaves the surface altogether as spray.
+    static constexpr int LIQUID_RISE_SCALE = 32;
+
+    // Taken off a rising cell's velocity every step: BODY_GRAVITY's 9/40 cell a
+    // step squared at this scale, rounded down, so a heave falls back the way a
+    // body thrown up does.
+    static constexpr int LIQUID_RISE_GRAVITY = 7;
+
+    // Share of its rise a cell keeps each step after gravity, /256, and the share
+    // of what is left it hands the liquid on top of it when it is buried: a push
+    // deep in a pool is carried up the column to the surface, losing some at
+    // every cell, which is pressure doing the work. Strong enough that a plunge's
+    // ring of pushed water heaves the surface beside the body; weak enough that a
+    // push two bodies deep is gone before it gets there.
+    static constexpr int LIQUID_RISE_DAMP = 224;
+
+    // A surface cell rising at least this fast, in LIQUID_RISE_SCALE units --
+    // three quarters of a cell a step -- throws a drop instead of heaving. Slower,
+    // and the surface bulges and settles back; at this speed a heave would climb
+    // over a cell in a step, which the grid draws as water teleporting up a row.
+    static constexpr int SPRAY_MIN_RISE = 24;
+
+    // Most a single drop takes from its cell. Half a cell: a full cell thrown
+    // whole reads as a block, not a drop, and the rest of it heaves next step
+    // and may throw another.
+    static constexpr int SPRAY_MASS = LIQUID_FULL / 2;
+
+    // How many drops can be in the air at once. The pool is reserved to this in
+    // the constructor and never grows; water that would have thrown a drop past
+    // the limit heaves instead.
+    static constexpr int SPRAY_MAX = 2048;
+
+    // Share of a moving body's speed the water it pushes aside is given, 16.16.
+    // That water goes out from the body along the face it was pushed off, and
+    // back along the body's path -- out and up from a body plunging in, the bow
+    // wave of one crossing a pool. All of the speed: a body moving a cell a step
+    // moves the water in front of it a cell a step, and it is the drag that takes
+    // energy out, not the push.
+    static constexpr fx::v SPLASH_SHARE = fx::ONE;
+
+    // Speed, in cells a step, that a body pushes water aside at without giving it
+    // any motion; above it the water gets SPLASH_SHARE of only the excess. A
+    // floating body bobs at a tenth of this, and with no dead band every bob
+    // pushed a ring of water out at its own speed, the ring came back off the
+    // walls and lifted it again, and a raft that had settled in three seconds
+    // bobbed for the whole of the probe's twenty-five: the push was adding energy
+    // the drag on the body had not taken out. A plunge, at a cell a step and
+    // more, still throws most of its speed into the water.
+    static constexpr fx::v SPLASH_MIN_SPEED = fx::from_ratio(1, 4);
+
+    // How far along a body's leading face push_aside looks for its end, in cells,
+    // when the water in front of the middle of it has nothing beside it but body.
+    // Past this -- a body wider than twice it -- the middle goes behind the body
+    // as it always did.
+    static constexpr int MAX_AROUND = 24;
+
     // How much of two stacked cells' combined amount the lower one holds: all of it
     // up to full, and never more. The only definition of the vertical
     // equilibrium; both the downward and the upward flow are computed from it, so
@@ -471,6 +561,40 @@ private:
     // Empty destination into liquid. Wakes the destination; waking the source is
     // the caller's, once however many transfers it makes from it.
     void transfer_liquid(int fx, int fy, int tx, int ty, int amount);
+
+    // Adds `amount` of liquid like `like` to cell `to`, moving at (flow, rise) in
+    // Element::flow and LIQUID_RISE_SCALE units, mixed by amount with what is
+    // there. `to` must be Empty or that liquid already. Wakes it.
+    void deposit_liquid(int to, const Element& like, int amount, int flow, int rise);
+
+    // The vertical half of step_liquid, for a cell with a rise: gravity and
+    // damping, then either a heave into empty space above, a drop thrown clear
+    // (spray), or the push handed on to the liquid on top. True if the cell has
+    // moved and step_liquid has nothing more to do with it this step.
+    bool step_rise(int x, int y, int rise);
+
+    // Flies every drop of spray one step and lands the ones that hit something.
+    // Before the sweep, so landed water starts flowing on this step.
+    void step_spray();
+
+    // Puts drop `d` back into the grid, into the liquid it hit at `hit` if that is
+    // the same liquid, else into the empty cell it is in (or the first empty cell
+    // or same liquid above it, if something has moved in under it). False, with
+    // the drop still flying, if there is nowhere in its column at all.
+    bool land_spray(const Spray& d, int at, int hit);
+
+    // A body is entering the cell `from`, which held `e`, moving at (vx, vy):
+    // pushes as much of that liquid as there is room for into the cells beside
+    // `from` that the body is neither entering nor leaving, giving it the body's
+    // momentum (SPLASH_SHARE). Returns how much went; tip_move puts the rest into
+    // a cell the body has left, as it always did.
+    int push_aside(int from, const Element& e, int64_t vx, int64_t vy);
+
+    // A cell a body has just left, still empty after its displaced liquid is
+    // placed: draws liquid in from beside and above it -- below too, if it is
+    // under the surface -- moving with the body, the way water closes behind a
+    // body instead of leaving a hole.
+    void draw_in(int idx, int64_t vx);
 
     // A sinking grain is about to swap into the liquid cell at (x, y): presses
     // that cell's amount into the same liquid nearby -- level with it or below,
@@ -496,6 +620,11 @@ private:
     // would wrap -- and need the whole array cleared -- every 255 of them.
     std::vector<int> level_queue;
     std::vector<uint8_t> level_visit;
+
+    // The spray in the air, at most SPRAY_MAX, reserved to that. A drop that
+    // lands is replaced by the last one, so order is by when each was thrown
+    // only until the first lands -- deterministic, which is all it needs to be.
+    std::vector<Spray> spray_drops;
 
     // A per-cell "seen this pass" marker for fracture_landing's fill, on the same
     // epoch trick as support_visit.
@@ -1182,9 +1311,11 @@ private:
     bool tip_move(Body& b);
 
     // The pose body `b` comes to rest in if it is lying within REST_SQUARE_ANGLE
-    // of a quarter turn: that exact turn, with its pivot on the lattice point it
-    // is nearest, so its cells are the shape turned without a shear. False if it
-    // is at more of an angle than that, and then it rests as it is.
+    // of a quarter turn: that exact turn, with its pivot on a lattice point, so
+    // its cells are the shape turned without a shear. It tries the lattice point
+    // under the pivot first, since a resting body is settling downward, then the
+    // one over it, and takes the first whose cells fit. False if it is at more of
+    // an angle than that or neither fits, and then it rests as it is.
     bool square_pose(const Body& b, int64_t& cx, int64_t& cy, fx::v& theta) const;
     // Moves `b` into that pose, if it has one and it fits.
     void square_body(Body& b);
@@ -1213,6 +1344,7 @@ private:
     std::vector<int> tip_next;           // scratch: the pose being tried
     std::vector<Element> tip_carry;      // scratch: the body's cells in transit
     std::vector<Element> tip_displaced;  // scratch: fluid the body moves into
+    std::vector<int> tip_displaced_at;   // scratch: and which cell each came from
     std::vector<Contact> contacts;  // scratch: every body's, this step
 
     // Last step's contacts, with the impulses they ended on, for warm starting;

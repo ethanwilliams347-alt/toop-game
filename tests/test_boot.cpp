@@ -289,7 +289,7 @@ void test_free_first_landing() {
 
 void test_shipped_fixture() {
     std::string error;
-    Scene scene = bmp::load("assets/test_material.bmp", "assets/test_albedo.bmp", &error);
+    Scene scene = bmp::load("tests/fixtures/test_material.bmp", "tests/fixtures/test_albedo.bmp", &error);
     if (!error.empty()) {
         check("fixture: the shipped scene loads", false, error);
         return;
@@ -327,7 +327,7 @@ void test_shipped_fixture() {
     // false of everything standing on it.
     std::string prop_error;
     const std::vector<PropDef> defs =
-        load_prop_list("assets/test_props.txt", &prop_error);
+        load_prop_list("tests/fixtures/test_props.txt", &prop_error);
     check("fixture: the shipped prop list parses", prop_error.empty(), prop_error);
     check("fixture: ...and is not empty", !defs.empty());
 
@@ -478,17 +478,14 @@ void test_scene_resolve_shipped_rows() {
             check("resolve: 'bg_valley' is a 344x144 fixed world at 10x, one art "
                   "pixel to one world cell",
                   r.world_w == 344 && r.world_h == 144 && !r.unclamped && r.scale == 10);
-        } else if (def.name == "bg_valley_ext") {
+        } else if (def.name == "bg_valley_wide") {
             // The same mapping and the same scale, over twice the world. The scale is
             // the assertion worth having: a row that resized the world and rescaled it
             // would keep the art filling the window and quietly halve the player
             // against the scene, which is the one way an extension stops being an
             // extension.
-            check("resolve: 'bg_valley_ext' is a 688x288 fixed world at bg_valley's 10x, "
+            check("resolve: 'bg_valley_wide' is a 688x288 fixed world at bg_valley's 10x, "
                   "still one art pixel to one world cell",
-                  r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
-        } else if (def.name == "bg_valley_gemini") {
-            check("resolve: 'bg_valley_gemini' is a 688x288 fixed world at 10x",
                   r.world_w == 688 && r.world_h == 288 && !r.unclamped && r.scale == 10);
         }
     }
