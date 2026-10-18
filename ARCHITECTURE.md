@@ -145,11 +145,13 @@ Arrows point from includer to included.
   that writes the grid.
 - `enemy.h` / `.cpp`, `rig.h` -- enemies and the skeleton their pixels hang on.
 - `tentacle.h` -- limbs that bend along their length: a chain of links, each a
-  rig turn, solved by FABRIK with a travelling wave on top. A species opts in
+  rig turn: a soft Verlet chain (`drift`) sprung toward its rest curl (`curl`),
+  solved by FABRIK, with a travelling wave on top. A species opts in
   with `Species::tentacles`; each chain takes over one rig part. Also the
   second-order follower (`Response`, `follow`) the bulb and the body's lean
   and sink move on, and the swept test (`sweep_touches`) a lure strike hits by.
-  Feet step from a planned home (`Enemy::plan_steps`), not on the stride.
+  Feet step from a planned home (`Enemy::plan_steps`), not on the stride, on a
+  spring and with overlap; the body gathers speed (`Enemy::walk_speed`).
   After a sever (`Limb::intact`, `Limb::role`) the body hops on one leg or
   drags itself on its lure. The piece cut off stays in the body's own mask,
   posed by its own Verlet chain held in the same `Limb` (`Enemy::move_pieces`),

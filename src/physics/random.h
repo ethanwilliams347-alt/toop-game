@@ -62,6 +62,9 @@ enum class Stream : uint64_t {
     // The small sideways scatter a drop of spray is thrown with, so a splash
     // fans out instead of rising as a column (Grid::step_rise).
     SprayScatter = 0x4CF5AD432745937Full,
+    // The slow noise in a cut-off tentacle's writhe (Enemy::writhe_noise),
+    // drawn per piece from a seed fixed at the cut.
+    PieceWrithe = 0x2545F4914F6CDD1Dull,
 };
 
 // splitmix64's finalizer. Not cryptographic, and does not need to be: the
@@ -128,7 +131,7 @@ inline constexpr Stream SIM_STREAMS[] = {
     Stream::Emission,       Stream::FlameLifetime,   Stream::FlameRise,
     Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
     Stream::LiquidDisperse, Stream::LiquidFlowRound, Stream::SurfaceGrip,
-    Stream::BodyNudge,      Stream::SprayScatter,
+    Stream::BodyNudge,      Stream::SprayScatter,    Stream::PieceWrithe,
 };
 
 // Two streams sharing a value are one stream, silently, with no assertion that

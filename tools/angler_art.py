@@ -49,13 +49,21 @@ from fish_art import (
 )
 from troll_art import ROOT, write_header
 
-# Links per tentacle. The legs' eight are about four cells each, short enough
-# that a joint never has to bend far; the lure is nearly twice as long and hooks
-# back on itself, so it gets twelve, which keeps every joint of its rest hook
-# under the game's bend limit (Motion::max_bend). Fewer and the outside of each
-# bend opens into a wider notch; more and the solver's cost grows for nothing
-# visible at this size. The game's tentacle::MAX_JOINTS is the most plus one.
-LEG_LINKS = 8
+# Links per tentacle. The lure is nearly twice as long as a leg and hooks back
+# on itself, so it gets twelve, which keeps every joint of its rest hook under
+# the game's bend limit (Motion::max_bend). The legs get twelve too, about three
+# cells each: they were eight of four or five, and a leg bent along eight long
+# links read as a polyline with corners, however softly the game bent each
+# joint. The same bend spread over more, shorter links is a curve. The game's
+# tentacle::MAX_JOINTS is the most plus one.
+#
+# The legs are still *drawn* along the eight-link chain they were first drawn
+# on (LEG_DRAW_LINKS), so finer links changed which link carries a pixel and
+# not a single pixel of the art. Twelve links rounded to whole cells zigzag a
+# little at rest -- a cell either way every few joints -- which a pixel never
+# shows but a capsule drawn along it would.
+LEG_LINKS = 12
+LEG_DRAW_LINKS = 8
 LURE_LINKS = 12
 
 
@@ -126,10 +134,14 @@ def tentacle(joints, r0, r1):
 # the box's columns, either side of the split, the whole way down: below the
 # hips a pixel is leg because of where it is (rig::part_of), so a tentacle that
 # wandered out of the box would leave its pixels behind as body.
-REAR_CHAIN = chain_of([(39, 49), (36.5, 60), (35, 71), (39, 83)], LEG_LINKS)
-FRONT_CHAIN = chain_of([(55, 49), (58, 60), (58.5, 71), (55, 83)], LEG_LINKS)
-REAR_LEG = tentacle(REAR_CHAIN, 4.4, 1.1)
-FRONT_LEG = tentacle(FRONT_CHAIN, 4.6, 1.1)
+REAR_CURVE = [(39, 49), (36.5, 60), (35, 71), (39, 83)]
+FRONT_CURVE = [(55, 49), (58, 60), (58.5, 71), (55, 83)]
+REAR_CHAIN = chain_of(REAR_CURVE, LEG_LINKS)
+FRONT_CHAIN = chain_of(FRONT_CURVE, LEG_LINKS)
+REAR_DRAWN = chain_of(REAR_CURVE, LEG_DRAW_LINKS)
+FRONT_DRAWN = chain_of(FRONT_CURVE, LEG_DRAW_LINKS)
+REAR_LEG = tentacle(REAR_DRAWN, 4.4, 1.1)
+FRONT_LEG = tentacle(FRONT_DRAWN, 4.6, 1.1)
 
 # The lure: up out of the top of the head, arching forward over the snout, and
 # hanging straight down in front of the mouth to the bulb. Longer than the
@@ -172,12 +184,12 @@ def draw():
 
     # Suckers: a pale dot every few cells down the inside of each tentacle, the
     # side facing the other one, from a little below the hip to near the tip.
-    for joints, inward in ((REAR_CHAIN, 1), (FRONT_CHAIN, -1)):
-        for i in range(2, LEG_LINKS):
+    for joints, inward in ((REAR_DRAWN, 1), (FRONT_DRAWN, -1)):
+        for i in range(2, LEG_DRAW_LINKS):
             (ax, ay), (bx, by) = joints[i], joints[i + 1]
             for f in (0.0, 0.5):
                 cx, cy = ax + (bx - ax) * f, ay + (by - ay) * f
-                x, y = round(cx + inward * (3.0 - 1.8 * i / LEG_LINKS)), round(cy)
+                x, y = round(cx + inward * (3.0 - 1.8 * i / LEG_DRAW_LINKS)), round(cy)
                 if y >= HIP_ROW and grid[y][x] is not EMPTY and grid[y][x] in legs:
                     grid[y][x] = "Y"
 
@@ -308,9 +320,12 @@ inline constexpr int LEG_SPLIT = $LEG_SPLIT;
 
 // The chains, root first, on pixel centres: $LEG_JOINTS joints a leg and
 // $LURE_JOINTS for the lure, which is nearly twice as long and hooks back on
-// itself. The radius is the furthest any of the tentacle's pixels is from its
-// chain, rounded up -- the bound the game draws round each posed link to look
-// for its pixels, and which enemy_test checks against the art.
+// itself. A leg's links are about three cells, rounded to whole cells, so its
+// rest chain zigzags a cell here and there; the game bends toward a smoothed
+// rest curl (tentacle::rest_curl), never toward that zigzag. The radius is
+// the furthest any of the tentacle's pixels is from its chain, rounded up --
+// the bound the game draws round each posed link to look for its pixels, and
+// which enemy_test checks against the art.
 inline constexpr int LEG_JOINTS = $LEG_JOINTS;
 inline constexpr int LURE_JOINTS = $LURE_JOINTS;
 inline constexpr int REAR_CHAIN[LEG_JOINTS][2] = {$REAR_CHAIN};

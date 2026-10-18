@@ -310,21 +310,25 @@ moved by `ANGLER_TENTACLES` in [enemy.h](src/physics/enemy.h):
 
 | Knob | File | Now | What it does |
 |---|---|---|---|
-| links | [angler_art.py](tools/angler_art.py) | 8 a leg, 12 the lure | Links per tentacle. More bend more smoothly; the lure is nearly twice as long and hooks on itself. |
-| wave steps / amplitude / spread | [enemy.h](src/physics/enemy.h) | 110, 1.5, 45 deg | The travelling wave down each tentacle: steps per wave, cells either side at its fullest (midway along, none at the ends), phase from one joint to the next. |
+| links | [angler_art.py](tools/angler_art.py) | 12 a leg, 12 the lure | Links per tentacle. More bend more smoothly; the lure is nearly twice as long and hooks on itself. A leg's art is still drawn along 8 (`LEG_DRAW_LINKS`), so the finer links changed no pixel. |
+| wave steps / amplitude / spread / length | [enemy.h](src/physics/enemy.h) | 110, 1.5, 45 deg, 34 | The travelling wave down each tentacle (two sines, the second three times as quick at a third the size): steps per wave, cells either side at its fullest (midway along, none at the ends) for a tentacle `length` cells long -- longer ones wave further -- phase from one joint to the next. |
 | iterations | [enemy.h](src/physics/enemy.h) | 3 | FABRIK rounds a step. The chain carries on from where it stopped, so it need not converge in one step. |
-| smoothing | [enemy.h](src/physics/enemy.h) | 1/4 | Share of the way each middle joint relaxes toward straight before the solve. Irons out the folds a slack chain makes. |
-| max bend | [enemy.h](src/physics/enemy.h) | 35 deg | The furthest any joint may bend. Just over the lure's sharpest joint at rest (34); also bounds the gap filled at the outside of a bend. |
+| keep / sag | [enemy.h](src/physics/enemy.h) | 7/8 / 1/20 | The soft chain: share of last step's movement each joint carries on with (Verlet), and cells a step it sags. Higher keep swings on longer after the body; 1 never settles. |
+| curl | [enemy.h](src/physics/enemy.h) | 1/8 | Share of the way each joint is sprung toward its smoothed rest bend before the solve. Higher is stiffer; 0 leaves folds to the bend limit. |
+| max bend | [enemy.h](src/physics/enemy.h) | 35 deg | The furthest any joint may bend: a safety clamp now, the curl keeps chains inside it. Just over the lure's sharpest joint at rest (34); also bounds the gap filled at the outside of a bend. |
 | step lift | [enemy.h](src/physics/enemy.h) | 5 | Cells a foot rises mid-swing. |
 | bow | [enemy.h](src/physics/enemy.h) | 1 | Cells a step each leg's middle is pushed outward (rear back, front forward), so slack bows the same way every time -- and so a near-straight leg can buckle toward a foot brought in closer. |
-| swing steps | [enemy.h](src/physics/enemy.h) | 12 | Steps a foot is in the air, whatever the speed: faster walking makes longer strides, not quicker ones. |
-| step / settle trigger | [enemy.h](src/physics/enemy.h) | 10 / 3 | Cells a planted foot may fall behind its home before it steps; once the body has stopped, before it steps to tidy itself under the body. |
+| swing steps | [enemy.h](src/physics/enemy.h) | 12 | Steps a foot's aim takes to reach home, whatever the speed: faster walking makes longer strides, not quicker ones. The foot lands once it is within a cell of home after that, or a whole swing late regardless. |
+| swing follow | [enemy.h](src/physics/enemy.h) | 8 steps, zeta 4/5, r 1/2 | Second-order follower the foot chases its swing's aim on, so it lags into a step and settles onto the ground. |
+| overlap steps | [enemy.h](src/physics/enemy.h) | 8 | Steps into one foot's swing before the other may lift too. At `swing steps` the gait is strictly one foot at a time. |
+| step / settle / brace trigger | [enemy.h](src/physics/enemy.h) | 10 / 3 / 6 | Cells a planted foot may fall behind its home before it steps; once the body has stopped, before it steps to tidy itself under the body; while a strike winds up, before it shuffles to brace. A foot dragged past the leg's reach is pulled after the hip, not teleported. |
 | step lead | [enemy.h](src/physics/enemy.h) | 1/2 | Share of a swing's travel home is led ahead by, so a foot lands where the body is going. |
 | foot probe | [enemy.h](src/physics/enemy.h) | 4 | Columns either side of home searched for a foothold, nearest first; solid ground is preferred to powder within it. |
 | stride | [enemy.h](src/physics/enemy.h) | 24 | Not read by the angler: its feet step on `step trigger` and its bob comes from its feet. Kept because every rig has one. |
 | body follow | [enemy.h](src/physics/enemy.h) | 30 steps, zeta 3/4, r 0 | Second-order follower (period, damping, response -- see `tentacle::response`) the body's lean and sink take from the feet. |
 | body sink / tilt | [enemy.h](src/physics/enemy.h) | 2 / 12 deg | Most the body sinks or rises with the feet's average height, and tilts toward the lower foot. |
 | footfall dip | [enemy.h](src/physics/enemy.h) | 1/4 | Cells a step of downward speed each footfall knocks into the body. |
+| walk accel / accel lean | [enemy.h](src/physics/enemy.h) | 4 / 1/2 deg | Cells a second the body gains or loses a step toward its walking speed times the share of legs planted (a foot in the air is a foot not pushing), and radians of lean into each cell a second gained. A stop is dead, not eased. |
 | lure follow | [enemy.h](src/physics/enemy.h) | 22 steps, zeta 9/26, r 0 | Second-order follower the bulb swings on. The same motion as the spring it replaced (1/12 of the gap, 1/5 of the speed a step): loose and underdamped, it sways past and swings back. |
 | lure sway / reach | [enemy.h](src/physics/enemy.h) | 3 / 10 | Cells the bulb drifts with each breath; cells further forward it is held while chasing. |
 | lure raise / arc | [enemy.h](src/physics/enemy.h) | (32,-26) / (88,-24) | Frame points: where the wind-up rears the bulb to (near the lure's full length, so it cannot fold), and what the strike curves over on its way to the ground -- no further out than 6 past where it is aimed. |
@@ -333,7 +337,7 @@ moved by `ANGLER_TENTACLES` in [enemy.h](src/physics/enemy.h):
 | lure live / bulb radius | [enemy.h](src/physics/enemy.h) | 3 / 3 | The bulb hurts through the whip and this many steps after it lands, and only what its swept path (this many cells round) touches. The strike is aimed when the wind-up starts, at the target's spot within `reach`. An arrow in the bulb calls a wind-up off and doubles the recovery. |
 | hop rest / hop speed | [enemy.h](src/physics/enemy.h) | 30 / 90 | On one leg (the other's foot cut or shot off) it moves only in hops: this many steps stood gathering itself, then a jump at this many cells a second -- about seven cells high, six along at a wander. |
 | legless sink / crawl share | [enemy.h](src/physics/enemy.h) | 26 / 1/3 | With no leg left it walks on its lure, which can then no longer strike: the body slumps this many cells down its box onto the ground and moves at this share of its speed. |
-| piece steps / wriggle / wriggle steps | [enemy.h](src/physics/enemy.h) | 60 / 2 / 12 | A tentacle cut off falls and lies as a chain of its own for this many steps, wriggling this many cells either side (dying away) once every this many steps, then crumbles to sand. |
+| piece steps / wriggle / wriggle steps / push | [enemy.h](src/physics/enemy.h) | 120 / 3 / 50 / 1/16 | A tentacle cut off falls and lies as a chain of its own for this many steps, writhing slowly -- this many cells either side at its free tip, none at the cut, easing out with the square of the time left -- about once every this many steps (speed and size pushed about by a two-octave noise), then crumbles to sand. `push` is the share of the writhe put into its Verlet chain each step, so it flops and rolls. |
 | `pad` | [enemy.h](src/physics/enemy.h) | 40 | Under the troll's 56, so the renderer's atlas slots are unchanged. |
 
 ### Animation (`Species::rig`, see [src/physics/rig.h](src/physics/rig.h))
@@ -523,6 +527,24 @@ Record adjustments to tuning parameters and their rationale here.
   Verlet chain that wriggles before it crumbles (`piece steps / wriggle /
   wriggle steps`). The values are guesses checked only in enemy_test (six
   hops in 300 steps, a slump of 26, a piece that moves 24 of 30 steps).
+- **2026-10-18 -- angler: soft chains, a freer gait, a slow writhe**
+  (first-pass values, not playtested). The legs read stiff: a leg bent along
+  eight long links was a polyline, `smoothing` pulled every leg toward straight
+  and the hard bend limit snapped. Now each chain is a Verlet chain (`keep` 7/8,
+  `sag` 1/20) sprung toward its smoothed rest curl (`curl` 1/8, replacing
+  `smoothing`), the legs have 12 links of about three cells, and the wave is two
+  sines scaled by tentacle length (`wave length` 34). The gait: the body
+  gathers speed (`walk accel` 4) toward what its planted feet push and leans
+  into it (`accel lean` 1/2 deg -- 1 deg tilted the body 3 px on flat ground),
+  a foot chases its swing on a spring (`swing follow`), a second foot may lift
+  8 steps into the first's swing (`overlap steps`), feet shuffle to brace
+  during a wind-up (`brace trigger` 6), and a foot past reach is dragged, not
+  teleported. Cut-off pieces writhe slowly, by the user's choice: `piece steps`
+  60 -> 120, `wriggle steps` 12 -> 50, `wriggle` 2 -> 3 at the free tip, eased
+  out, noisy, and pushed into the chain (`push` 1/16). enemy_test: both feet up
+  together at most 2 steps on the flat, 3 over a step; 17 footfalls over the
+  step in 600 steps (was 22, the walk now eases); no leg joint in the ground;
+  a piece's tip travels 38 cells to its cut end's 22.
 - **2026-10-18 -- water, stage 2: momentum, vertical velocity, spray.** A
   playtest found displacement looked wrong: a moving body swapped the water it
   entered straight into the cells it left, so water teleported from in front of

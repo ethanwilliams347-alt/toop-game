@@ -251,22 +251,27 @@ inline constexpr int SHOULDER_Y = 22;
 inline constexpr int HIP_ROW = 53;
 inline constexpr int LEG_SPLIT = 47;
 
-// The chains, root first, on pixel centres: 9 joints a leg and
+// The chains, root first, on pixel centres: 13 joints a leg and
 // 13 for the lure, which is nearly twice as long and hooks back on
-// itself. The radius is the furthest any of the tentacle's pixels is from its
-// chain, rounded up -- the bound the game draws round each posed link to look
-// for its pixels, and which enemy_test checks against the art.
-inline constexpr int LEG_JOINTS = 9;
+// itself. A leg's links are about three cells, rounded to whole cells, so its
+// rest chain zigzags a cell here and there; the game bends toward a smoothed
+// rest curl (tentacle::rest_curl), never toward that zigzag. The radius is
+// the furthest any of the tentacle's pixels is from its chain, rounded up --
+// the bound the game draws round each posed link to look for its pixels, and
+// which enemy_test checks against the art.
+inline constexpr int LEG_JOINTS = 13;
 inline constexpr int LURE_JOINTS = 13;
-inline constexpr int REAR_CHAIN[LEG_JOINTS][2] = {{39, 49}, {38, 53}, {37, 58}, {36, 62}, {35, 66},
-                                                  {35, 71}, {36, 75}, {37, 79}, {39, 83}};
-inline constexpr int FRONT_CHAIN[LEG_JOINTS][2] = {{55, 49}, {56, 53}, {57, 57}, {58, 62}, {59, 66},
-                                                   {59, 70}, {58, 75}, {56, 79}, {55, 83}};
+inline constexpr int REAR_CHAIN[LEG_JOINTS][2] = {{39, 49}, {38, 52}, {38, 55}, {37, 58}, {36, 60},
+                                                  {36, 63}, {35, 66}, {35, 69}, {35, 72}, {36, 75},
+                                                  {37, 78}, {38, 80}, {39, 83}};
+inline constexpr int FRONT_CHAIN[LEG_JOINTS][2] = {{55, 49}, {56, 52}, {57, 55}, {57, 57}, {58, 60},
+                                                   {58, 63}, {59, 66}, {59, 69}, {58, 72}, {58, 75},
+                                                   {57, 77}, {56, 80}, {55, 83}};
 inline constexpr int LURE_CHAIN[LURE_JOINTS][2] = {{60, 22}, {60, 17}, {61, 12}, {63, 8}, {67, 4},
                                                    {72, 3},  {77, 3},  {81, 5},  {85, 9}, {87, 13},
                                                    {88, 18}, {89, 23}, {89, 28}};
 inline constexpr int REAR_RADIUS = 4;
-inline constexpr int FRONT_RADIUS = 4;
+inline constexpr int FRONT_RADIUS = 5;
 inline constexpr int LURE_RADIUS = 3;
 
 inline constexpr body_art::Art ART = body_art::with_arm_box(body_art::Art{
