@@ -31,7 +31,7 @@ task seems to require breaking one, stop and say so rather than working around i
 - **The step loop allocates nothing in steady state.** `Run::step()` /
   `Grid::update()` reuse persistent scratch vectors cleared with `.clear()`;
   those with a hard bound are reserved to it in the `Grid` constructor, and the
-  few with none (the support queues, the tipping pool) grow to a high-water mark
+  few with none (the support queues, the body pool and its contacts) grow to a high-water mark
   and stay there. No local `std::vector`, `std::string`, or `std::function` in
   anything reachable from `Run::step()`. `alloc_test` counts allocations and
   fails if a replayed step makes any.
@@ -61,10 +61,10 @@ textures, draw calls.
 | Task | Start in | Also touch / check |
 |---|---|---|
 | Cell behaviour (falling, flow, heat, burning) | `src/physics/grid.cpp`, `src/physics/material.h` | `grid_test`, `golden_frame_test`, `grid_bench --focus` |
-| New material | `src/physics/material.h` (`MATERIALS`), `src/physics/element.h` | `src/scene/legend.h` if it can be painted in a scene BMP; `src/ui/hotbar.h` if it's on the hotbar |
+| New material | `src/physics/material.h` (`MATERIALS`, including its `weight`, `grip`, `bounce`), `src/physics/element.h` | `src/scene/legend.h` if it can be painted in a scene BMP; `src/ui/hotbar.h` if it's on the hotbar |
 | Reaction between materials | `src/physics/reaction.h` (`REACTIONS`, ordered) | `static_assert`s in `reaction.h` |
 | Liquids (water, oil) | `src/physics/grid.cpp` (`step_liquid`, `transfer_liquid`, `level_liquid`, `disperse_liquid`) | see *Liquids* below; `tests/fluid_probe.cpp` |
-| Structural collapse / toppling | `src/physics/grid.cpp` (support), `src/physics/topple.cpp` | `collapse_test` |
+| Structural collapse, toppling, loose bodies | `src/physics/grid.cpp` (support), `src/physics/bodies.cpp` | `collapse_test`, `tests/body_probe.cpp`, `TUNING.md` |
 | Player movement or feel | `src/physics/player.h` / `.cpp` | `TUNING.md` in the same commit; `player_test`, `tuning_test` |
 | Dig or bow | `src/physics/tool.h` / `.cpp`, `src/physics/arrow.*` | `tool_test` |
 | Enemy behaviour | `src/physics/enemy.h` / `.cpp` (`species::GHOUL/TROLL/FISH/ANGLER`), `rig.h`, `tentacle.h` | `enemy_test` |
@@ -127,8 +127,15 @@ Arrows point from includer to included.
   support and collapse. Culled by 64x64 chunks that sleep when nothing moves.
   Cell writes go through `set_element` / `swap_elements` (`displace` resolves to
   `set_element`).
-- `topple.cpp` -- the non-cellular part of `Grid`: unsupported structures pivot
-  about their last supporting edge as rigid bodies with an angle.
+- `bodies.cpp` -- the non-cellular part of `Grid`: loose bodies. A piece that
+  loses its support, topples, is knocked over or lands off balance becomes a
+  rigid body (centre of mass, velocity, spin, mass and inertia from
+  `Material::weight`), solved with sequential impulses, friction and
+  restitution against contacts read off the grid, buoyancy and drag in liquid,
+  and the weight of what rests on it. Bodies wake and push pieces at rest.
+  Poses are Paeth shears, so cells are permuted, never resampled; the body lives
+  in the grid throughout. Also the balance check, which weighs a piece with
+  everything resting on it.
 - `element.h` (what a cell holds), `material.h` (`MATERIALS`), `reaction.h`
   (ordered `REACTIONS`).
 - `box_body.h` -- AABB-vs-grid collision shared by player and enemies.
@@ -139,7 +146,10 @@ Arrows point from includer to included.
 - `enemy.h` / `.cpp`, `rig.h` -- enemies and the skeleton their pixels hang on.
 - `tentacle.h` -- limbs that bend along their length: a chain of links, each a
   rig turn, solved by FABRIK with a travelling wave on top. A species opts in
-  with `Species::tentacles`; each chain takes over one rig part.
+  with `Species::tentacles`; each chain takes over one rig part. Also the
+  second-order follower (`Response`, `follow`) the bulb and the body's lean
+  and sink move on, and the swept test (`sweep_touches`) a lure strike hits by.
+  Feet step from a planned home (`Enemy::plan_steps`), not on the stride.
 - `body_art.h`, `enemy_art.h`, `troll_art.h`, `fish_art.h`, `angler_art.h` --
   enemy bodies as character grids. Here, not in `assets/`, because the picture
   *is* the body: which pixels exist decides where an arrow hits. `troll_art.h`,
@@ -153,8 +163,9 @@ Arrows point from includer to included.
 
 ### `src/game/` -- the run (SDL-free; `run`, `level`, `input_log` are .cpp, the rest header-only)
 
-- `run.h` / `.cpp` -- `Run`: one playthrough; owns `Grid`, `Player`, enemies,
-  quiver, dig tool. `Run::step(const Input&)` advances one step. `Input` is plain
+- `run.h` / `.cpp` -- `Run`: one playthrough; owns `Grid`, `Player`, enemies
+  (and the tentacled ones' `Enemy::Chains`, a smaller pool of their own, so
+  `Run` is not copyable), quiver, dig tool. `Run::step(const Input&)` advances one step. `Input` is plain
   bools + cursor (no SDL keycodes) and carries one-shot `Command`s, so every
   world change is in the recorded stream.
 - `events.h` -- what happened in a step (kills, hits, slams, digs) for HUD,
@@ -227,10 +238,11 @@ Arrows point from includer to included.
    records.
 4. **Interpolate** -- player draw position blended by the pacer's alpha; camera
    follows.
-5. **Present** -- `present::paint_enemies`, `present::arrows`,
+5. **Present** -- `present::paint_bodies` (loose bodies, drawn as turned
+   sprites with their cells left out of the cell upload), `present::paint_enemies`, `present::arrows`,
    `present::run_readout` read the `Run` const.
 6. **Draw** -- `shell::upload_cells`; `frame::compose` walks `frame::LAYERS`
-   (backdrop, props, cells, objective, enemies, player, arrows, foreground,
+   (backdrop, props, cells, bodies, objective, enemies, player, arrows, foreground,
    grade, light pass); `overlay::draw`; `SDL_RenderPresent`.
 
 Only step 3 changes the world; 4-6 read the `Run` const.

@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include "fixed.h"
@@ -68,6 +69,62 @@ enum class Role : uint8_t { Leg, Lure };
 using Points = std::array<rig::Point, MAX_JOINTS>;
 using Lengths = std::array<fx::v, MAX_LINKS>;
 
+// --- second-order dynamics ----------------------------------------------------
+//
+// One way of making a thing follow a target that every follower here shares --
+// the bulb, the body's lean and sink -- after t3ssel8r's "Giving Personality to
+// Procedural Animations using Math". A follower is a damped spring with one
+// extra term, and its three constants come from three numbers someone tuning
+// it can think in:
+//
+//   period  steps for one swing at its natural speed: how quick it is;
+//   zeta    damping: under 1 it overshoots and swings back, 1 just settles,
+//           over 1 creeps in;
+//   r       response: 0 starts gently, 1 moves with the target the moment it
+//           moves, over 1 overshoots straight away, under 0 dips the wrong way
+//           first -- anticipation, for free.
+//
+// The video's update with T fixed at one step, which turns its k1 = zeta/(pi f),
+// k2 = 1/(2 pi f)^2 and k3 = r zeta/(2 pi f) into the period's 1/w = period/2pi
+// times constants. k2 is held to at least what keeps the step stable at T = 1
+// -- the video's own clamp -- so no tuning makes a follower blow up.
+struct Response {
+    fx::v k1, k2, k3;
+};
+
+constexpr Response response(int period, fx::v zeta, fx::v r) {
+    // 1/w in fx: period / (2 pi), with 2 pi as four fx half-turns.
+    const fx::v inv_w =
+        static_cast<fx::v>(int64_t{period} * fx::ONE * fx::ONE / (4 * int64_t{fx::HALF_PI}));
+    Response k{2 * fx::mul(zeta, inv_w), fx::mul(inv_w, inv_w), fx::mul(fx::mul(r, zeta), inv_w)};
+    const fx::v stable = fx::ONE / 2 + k.k1 / 2;
+    if (k.k2 < stable) k.k2 = stable;
+    if (k.k2 < k.k1) k.k2 = k.k1;
+    return k;
+}
+
+// One axis of a follower: where it is, how fast it is going, and where its
+// target was last step (for the target's own speed, which r scales).
+struct Follow {
+    fx::v pos = 0;
+    fx::v vel = 0;
+    fx::v last = 0;
+};
+
+// One step toward `target`. Speed first and then position (semi-implicit), as
+// the bulb's hand-written spring was, so a follower with r = 0 is that spring.
+inline void follow(Follow& f, fx::v target, const Response& k) {
+    const int64_t moved = target - f.last;
+    f.last = target;
+    const int64_t pull =
+        int64_t{target} + fx::mul(k.k3, static_cast<fx::v>(moved)) - f.pos - fx::mul(k.k1, f.vel);
+    f.vel += static_cast<fx::v>(pull * fx::ONE / k.k2);
+    f.pos += f.vel;
+}
+
+// Put a follower at rest on `at`: nothing to catch up, no speed.
+inline void settle(Follow& f, fx::v at) { f = {at, 0, at}; }
+
 // One tentacle's rest geometry: which rig part its pixels are, and the chain
 // they were drawn along, in frame cells on pixel centres. `radius` bounds how
 // far any of its pixels is from the chain, so a posed link's pixels lie within
@@ -112,7 +169,28 @@ struct Motion {
     fx::v max_bend;
 
     // --- the legs ----------------------------------------------------------
-    // A foot rises this many cells at the middle of its swing.
+    //
+    // A foot steps when it needs to, not on a clock: each leg has a home --
+    // under its rest spot, led ahead by how fast the body is going -- and a
+    // planted foot stays put until home has moved step_trigger cells away from
+    // it, or settle_trigger once the body has stopped, so a body that halts
+    // mid-stride tidies its feet under it. Only one foot is ever in the air, and
+    // of two that want to step, the one further from home goes first; the
+    // other waits, which is what makes the two fall into turns on their own.
+    //
+    // A swing takes swing_steps whatever the speed, so a running body takes
+    // longer strides rather than quicker ones, and lands step_lead of a
+    // swing's travel ahead of home's rest spot, so the foot is put down where
+    // the body will be rather than where it was. Home's ground is searched
+    // foot_probe columns either side, nearest first, and a solid foothold is
+    // preferred to loose powder within that.
+    int swing_steps;
+    int step_trigger;
+    int settle_trigger;
+    fx::v step_lead;
+    int foot_probe;
+    // A foot rises this many cells at the middle of its swing, and further when
+    // it is stepping up -- by half the climb.
     int step_lift;
     // Each step a leg's middle joints are pushed this far outward -- the rear
     // leg back, the front one forward -- before the chain is solved. Not
@@ -121,12 +199,24 @@ struct Motion {
     // one side to the other between steps.
     fx::v bow;
 
+    // --- the body on its feet ----------------------------------------------
+    //
+    // The body is carried by its feet rather than by its box: it sinks and
+    // rises with the average height of the feet against where they stand at
+    // rest, up to body_sink cells either way, and tilts toward the lower foot
+    // by the slope between them, up to body_tilt -- so it leans down a slope
+    // and dips into a hollow one foot is standing in. Both follow on
+    // body_follow, and each foot put down knocks the sink's speed by
+    // footfall_dip cells a step, so a step lands as a small give in the body.
+    Response body_follow;
+    int body_sink;
+    fx::v body_tilt;
+    fx::v footfall_dip;
+
     // --- the lure ----------------------------------------------------------
-    // The tip's spring toward where it wants to be: the share of the gap it
-    // accelerates by each step, and the share of its speed it loses. Loose and
-    // underdamped, so the bulb sways past where it is going and swings back.
-    fx::v lure_spring;
-    fx::v lure_damp;
+    // How the bulb follows where it wants to be (see Response). Loose and
+    // underdamped, so it sways past where it is going and swings back.
+    Response lure_follow;
     // How far the bulb drifts with each breath, and how much further forward
     // it is held once it has seen you.
     int lure_sway;
@@ -136,6 +226,26 @@ struct Motion {
     // the way down to the ground in front.
     rig::Joint lure_raise;
     rig::Joint lure_arc;
+
+    // --- the strike ----------------------------------------------------------
+    //
+    // The bulb is what hits. It reaches the top of the wind-up lure_hold steps
+    // early and holds there, trembling -- the last, plainest part of the
+    // telegraph -- before it whips. The whip sends one bend down the stalk
+    // from root to tip, lure_crack cells across at its fullest, as an octopus
+    // arm reaches by rolling a bend along itself; on impact the stalk thrashes,
+    // its wave lure_flourish cells fuller and dying away.
+    //
+    // It hurts only while it is moving to hurt: through the whip and for
+    // lure_live steps after it lands, and only what its path touches -- the
+    // bulb swept from where it was drawn last step to where it is drawn now,
+    // bulb_radius cells round, so a bulb that moves further in a step than
+    // anything is wide still finds what it passed through.
+    int lure_hold;
+    fx::v lure_crack;
+    fx::v lure_flourish;
+    int lure_live;
+    int bulb_radius;
 };
 
 // A species' tentacles: up to three chains and how they move. The chains'
@@ -236,6 +346,48 @@ inline void wave(Points& p, int links, fx::v amplitude, fx::v phase, fx::v sprea
         p[i].x += static_cast<fx::v>(int64_t{-dy} * push / d);
         p[i].y += static_cast<fx::v>(int64_t{dx} * push / d);
     }
+}
+
+// One bend travelling down the chain: the joints within two of `front` -- 0
+// at the root, ONE at the tip -- pushed sideways to their link, `amplitude`
+// cells at `front` and tapering to nothing two joints either side. Stepped
+// from 0 to ONE over a strike, it rolls a crook from the root out to the tip.
+// Positive is to the link's right, as for wave.
+inline void pulse(Points& p, int links, fx::v amplitude, fx::v front) {
+    const fx::v at = front * links;
+    const fx::v width = fx::from_int(2);
+    for (int i = 1; i < links; ++i) {
+        const fx::v d = std::abs(fx::from_int(i) - at);
+        if (d >= width) continue;
+        const fx::v push = static_cast<fx::v>(int64_t{amplitude} * (width - d) / width);
+        const fx::v dx = p[i].x - p[i - 1].x, dy = p[i].y - p[i - 1].y;
+        const fx::v len = length(dx, dy);
+        if (len == 0) continue;
+        p[i].x += static_cast<fx::v>(int64_t{-dy} * push / len);
+        p[i].y += static_cast<fx::v>(int64_t{dx} * push / len);
+    }
+}
+
+// Whether a ball of radius `r` moved from `a` to `b` touches the box of whole
+// cells [x0, x1) x [y0, y1), all in fx. The path is walked in steps of at most
+// half a cell and each stop tested exactly -- the nearest point of the box
+// within r -- so a ball that crossed the box between one step's end and the
+// next still touches it. Half a cell, against a box at least a cell wide and
+// a radius of a cell or more, cannot step over anything.
+inline bool sweep_touches(rig::Point a, rig::Point b, fx::v r, int x0, int y0, int x1, int y1) {
+    // A cell's area runs half a cell either side of its centre.
+    const fx::v left = fx::from_int(x0) - fx::ONE / 2, right = fx::from_int(x1) - fx::ONE / 2;
+    const fx::v top = fx::from_int(y0) - fx::ONE / 2, bottom = fx::from_int(y1) - fx::ONE / 2;
+    const fx::v dist = length(b.x - a.x, b.y - a.y);
+    const int stops = 1 + static_cast<int>(dist / (fx::ONE / 2));
+    for (int i = 0; i <= stops; ++i) {
+        const fx::v x = a.x + static_cast<fx::v>(int64_t{b.x - a.x} * i / stops);
+        const fx::v y = a.y + static_cast<fx::v>(int64_t{b.y - a.y} * i / stops);
+        const fx::v nx = std::clamp(x, left, right), ny = std::clamp(y, top, bottom);
+        const int64_t ex = x - nx, ey = y - ny;
+        if (ex * ex + ey * ey <= int64_t{r} * r) return true;
+    }
+    return false;
 }
 
 // Each middle joint moved by the share `k` of the way toward the midpoint of

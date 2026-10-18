@@ -99,7 +99,7 @@ endif()
 # path, so the guarantee does not rest on nobody ever adding a link here.
 set(ENGINE_SOURCES
     src/physics/grid.cpp
-    src/physics/topple.cpp
+    src/physics/bodies.cpp
     src/physics/player.cpp
     src/physics/tool.cpp
     src/physics/enemy.cpp
@@ -563,6 +563,14 @@ if(BUILD_TESTING)
     target_include_directories(preview_light PRIVATE src tests)
     target_link_libraries(preview_light PRIVATE slop_engine slop_render)
 
+    # The same for loose bodies: a post going over a ledge, composed the way
+    # main.cpp composes it -- body atlas, cells left out, frame::compose -- at a
+    # few steps side by side. Asserts nothing; for seeing that a body is drawn
+    # whole and turned rather than a cell at a time.
+    add_executable(preview_bodies tests/preview_bodies.cpp)
+    target_include_directories(preview_bodies PRIVATE src tests)
+    target_link_libraries(preview_bodies PRIVATE slop_engine slop_present slop_frame SDL2-static)
+
     # The same idea for a backdrop set (assets/<dir>/backdrop.txt): stills and a
     # flight through the scene, composed by the real frame::compose. Links
     # SDL for the software renderer, as golden_frame_test does; asserts nothing.
@@ -579,6 +587,13 @@ if(BUILD_TESTING)
     target_include_directories(burn_probe PRIVATE src tests)
     target_link_libraries(burn_probe PRIVATE slop_engine)
 
+    # How loose bodies move, in numbers and ASCII pictures: a disc rolling, a post
+    # kicked over a ledge, dominoes, a seesaw under sand, wood floating. Not an
+    # add_test() because how far a post skids is feel, not correctness.
+    add_executable(body_probe tests/body_probe.cpp)
+    target_include_directories(body_probe PRIVATE src tests)
+    target_link_libraries(body_probe PRIVATE slop_engine)
+
     # What the liquids do, in numbers: a U-tube, a dam break, sand poured into a
     # pool, a partial top row. Not an add_test() because what it reports is how
     # well a fluid model behaves, not whether it is correct.
@@ -592,6 +607,14 @@ if(BUILD_TESTING)
     add_executable(rim_probe tests/rim_probe.cpp)
     target_include_directories(rim_probe PRIVATE src tests)
     target_link_libraries(rim_probe PRIVATE slop_engine)
+
+    # How the angler's tentacles move -- feet, lean, strike, a lost leg -- in
+    # numbers and frames (tools/angler_frames.py makes a GIF of them). Not an
+    # add_test() because whether a step reads as a step is feel; enemy_test
+    # holds the parts that are rules.
+    add_executable(angler_probe tests/angler_probe.cpp)
+    target_include_directories(angler_probe PRIVATE src tests)
+    target_link_libraries(angler_probe PRIVATE slop_engine)
 
     # The instrument for the Element::ticks representation question -- what a
     # second byte costs, and whether a packed integer velocity can carry a

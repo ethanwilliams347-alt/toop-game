@@ -53,6 +53,12 @@ enum class Stream : uint64_t {
     // Which way a liquid cell's velocity rounds when it is stored in its byte
     // (Grid::step_liquid).
     LiquidFlowRound = 0x9B1D3C2E7F4A6853ull,
+    // How rough the surface is at one spot, for a loose body sliding on it. Pinned
+    // at step 0, like IgnitionPoint: a property of the material there.
+    SurfaceGrip = 0x85EBCA77C2B2AE63ull,
+    // The small push a body is given as it comes loose: nothing real is perfectly
+    // square, still, or balanced on a knife edge. One draw per body, per axis.
+    BodyNudge = 0xE6546B64CC9E2D51ull,
 };
 
 // splitmix64's finalizer. Not cryptographic, and does not need to be: the
@@ -118,7 +124,8 @@ inline constexpr Stream SIM_STREAMS[] = {
     Stream::FluidDirection, Stream::Reaction,        Stream::Fracture,
     Stream::Emission,       Stream::FlameLifetime,   Stream::FlameRise,
     Stream::IgnitionPoint,  Stream::SteamLifetime,   Stream::EmissionSlot,
-    Stream::LiquidDisperse, Stream::LiquidFlowRound,
+    Stream::LiquidDisperse, Stream::LiquidFlowRound, Stream::SurfaceGrip,
+    Stream::BodyNudge,
 };
 
 // Two streams sharing a value are one stream, silently, with no assertion that

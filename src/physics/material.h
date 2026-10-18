@@ -66,6 +66,36 @@ struct Material {
     // visibly burn.
     ElementType emits;
     uint8_t emit_chance; // percent, per step, per burning cell
+
+    // --- weight and surface, for anything that is weighed or pushed ---
+
+    // How heavy one cell is, in tenths of a gram per cubic centimetre: real bulk
+    // densities, so the ratios are the real ratios. `density` above is a sort
+    // order for displacement -- every structural row is 32000 there so that any
+    // structure sinks through any fluid -- and cannot answer "how much heavier is
+    // stone than wood", which is what balance, a loose body's inertia, the load
+    // a pile of sand puts on a plank and whether a piece floats all need.
+    uint8_t weight;
+
+    // Coulomb friction against whatever it is pressed on, in percent: the most
+    // sideways push a contact can take, as a share of the push holding the two
+    // together. A pair grips at the mean of its two rows.
+    uint8_t grip;
+
+    // Coefficient of restitution, in percent: how much of the speed it hits with
+    // a hard landing gives back. A pair bounces at the larger of its two rows,
+    // because a hard thing hitting a soft one still rings.
+    uint8_t bounce;
+
+    // How much bending a section of it can take before it snaps, as the weight
+    // times lever arm (in Material::weight units times cells) that a section one
+    // cell thick carries; a section h cells thick carries h * h times this, as a
+    // beam's does. Zero for anything that is not structural. Proportioned from
+    // real ones at this scale: wood is strong for its weight and all but never
+    // snaps under itself or a fall; stone is weak in tension and cracks when it
+    // lands hard with its weight hanging over an edge; charcoal crumbles, so a
+    // beam that has burnt through at one point lets go there.
+    uint16_t strength;
 };
 
 // Indexed by ElementType. Keep rows in the same order as the enum.
@@ -86,21 +116,21 @@ struct Material {
 // a comment, even -- collapses every row in it.
 // clang-format off
 inline constexpr Material MATERIALS[] = {
-    // name      colour       jitter  move              density  spread  structural  cond  spawn  source  emits                 emit%
+    // name      colour       jitter  move              density  spread  structural  cond  spawn  source  emits                 emit%  weight  grip  bounce  strength
     // Empty is the one row whose colour is fully transparent rather than a colour:
     // nothing is there, so whatever is drawn behind the cell shows through. Every
     // other row is opaque -- alpha marks absence here, not a per-material effect.
-    {  "Empty",  0x00000000,      0,  MoveKind::Static,       0,      0,  false,        0,    20,      0,  ElementType::Count,      0 },
-    {  "Sand",   0xFFC6A970,      6,  MoveKind::Powder,     150,      0,  false,       30,     0,      0,  ElementType::Count,      0 },
+    {  "Empty",  0x00000000,      0,  MoveKind::Static,       0,      0,  false,        0,    20,      0,  ElementType::Count,      0,       0,     0,       0,         0 },
+    {  "Sand",   0xFFC6A970,      6,  MoveKind::Powder,     150,      0,  false,       30,     0,      0,  ElementType::Count,      0,      16,    60,       0,         0 },
     // Water is teal rather than blue for compositing reasons: the backdrop behind
     // it is a cool blue, and a blue liquid seen through a gap read as a hole in the
     // world.
-    {  "Water",  0xFF2E7F96,      5,  MoveKind::Liquid,     100,      6,  false,      120,     0,      0,  ElementType::Count,      0 },
+    {  "Water",  0xFF2E7F96,      5,  MoveKind::Liquid,     100,      6,  false,      120,     0,      0,  ElementType::Count,      0,      10,     0,       0,         0 },
     // The two structural materials. Density is what lets an unsupported slab sink
     // through a fluid it lands in rather than perch on top of it. Wall conducts
     // poorly on purpose: a wall is usually the biggest connected body in a scene,
     // and a good conductor there would quench any fire touching it.
-    {  "Wall",   0xFF6F6A63,      5,  MoveKind::Static,   32000,      0,  true,        30,     0,      0,  ElementType::Count,      0 },
+    {  "Wall",   0xFF6F6A63,      5,  MoveKind::Static,   32000,      0,  true,        30,     0,      0,  ElementType::Count,      0,      26,    70,      10,      3000 },
     // Wood is fuel. What it turns into when lit is Charred rather than Fire -- the
     // burning is a state of this cell, and the flame is thrown off it. How long it
     // burns is the decay chance on Charred's row in REACTIONS.
@@ -111,12 +141,12 @@ inline constexpr Material MATERIALS[] = {
     // the front sheds heat faster than it is fed and stops rather than slows. That
     // cliff is close below 40. The ignition point cannot be raised to compensate:
     // Charred holds itself at 200, so anything above 150 eats a thin margin.
-    {  "Wood",   0xFF6B4E33,      5,  MoveKind::Static,   32000,      0,  true,        40,     0,      0,  ElementType::Count,      0 },
+    {  "Wood",   0xFF6B4E33,      5,  MoveKind::Static,   32000,      0,  true,        40,     0,      0,  ElementType::Count,      0,       6,    50,      30,     20000 },
     // Oil flashes straight to Fire and does not smoulder. A burning cell holds its
     // state in the cell, and Oil is a Liquid, so a smouldering oil cell would carry
     // that state through swap_elements and every fluid rule. Only Static materials
     // get a burning state; movable fuels ignite and are gone.
-    {  "Oil",    0xFF2C2620,      3,  MoveKind::Liquid,      60,      3,  false,       70,     0,      0,  ElementType::Count,      0 },
+    {  "Oil",    0xFF2C2620,      3,  MoveKind::Liquid,      60,      3,  false,       70,     0,      0,  ElementType::Count,      0,       9,     0,       0,         0 },
     // Spawns below the coldest ignition point in REACTIONS, and that bound is
     // enforced at the bottom of reaction.h rather than remembered. A steam spawn
     // above an ignition point makes steam a fire-starter -- both ways of making it,
@@ -128,10 +158,10 @@ inline constexpr Material MATERIALS[] = {
     // "steam's condensation clock" in grid.h), so a low spawn temperature does not
     // shorten the puff. The gain beyond the bug is that water boiling into cooler
     // steam absorbs heat rather than creating it out of nothing.
-    {  "Steam",  0xFFC4D2D8,      4,  MoveKind::Gas,        -20,      3,  false,       40,    88,      0,  ElementType::Count,      0 },
+    {  "Steam",  0xFFC4D2D8,      4,  MoveKind::Gas,        -20,      3,  false,       40,    88,      0,  ElementType::Count,      0,       0,     0,       0,         0 },
     // Denser (less negative) than Steam so flame stays under a steam layer instead
     // of punching through it. The only heat source in the table.
-    {  "Fire",   0xFFF07A22,     16,  MoveKind::Gas,        -10,      4,  false,      200,   250,    250,  ElementType::Count,      0 },
+    {  "Fire",   0xFFF07A22,     16,  MoveKind::Gas,        -10,      4,  false,      200,   250,    250,  ElementType::Count,      0,       0,     0,       0,         0 },
     // The cell that is actually on fire. Structural, because a burning ceiling that
     // drops the instant it catches is worse than one that burns through first.
     // That `true` is what forces its lifetime to be a decay chance rather than a
@@ -149,7 +179,7 @@ inline constexpr Material MATERIALS[] = {
     // near-black cell against the dark blue backdrop reads as a hole rather than a
     // material, and mottling is most of what separates charcoal from a flat fill.
     // It stays far enough under the flame it emits to keep the two shapes distinct.
-    {  "Charred",0xFF3A3431,     10,  MoveKind::Static,   32000,      0,  true,        90,     0,    200,  ElementType::Fire,      25 },
+    {  "Charred",0xFF3A3431,     10,  MoveKind::Static,   32000,      0,  true,        90,     0,    200,  ElementType::Fire,      25,       4,    60,       5,       300 },
 };
 // clang-format on
 

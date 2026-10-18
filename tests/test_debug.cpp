@@ -217,8 +217,8 @@ int main() {
 
         // Two steps down from where it was authored.
         const std::string s = describe_cell(g, 20, 32);
-        check("a falling structural cell shows its fall clock",
-              s.find("Wall") != std::string::npos && s.find(" FALL:") != std::string::npos, s);
+        check("a falling structural cell shows that it is moving",
+              s.find("Wall") != std::string::npos && s.find(" BODY") != std::string::npos, s);
 
         // The finding this suite was written by, and it is about the engine rather
         // than about the inspector. A falling structural piece is carried by

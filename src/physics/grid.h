@@ -141,9 +141,59 @@ public:
     // building stopped moving yet", which a half-toppled tower has not.
     bool has_pending_support_checks() const { return !pending_support.empty() || tip_count > 0; }
 
-    // How many pieces are pivoting over an edge right now. Exposed for tests and
-    // the diagnostic for the same reason active_chunk_count() is.
+    // How many pieces are moving as rigid bodies right now -- toppling, tumbling,
+    // sliding, floating. Exposed for tests and the diagnostic for the same reason
+    // active_chunk_count() is.
     int tipping_count() const { return tip_count; }
+
+    // One of those bodies, i in [0, tipping_count()), as numbers: where its centre
+    // of mass is and how it is moving. For tests, probes and the diagnostic; the
+    // simulation never reads it back.
+    struct BodyState {
+        fx::v x = 0, y = 0;    // centre of mass, cells
+        fx::v vx = 0, vy = 0;  // cells per step
+        fx::v theta = 0;       // radians, clockwise
+        fx::v omega = 0;       // radians per step
+        int cells = 0;
+        int64_t mass = 0;      // sum of Material::weight
+        int age = 0;           // steps since it started moving
+
+        // Where it was at the start of the last step, for drawing it between the
+        // two: a body is drawn where it continuously is, not where its cells were
+        // rounded to, or it would move a whole cell at a time.
+        fx::v prev_x = 0, prev_y = 0, prev_theta = 0;
+
+        // The centre of mass in the shape's own frame, relative to the origin
+        // body_shape is stored about. The shape turns about this point.
+        fx::v shape_cx = 0, shape_cy = 0;
+
+        // Steps left before it goes back to being cells, if it stays as still as
+        // it has been, and the pose those cells will be in, if it is lying near
+        // enough square to be set down square (`squares`). The renderer eases the
+        // picture onto that pose over the last few steps, so the hand-back is not
+        // a jump of up to a cell.
+        int steps_to_sleep = 0;
+        bool squares = false;
+        fx::v rest_x = 0, rest_y = 0, rest_theta = 0;
+    };
+    BodyState body_state(int i) const;
+
+    // A body's shape as it was when it started moving, one entry per cell, in its
+    // own frame -- cell (x, y) spans [x, x + 1) -- and, entry for entry, which grid
+    // cell each of those is now. Together they are a picture of the body to draw
+    // turned, with the colours the grid holds for it now (a burning beam chars as
+    // it tumbles).
+    struct BodyCell {
+        int16_t x, y;
+    };
+    const std::vector<BodyCell>& body_shape(int i) const;
+    const std::vector<int>& body_cells(int i) const;
+
+    // Whether the cell at (x, y) is part of one of those bodies. Out of bounds is
+    // false. For the cell inspector, the renderer and tests.
+    bool moving_at(int x, int y) const {
+        return is_within_bounds(x, y) && is_tipping(get_index(x, y));
+    }
 
     // --- liquids ---
     //
@@ -750,6 +800,9 @@ private:
     void settle_marks(SupportState state, int extra);
 
     std::vector<int> pending_support;
+    // Pieces a balance check found carrying something it weighed, to be weighed
+    // themselves next step (see topple_if_unbalanced). Grows to a high-water mark.
+    std::vector<int> support_rejudge;
     std::vector<int> support_stack;     // scratch, reused across fills
     std::vector<int> support_component; // scratch, reused across fills
     // drop_component's sort keys, one per support_component entry. Scratch, and
@@ -785,96 +838,272 @@ private:
     // checks for the fall that is already in progress.
     bool resolving_support = false;
 
-    // --- toppling ---
+    // --- loose bodies ---
     //
-    // Support used to be one yes/no question: is any cell of this piece standing on
-    // anything? Yes meant it stayed exactly where it was, however little of it was
-    // underneath -- a tall post with one corner on a ledge stood there forever, and
-    // a slab landing on the lip of a cliff hung off it by a single cell. Nothing
-    // could fall over, only fall down.
+    // Support used to be one yes/no question -- is any cell of this piece standing
+    // on anything? -- and then two: is its centre of mass over what it stands on?
+    // The second made pieces tip, but only as a hinge: a piece turned about one
+    // fixed corner, stopped dead on the first thing it touched, and anything that
+    // came clear of its corner was handed to falling, which drops straight down. A
+    // post tipping off a ledge lost its spin and its sideways speed the moment it
+    // left the edge, and fell like a lift; nothing ever bounced, slid, rolled or
+    // knocked anything else over. Gravity was a set of rules about pieces rather
+    // than a force acting on them.
     //
-    // A held-up piece is now asked a second question: is its centre of mass over
-    // what it is standing on? The cells it stands on span some range of columns;
-    // if the mean of all its cells lies outside that range, gravity has a lever
-    // arm about the last supporting edge and the piece tips over it.
+    // A piece that is going anywhere other than straight down is now a rigid body
+    // with real state: a centre of mass, a linear and an angular velocity, a mass
+    // and a moment of inertia summed from what it is made of (Material::weight --
+    // stone is four times as heavy as wood). Every step gravity accelerates it,
+    // and every contact with the world pushes back through an impulse at the point
+    // of contact, with friction and restitution. Toppling is no longer a rule. A
+    // post standing on one corner of its foot tips because the only thing holding
+    // it up is pushing on it off its centre, so the push turns it; as it goes over
+    // the contact slides or holds by friction; when it comes clear it keeps the
+    // spin and the speed it had, flies off in an arc and lands on whatever corner
+    // reaches the ground first, which kicks it again. Straight down, the cheap
+    // case, stays with falling (drop_component), which is the same motion.
     //
-    // The objection in "fracture" below -- that rotating on a grid means
-    // resampling the piece and destroying its authored pixels -- is answered by
-    // rotating with three shears (Paeth's method) instead of by sampling. Each
-    // shear slides whole rows, or whole columns, by an integer number of cells,
-    // which is a permutation of the lattice: no cell is dropped, duplicated or
-    // recoloured, so a tipped piece is the same cells in a new arrangement and
-    // matter is conserved by construction. Every pose is re-derived from the shape
-    // the piece had when it started tipping, never from the previous pose, so the
-    // small staircase a shear leaves at an angle does not compound frame on frame.
+    // The solver is the standard one -- sequential impulses with accumulated,
+    // clamped normal and friction impulses (Catto) -- in 16.16 integers, so it
+    // replays exactly. Contacts come from the grid itself: a body's cell beside a
+    // solid cell that is not the body is a contact, with a normal read off the
+    // shape of the solid around it rather than off the cell's square edge, so a
+    // body slides down a diagonal slope instead of catching on its staircase. Many
+    // edge contacts on one face are reduced to the two at its ends, the way a box
+    // engine keeps a two-point manifold, which is all a face needs to hold up a
+    // body or to tip it.
     //
-    // A tipping piece lives in the grid the whole time, exactly as a falling one
-    // does, so rendering, the player, digging and fire all see it unchanged. What
-    // it has that a falling piece does not is identity between steps -- an angle,
-    // a spin and an original shape -- which is why it is a TipBody here rather
-    // than something re-discovered by flood fill. It gets a fresh piece_tag when it
-    // starts, which is both how its cells are recognised and how it stays a
-    // separate piece from whatever it lands on afterwards.
+    // Poses stay what they were: three shears (Paeth) about a lattice point, a
+    // permutation of the lattice, so a body never gains, loses or recolours a cell,
+    // and every pose is derived from the shape it started with. The body lives in
+    // the grid the whole time, which keeps rendering, the player, digging and
+    // fire working on it unchanged. It moves in sub-steps of at most a cell at its
+    // rim, each one checked, so a fast body cannot pass through a thin wall; a
+    // sub-step into something it had not touched yet is where it stops, and the
+    // next step's contacts take the impact. The body's continuous state is never
+    // allowed to run ahead of where its cells are.
     //
-    // It stops the moment its next pose would overlap anything solid, and hands
-    // back to the ordinary support logic, which asks both questions again from
-    // where it lies. That is the whole collision model: no bounce, no slide. A
-    // tower lands on its side and is balanced; one that clips a boulder on the
-    // way down is re-judged about its new contact and may tip again from there.
+    // Bodies push bodies, and wake pieces at rest: a body striking a standing
+    // piece that is free to move (judged as balance judges one, below) turns it
+    // into a body too, and the two then share every impulse between them by their
+    // masses. That is what makes a row of posts go down like dominoes. A body
+    // resting under a pile of sand, or a block, is pressed by its weight, and so is
+    // a piece being weighed for balance: a plank across a post tips when enough
+    // sand lands on one end of it. A body in liquid is lifted by the weight of the
+    // liquid it displaces and slowed by it, so wood floats and stone sinks slowly.
+    //
+    // A body that has stopped -- slow, not speeding up, and touching something or
+    // floating -- for BODY_SLEEP_STEPS goes back to being ordinary structure, with
+    // a tag of its own; if it moved, the support logic asks about it again from
+    // where it lies, and that is the whole hand-off in both directions.
 
-    // Gravity for a tipping piece, in cells per step per step. The same quarter
-    // cell that a falling piece gains every TICKS_PER_SPEEDUP steps, so a post
-    // toppling and one dropping read as the same world.
-    static constexpr fx::v TIP_GRAVITY = fx::from_ratio(1, TICKS_PER_SPEEDUP);
+    // Gravity on a body, in cells per step per step. The same quarter cell that a
+    // falling piece gains every TICKS_PER_SPEEDUP steps, so a post toppling and one
+    // dropping read as the same world.
+    //
+    // Nine tenths of the quarter cell a step it was first set to, which a playtest
+    // found a little quick.
+    static constexpr fx::v BODY_GRAVITY = fx::from_ratio(9, 40);
 
-    // A tipping piece gives up and is handed back after this many steps, whatever
-    // it is doing. Torque only ever grows as a piece goes over, so a real topple
-    // ends long before this: by collision, by coming clear of its corner once its
-    // centre is below it, or by reaching the bottom of its swing if it cannot; the
-    // cap exists so that a case nobody thought of costs a frozen piece rather
-    // than one that is simulated forever.
-    static constexpr int TIP_MAX_STEPS = 600;
+    // Air drag, per step, as a share of speed times speed: a falling body's speed
+    // eases toward where drag balances gravity, sqrt(BODY_GRAVITY / AIR_DRAG),
+    // about 7.5 cells a step, instead of climbing in a straight line and stopping
+    // dead at MAX_FALL_SPEED. The straight line is most of what made a fall look
+    // like arithmetic.
+    static constexpr fx::v AIR_DRAG = fx::from_ratio(1, 250);
 
-    struct TipCell { int16_t x, y; };  // relative to the pivot, in cells
+    // How much rougher or smoother than its material a surface is at any one
+    // spot, in percent either way, and the most a body is nudged by as it comes
+    // loose, in radians per step. Real surfaces are not uniform and nothing comes
+    // loose perfectly still: without either, every topple of a given shape is the
+    // same topple, and balance is a knife edge a real object never stands on.
+    static constexpr int GRIP_ROUGHNESS = 20;
+    static constexpr fx::v NUDGE_SPIN = fx::from_ratio(1, 1500);
 
-    // A piece that is going over. Pool entries are reused rather than freed (see
-    // tip_count), so the vectors inside keep their capacity across topples.
-    struct TipBody {
-        // The corner it pivots about, as a lattice point: (px, py) is the top-left
-        // corner of cell (px, py), so it is shared by the four cells around it.
-        int px = 0, py = 0;
+    // A loose piece whose centre of mass is within this many cells of the edge of
+    // its footing is handed to the solver rather than ruled standing: near the
+    // edge, whether it stays is a matter of friction, rolling and the nudge, not
+    // of which side of a line its centre is on.
+    static constexpr fx::v BALANCE_MARGIN = fx::from_ratio(1, 2);
 
-        // The cell under the supporting corner, or -1 for the floor of the world.
-        // Dig that out and the piece has nothing to pivot on, so it stops tipping
-        // and goes back to falling.
-        int ground_idx = -1;
+    // The most times its own weight a landing loads a body with, for snapping.
+    // The solver delivers a landing in one step, as one spike; a real one is
+    // spread over the moment the two surfaces take to give, and a wooden stick
+    // falling flat does not break.
+    static constexpr fx::v IMPACT_LOAD_MAX = fx::from_int(6);
 
-        uint8_t tag = 0;
-        int age = 0;
-        bool moved = false;  // whether any cell has changed place since it started
+    // Passes the contact solver makes over a body's contacts per step. Each pass
+    // spreads the impulses a little further through the contacts that share them;
+    // eight is where a slab resting on two points stops visibly sagging into one.
+    static constexpr int BODY_SOLVER_PASSES = 32;
 
-        fx::v theta = 0;  // radians, clockwise on screen (y points down)
-        fx::v omega = 0;  // radians per step
+    // How much of last step's impulse a contact starts this step with (see the
+    // warm start in solve_contacts). All of it converges fastest and, when the
+    // contact has moved since, pushes with a step-old answer: a falling stack
+    // threw its blocks across the room.
+    static constexpr fx::v WARM_START = fx::from_ratio(1, 4);
 
-        // Sums over the original shape, taken in doubled coordinates so that the
-        // half-cell offset of a cell's centre stays an integer: X2 = 2*lx + 1.
-        // What gravity needs is the lever arm and the moment of inertia, and both
-        // are linear in these, so they are computed once rather than per step.
-        int64_t sx2 = 0, sy2 = 0;  // sum X2, sum Y2
-        int64_t i4 = 0;            // sum X2^2 + Y2^2, which is 4 * moment of inertia
-        int reach = 1;             // furthest cell centre from the pivot, rounded up
+    // A body counts as stopped when, held by something, no part of it has strayed
+    // more than BODY_SLEEP_DRIFT cells from where it was BODY_SLEEP_STEPS steps
+    // ago. Half a second: long enough that a topple starting from the very edge
+    // of balance -- slow, but gaining all the time -- is past half a cell before
+    // the window closes.
+    static constexpr fx::v BODY_SLEEP_DRIFT = fx::from_ratio(1, 2);
+    static constexpr int BODY_SLEEP_STEPS = 30;
 
-        std::vector<TipCell> shape;  // as it was when it started tipping
-        std::vector<int> at;         // where each of those cells is now (grid index)
+    // A body coming to rest within this many radians (about six degrees) of a
+    // quarter turn is set down square. On a grid that is how it would lie: a post
+    // lying on flat ground at 92 degrees is resting on the staircase its own
+    // shears made of its edge, and its cells are that staircase, which no turned
+    // picture matches -- the hand-back from sprite to cells jumped by it. Square,
+    // the cells are the shape turned exactly, and the sprite eases onto them.
+    static constexpr fx::v REST_SQUARE_ANGLE = fx::from_ratio(1, 10);
+
+    // Rolling resistance, as the lever it acts at, in cells: each step a body's
+    // spin is opposed by at most the normal impulse holding it up times this. A
+    // contact on a grid is never the knife edge the solver models -- the rim of a
+    // disc is a staircase, and the corner a post tips over is a cell wide -- and
+    // without it a lumpy disc rocks for ever on the energy the rounding feeds in.
+    // Small, because a post past its balance point by a fraction of a cell has
+    // only that much more torque than this to get going with.
+    static constexpr fx::v ROLLING_ARM = fx::from_ratio(1, 16);
+
+    // An impact slower than this, in cells per step along the contact normal,
+    // gives back nothing. Without a threshold a body resting on the floor bounces
+    // off the quarter cell gravity puts into it every step, and never sleeps.
+    static constexpr fx::v BOUNCE_MIN_SPEED = fx::from_ratio(3, 4);
+
+    // How fast a body has to be closing on a piece at rest, in cells per step, for
+    // the piece to be woken and pushed. Above a step's worth of gravity, so that a
+    // body lying on something does not wake it every step just by lying there.
+    static constexpr fx::v WAKE_SPEED = fx::from_ratio(3, 8);
+
+    // How hard a body has to lean sideways on a piece at rest to wake it: the
+    // normal impulse of one contact in a step, per unit of the body's mass, in
+    // cells per step. A sixteenth of a step's gravity -- any real lean.
+    static constexpr fx::v PUSH_WAKE = fx::from_ratio(1, 64);
+
+    // Share of its velocity a fully submerged body loses each step, in 1/256ths,
+    // scaled by how much of it is under: the slow, viscous part of liquid drag,
+    // which is what stops a floating body bobbing for ever once the waves it
+    // makes have carried the rest away. Its spin has its own, LIQUID_SPIN_DRAG.
+    //
+    // It was 96, and all of the drag, until a playtest found sinking linear and
+    // snappy and floating wood popping. A body losing over a third of its speed a
+    // step is at its terminal speed within a few steps of going under, and from
+    // then on falls at a constant rate -- the straight line -- and the drag
+    // switches on all at once as it touches the surface. The speed-squared part,
+    // LIQUID_FORM_DRAG, now does the work at speed, and this only the settling.
+    static constexpr int LIQUID_DRAG = 40;
+    static constexpr int LIQUID_SPIN_DRAG = 40;
+
+    // Form drag, the part that grows with the square of speed: per step a body's
+    // speed v becomes v / (1 + k v), with k this times the liquid's weight times
+    // the square root of the cells under (the width it pushes through) over its
+    // mass, added mass included. Written that way rather than as v - k v^2 so a
+    // body slapping into a pool at speed is slowed hard but never turned back.
+    // Sets the terminal speed: a 8x6 stone block sinks at about 0.6 cells a step.
+    static constexpr fx::v LIQUID_FORM_DRAG = fx::from_ratio(5, 1);
+
+    // Added mass: a body moving through liquid has to move some of the liquid
+    // with it, so it is harder to speed up or slow down than its own mass says,
+    // by this share of the weight of liquid it displaces (1 for a cylinder in two
+    // dimensions). It is why a stone gathers speed in water instead of starting
+    // at it, and why wood held under rises at a quarter of gravity rather than at
+    // two thirds of it -- it was the pop a playtest saw.
+    static constexpr fx::v LIQUID_ADDED_MASS = fx::from_ratio(1, 1);
+
+    // BODY_SLEEP_DRIFT for a body held only by liquid. A body afloat drifts in
+    // a gentle bob that half a cell would take for stopped, and stopping it there
+    // freezes it mid-bob; the support logic then finds it floating and launches
+    // it again from rest -- the pop.
+    static constexpr fx::v FLOAT_SLEEP_DRIFT = fx::from_ratio(1, 8);
+
+    // How far up a column of resting load is followed, in cells. A column that
+    // is still solid this high is not a load; it is a ceiling, or the rest of the
+    // level, and holds itself up. A post wedged under an overhang is not pressed
+    // into the ground by the mountain above it.
+    static constexpr int LOAD_SCAN = 48;
+
+    // A body still moving after this many steps is frozen where it is. Bodies end
+    // by stopping, long before; this is so that a case nobody thought of costs a
+    // frozen piece rather than one simulated for ever.
+    static constexpr int BODY_MAX_STEPS = 1800;
+
+    // One contact, between body A (the one being stepped) and either the world or
+    // body `other`. Everything in 16.16; impulses are per unit of A's mass, so a
+    // lone body against the world never needs its own mass at all and the numbers
+    // stay well inside 64 bits whatever it weighs.
+    struct Contact {
+        int64_t rax = 0, ray = 0;  // contact point relative to A's centre of mass
+        int64_t rbx = 0, rby = 0;  // and to B's, if there is a B
+        int64_t nx = 0, ny = 0;    // unit normal, pointing from the obstacle into A
+        int64_t kn = 0, kt = 0;    // inverse effective mass along the normal / tangent
+        int64_t rho = 0;           // A's mass over B's, 0 for the world
+        int64_t target = 0;        // separating speed wanted along the normal (bounce)
+        int64_t grip = 0;          // friction coefficient for the pair
+        int64_t acc_n = 0, acc_t = 0;  // impulse accumulated over the passes
+        int self = 0;       // body A
+        int other = -1;     // body B, or -1 for the world
+        int obstacle = -1;  // for the world, the structural cell touched, if any
+        uint32_t id = 0;    // the same contact next step has the same id: see solve_contacts
     };
 
-    std::vector<TipBody> tip_bodies;
+    // A loose piece. Pool entries are reused rather than freed (see tip_count),
+    // so the vectors inside keep their capacity across bodies.
+    struct Body {
+        uint8_t tag = 0;
+        int age = 0;
+        int still = 0;       // stopped steps in a row
+        bool moved = false;  // whether any cell has changed place since it started
+        bool touching = false;  // had a contact, or was in liquid, on its last step
+        bool contact = false;   // had a contact on its last step, liquid aside
+
+        // Continuous state, 16.16. Position is the centre of mass in world cells
+        // (cell x spans [x, x + 1)); angle is clockwise on screen (y points down).
+        int64_t cx = 0, cy = 0;
+        int64_t vx = 0, vy = 0;  // cells per step
+        fx::v theta = 0;
+        int64_t omega = 0;       // radians per step
+
+        // Where it started, and where its current stopped count began: see
+        // BODY_SLEEP_STEPS. Its total normal impulse this step, for rolling
+        // resistance.
+        int64_t start_cx = 0, start_cy = 0, rest_cx = 0, rest_cy = 0;
+        int64_t prev_cx = 0, prev_cy = 0;
+        fx::v prev_theta = 0;
+        fx::v start_theta = 0, rest_theta = 0;
+        int64_t support = 0;
+
+        // The lattice point of the shape the pose turns about, relative to the
+        // shape's origin. Moved, each step, to the contact pressing hardest on the
+        // body, because the shears are exact at the point they turn about and off
+        // by up to a cell at the far end: where a body is touching something is
+        // where that cell matters. The hardest-pressed contact this step, as a
+        // world point, and how hard, are kept for choosing it.
+        int16_t pivot_x = 0, pivot_y = 0;
+        int64_t pressed = 0, press_x = 0, press_y = 0;
+        bool pivot_held = false;  // a contact this step was within a cell of the pivot
+
+        // The centre of mass relative to the origin lattice point the shape is
+        // stored about, 16.16. The pose puts the origin at cx,cy - R(theta)*lc.
+        int64_t lcx = 0, lcy = 0;
+        int64_t mass = 1;  // sum of Material::weight over its cells
+        int64_t k2 = 1;    // moment of inertia over mass, about the centre: cells^2, 16.16
+        int reach = 1;  // furthest cell centre from the centre of mass, whole cells, rounded up
+        int64_t grip = 0, bounce = 0;  // its material's, 16.16 fractions
+
+        std::vector<BodyCell> shape;  // as it was when it started
+        std::vector<int> at;  // where each of those cells is now (grid index)
+    };
+
+    std::vector<Body> tip_bodies;
     int tip_count = 0;  // live bodies are tip_bodies[0, tip_count)
 
-    // Which piece tags belong to a tipping body. A per-tag flag rather than a
+    // Which body each piece tag belongs to, or -1. A per-tag table rather than a
     // per-cell array: a body's cells all wear its fresh tag, so the tag is the
-    // ownership test, at no cost per cell.
-    bool tip_tag_live[256] = {};
+    // ownership test, at no cost per cell. Kept in step with swap-removes.
+    int16_t tag_body[256];
 
     // What balance treats as one material. Charred is a state of Wood, not a
     // different thing: a beam that has caught in the middle is still one beam.
@@ -883,37 +1112,100 @@ private:
     }
 
     bool is_tipping(int idx) const {
-        return is_structural(cells[idx].type) && tip_tag_live[cells[idx].piece_tag];
+        return is_structural(cells[idx].type) && tag_body[cells[idx].piece_tag] >= 0;
     }
 
+    // Collects into balance_component the piece containing `seed` the way balance
+    // judges one: the run of its tag and its material (or, `in_flight`, the cells
+    // that were moving). False if it should not be judged at all -- it was judged
+    // already this pass, it is too big, or it stands on the bottom of the world.
+    bool collect_piece(int seed, bool in_flight);
+
+    // Everything resting on the piece in balance_component, transitively, each
+    // piece weighed by the share of its footing that comes down on this one. `w`
+    // and `wx2` (the piece's weight and doubled-x moment) come in as the piece's
+    // own and go out scaled by LOAD_WHOLE, load included.
+    void add_load(int64_t& w, int64_t& wx2);
+
+    // add_load's scratch: its own visit marks, the set of cells it has weighed so
+    // far and the share each one is carried at, in 1/LOAD_WHOLE.
+    static constexpr int LOAD_WHOLE = 256;
+    std::vector<uint8_t> load_visit;
+    std::vector<uint16_t> load_share_at;
+    std::vector<int> load_cells;
+    std::vector<int> load_stack;
+    std::vector<int> load_pieces;  // [begin, end) in load_cells of each piece found carried
+    uint8_t load_epoch = 0;
+
     // Called by fall_if_unsupported at the point it concludes a piece is held up.
-    // Fills the piece, compares its centre of mass with the span of columns it
-    // stands on, and starts it tipping if the centre is outside. `in_flight` means
-    // the piece has just landed: it is then the cells that were moving (ticks > 0),
-    // because the instant it touches down it is connected to the floor it landed
-    // on, and the floor is not part of what is falling over.
+    // Fills the piece, compares its centre of mass -- with the load resting on it
+    // -- with the span of columns it stands on, and makes it a body if the centre
+    // is outside. Also makes it a body if it is a loose piece lighter than the
+    // liquid it is in, which floats it. `in_flight` means the piece has just
+    // landed: it is then the cells that were moving (ticks > 0), because the
+    // instant it touches down it is connected to the floor it landed on, and the
+    // floor is not part of what is falling over. It lands with the speed it fell
+    // at, which is what kicks it.
     //
     // Returns whether it started one.
     bool topple_if_unbalanced(int x, int y, bool in_flight);
 
-    // Turns balance_component into a TipBody pivoting about corner (px, py).
-    void start_tipping(int px, int py, int ground_idx);
+    // Turns `cells_of` into a body moving at (vx, vy). Gives it a fresh tag.
+    // Returns its index in the pool.
+    int start_body(const std::vector<int>& cells_of, int64_t vx, int64_t vy);
 
-    // Advances every tipping body by one step. Runs after resolve_support() and
-    // before the sweep, for the same reason that does.
+    // Sums mass, centre and inertia over body `b`'s shape, from the materials its
+    // cells are now, keeping its pose and the motion of every cell it still has.
+    // Used when it starts and whenever fire or digging changes what it is made of.
+    void weigh_body(Body& b, bool keep_motion);
+
+    // Advances every body by one step. Runs after resolve_support() and before the
+    // sweep, for the same reason that does.
     void step_tipping();
 
-    // Where body `b`'s cells would be at angle `theta`, into tip_next. False if
-    // any of them would leave the world.
-    bool tip_pose(const TipBody& b, fx::v theta);
+    // The parts of a step: each body's contacts (appended to `contacts`) and the
+    // forces on it, then one solve over every contact, then each body moves.
+    // gather_contacts may wake other pieces, which can grow the pool, so it takes
+    // an index, not a reference.
+    void gather_contacts(int i);
+    void apply_body_forces(Body& b);
+    void solve_contacts();
+    // Returns whether any cell of it moved.
+    bool advance_body(Body& b);
+
+    // Where body `b`'s cells would be with its centre at (cx, cy) and angle
+    // `theta`, into tip_next. False if any of them would leave the world.
+    bool tip_pose(const Body& b, int64_t cx, int64_t cy, fx::v theta);
 
     // Tries to move body `b` to the pose in tip_next. False, with nothing
     // written, if that pose overlaps anything solid that is not the body itself.
-    bool tip_move(TipBody& b);
+    bool tip_move(Body& b);
+
+    // The pose body `b` comes to rest in if it is lying within REST_SQUARE_ANGLE
+    // of a quarter turn: that exact turn, with its pivot on the lattice point it
+    // is nearest, so its cells are the shape turned without a shear. False if it
+    // is at more of an angle than that, and then it rests as it is.
+    bool square_pose(const Body& b, int64_t& cx, int64_t& cy, fx::v& theta) const;
+    // Moves `b` into that pose, if it has one and it fits.
+    void square_body(Body& b);
+
+    // Breaks body `i` at the edge of what holds it up if its overhang bends more
+    // than its section there can carry, loaded `load` times its weight (16.16).
+    // Returns whether it broke; the broken-off part is queued, to come loose as a
+    // body of its own next step.
+    bool snap_overhang(int i, int64_t load);
+    struct SnapColumn {
+        int cells = 0;
+        int64_t weight = 0;
+        uint16_t strength = 0xFFFF;  // the weakest cell's
+        bool held = false;           // something not the body directly under one of its cells
+    };
+    std::vector<SnapColumn> snap_cols;  // scratch, one per column a body spans
 
     // Ends body `i`: its cells stay where they are and become an ordinary piece.
-    // With `requeue`, they are queued for support so they fall, settle or tip
-    // again from there; without, they are left at rest where they stopped.
+    // With `requeue`, whatever they have come to rest on is queued for support,
+    // to be weighed with them on it; the body's own cells are not, since a body
+    // only stops once something holds it.
     void end_tipping(int i, bool requeue);
 
     std::vector<int> balance_component;  // scratch, reused across checks
@@ -921,6 +1213,26 @@ private:
     std::vector<int> tip_next;           // scratch: the pose being tried
     std::vector<Element> tip_carry;      // scratch: the body's cells in transit
     std::vector<Element> tip_displaced;  // scratch: fluid the body moves into
+    std::vector<Contact> contacts;  // scratch: every body's, this step
+
+    // Last step's contacts, with the impulses they ended on, for warm starting;
+    // prev_contacts[warm_from[tag], warm_to[tag]) are the ones whose first body
+    // wore that tag. Grows to a high-water mark with `contacts`.
+    std::vector<Contact> prev_contacts;
+    int warm_from[256] = {};
+    int warm_to[256] = {};
+
+    // Manifold reduction for gather_contacts: per (direction, other body), the two
+    // contacts furthest apart along the face. Fixed size; a body touching more
+    // distinct faces than this at once keeps the first ones it found.
+    static constexpr int MAX_CONTACT_FACES = 16;
+    struct Face {
+        int key = 0;
+        int64_t lo_t = 0, hi_t = 0;
+        Contact lo, hi;
+    };
+    Face faces[MAX_CONTACT_FACES];
+    int face_count = 0;
 
     // tip_move's "this cell is the body" marks, on the epoch trick. Its own
     // array rather than support_visit borrowed between passes: see tip_move.

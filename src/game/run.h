@@ -130,6 +130,10 @@ public:
     // yet, but the world border reads as solid, so it falls to the bottom edge
     // rather than out of existence.
     Run(int width, int height, uint64_t seed = Grid::DEFAULT_SEED);
+    // Not copied or moved: a tentacled enemy points into this Run's `chains`
+    // (Enemy::Chains says why), so a copy's enemies would step the original's.
+    Run(const Run&) = delete;
+    Run& operator=(const Run&) = delete;
 
     // Puts the run back to what a fresh Run(width, height, seed) would be: `grid`
     // goes through Grid::reset(seed) rather than being reallocated, and
@@ -206,9 +210,15 @@ public:
     // screens' worth -- the planter puts down a handful, and the spawn key is a
     // development tool.
     static constexpr int MAX_ENEMIES = 24;
+    // Of those, how many can be tentacled at once: each one needs an
+    // Enemy::Chains, which is most of a body's size, and only the angler has
+    // them. Eight is more anglers than a screen holds; a ninth is refused like
+    // a twenty-fifth enemy.
+    static constexpr int MAX_CHAINED = 8;
 
     // Brings a dead slot to life as `kind`, with the box's top-left at (x, y).
-    // Refused, and false, when every slot is taken or the box would start inside
+    // Refused, and false, when every slot is taken -- or, for a tentacled
+    // species, every chain slot -- or the box would start inside
     // something solid -- an enemy spawned into a wall would spend its life stuck
     // there.
     bool spawn_enemy(int x, int y, const Species& kind = species::GHOUL);
@@ -236,6 +246,10 @@ public:
     DigTool dig_tool;
     Quiver quiver;
     std::array<Enemy, MAX_ENEMIES> enemies{};
+    // The tentacled enemies' chains. A slot is free when no live enemy points
+    // at it: a body that dies keeps its pointer but never reads it again, and
+    // spawn clears a slot before handing it out.
+    std::array<Enemy::Chains, MAX_CHAINED> chains{};
 
 private:
     // The outcome latches. Once a run is over it stays over, even though step()

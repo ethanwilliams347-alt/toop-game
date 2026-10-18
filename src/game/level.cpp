@@ -49,8 +49,10 @@ Report start(Run& run, const scene_activation::Resolved& size, const scene_list:
     //
     // A level that lists enemies gets exactly those and no heuristic ones on top:
     // an author who placed one troll in a pit did not also ask for six ghouls
-    // spread across the map.
-    if (!level.enemies.empty()) {
+    // spread across the map. Neither while PLANT_ENEMIES is off.
+    if (!PLANT_ENEMIES) {
+        // none: the spawn keys are the only source
+    } else if (!level.enemies.empty()) {
         r.enemies_authored = true;
         for (const level_list::EnemyDef& e : level.enemies) {
             const Species* kind = species::find(e.species.c_str());

@@ -275,6 +275,24 @@ int main(int argc, char* argv[]) {
         static_cast<size_t>(present::ENEMY_ATLAS_W) * present::ENEMY_ATLAS_H, 0u);
     std::vector<frame::EnemySprite> enemy_sprites;
     std::vector<frame::ArrowSprite> arrow_sprites;
+
+    // The loose bodies' pictures, the same way; present/present.h has the layout.
+    // Without the texture the bodies are still drawn, as cells, the old way.
+    SDL_Texture* body_atlas =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                          present::BODY_ATLAS_W, present::BODY_ATLAS_H);
+    if (body_atlas) {
+        SDL_SetTextureBlendMode(body_atlas, SDL_BLENDMODE_BLEND);
+    } else {
+        std::fprintf(stderr,
+                     "WARNING: could not create the body texture (%s); "
+                     "moving structure will be drawn as cells.\n",
+                     SDL_GetError());
+    }
+    std::vector<uint32_t> body_atlas_pixels(
+        static_cast<size_t>(present::BODY_ATLAS_W) * present::BODY_ATLAS_H, 0u);
+    std::vector<frame::BodySprite> body_sprites;
+    std::vector<frame::HiddenCell> body_hidden;
     enemy_sprites.reserve(Run::MAX_ENEMIES);
     arrow_sprites.reserve(Quiver::CAPACITY);
 
@@ -1148,7 +1166,21 @@ int main(int argc, char* argv[]) {
         // viewport; shell::upload_cells has the rest.
         const int visible_w = std::min(mode.padded_w(view_scale), run.grid.get_width());
         const int visible_h = std::min(mode.padded_h(view_scale), run.grid.get_height());
-        shell::upload_cells(targets.cells, run.grid, camera, visible_w, visible_h, cell_window);
+        // The loose bodies first, because their cells are left out of the upload:
+        // each is drawn whole as a sprite, where it continuously is.
+        body_sprites.clear();
+        body_hidden.clear();
+        if (body_atlas) {
+            present::paint_bodies(run, alpha, body_atlas_pixels, body_sprites, body_hidden);
+            for (const frame::BodySprite& bs : body_sprites)
+                SDL_UpdateTexture(body_atlas, &bs.src,
+                                  body_atlas_pixels.data() +
+                                      static_cast<size_t>(bs.src.y) * present::BODY_ATLAS_W +
+                                      bs.src.x,
+                                  present::BODY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
+        }
+        shell::upload_cells(targets.cells, run.grid, camera, visible_w, visible_h, cell_window,
+                            &body_hidden);
 
         // Computed against the same view origin the cell upload just used, and after
         // camera.follow for the same reason that upload is: a light field built from
@@ -1208,6 +1240,8 @@ int main(int argc, char* argv[]) {
         fp.enemy_atlas = enemy_atlas;
         fp.enemies = &enemy_sprites;
         fp.arrows = &arrow_sprites;
+        fp.body_atlas = body_atlas;
+        fp.bodies = &body_sprites;
         fp.light = &targets.light;
         fp.light_texture = targets.light_texture;
 
@@ -1331,6 +1365,7 @@ int main(int argc, char* argv[]) {
 
     if (player_tex) SDL_DestroyTexture(player_tex);
     if (enemy_atlas) SDL_DestroyTexture(enemy_atlas);
+    if (body_atlas) SDL_DestroyTexture(body_atlas);
     // The cache is the destroy list -- one entry per distinct sprite name, so a
     // scene with fifty trees of three kinds still frees exactly three textures and
     // `props` holding several borrowed copies of each is not a double free.

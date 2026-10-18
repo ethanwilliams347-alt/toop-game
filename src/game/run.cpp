@@ -28,11 +28,23 @@ void Run::reset(uint64_t seed, int new_width, int new_height) {
 }
 
 bool Run::spawn_enemy(int x, int y, const Species& kind) {
+    Enemy::Chains* free_chains = nullptr;
+    if (kind.tentacles) {
+        for (Enemy::Chains& c : chains) {
+            bool used = false;
+            for (const Enemy& e : enemies) used = used || (e.is_alive() && e.chain_slot() == &c);
+            if (!used) {
+                free_chains = &c;
+                break;
+            }
+        }
+        if (!free_chains) return false;
+    }
     for (Enemy& e : enemies) {
         if (e.is_alive()) continue;
         // Asked of the slot as the new species: the test is the box, and the box
         // is the species'.
-        e.spawn(x, y, kind);
+        e.spawn(x, y, kind, free_chains);
         e.set_snapped_poses(snap_poses);
         if (e.overlaps_solid(grid, x, y)) {
             e = Enemy{};

@@ -31,6 +31,11 @@
 // load_assets() below's job, which lives with the loaders.
 namespace level {
 
+// Whether start() puts any enemies down. Off for now: enemies come only from the
+// spawn keys (T, Y, U, I), neither the level file's `enemy` lines nor the spacing
+// heuristic. Flip it back to bring both back.
+inline constexpr bool PLANT_ENEMIES = false;
+
 // What start() did, for the caller to print and a test to check. Plain data
 // rather than printing in here, because the bench and the game want the same
 // facts in different places.

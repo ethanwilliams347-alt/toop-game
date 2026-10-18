@@ -235,7 +235,8 @@ void blank_cells(SDL_Texture* cells) {
 // blending terrain toward the generated ground plane. It went with that
 // backdrop; render/backdrop_set.h has the account.)
 void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, int visible_w,
-                  int visible_h, std::vector<uint32_t>& scratch) {
+                  int visible_h, std::vector<uint32_t>& scratch,
+                  const std::vector<frame::HiddenCell>* hidden) {
     const std::vector<uint32_t>& pixels = grid.get_pixels();
     const SDL_Rect visible_rect{0, 0, visible_w, visible_h};
     const int grid_w = grid.get_width();
@@ -243,7 +244,8 @@ void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, in
     const int view_x = camera.view_x(), view_y = camera.view_y();
     const bool inside =
         view_x >= 0 && view_y >= 0 && view_x + visible_w <= grid_w && view_y + visible_h <= grid_h;
-    if (inside) {
+    const bool hiding = hidden && !hidden->empty();
+    if (inside && !hiding) {
         SDL_UpdateTexture(cells, &visible_rect,
                           pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
                           grid_w * static_cast<int>(sizeof(uint32_t)));
@@ -258,6 +260,13 @@ void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, in
             if (gx < 0 || gx >= grid_w) continue;
             scratch[static_cast<size_t>(wy) * visible_w + wx] =
                 pixels[static_cast<size_t>(gy) * grid_w + gx];
+        }
+    }
+    if (hiding) {
+        for (const frame::HiddenCell& h : *hidden) {
+            const int wx = h.index % grid_w - view_x, wy = h.index / grid_w - view_y;
+            if (wx < 0 || wy < 0 || wx >= visible_w || wy >= visible_h) continue;
+            scratch[static_cast<size_t>(wy) * visible_w + wx] = h.fill;
         }
     }
     SDL_UpdateTexture(cells, &visible_rect, scratch.data(),

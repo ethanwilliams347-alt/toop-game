@@ -71,6 +71,8 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     level_visit.resize(width * height, 0);
     balance_visit.resize(width * height, 0);
     tip_visit.resize(width * height, 0);
+    load_visit.resize(width * height, 0);
+    load_share_at.resize(width * height, 0);
 
     // The step loop allocates nothing in steady state: every scratch vector below
     // grows by push_back and is only ever .clear()ed, so its capacity survives
@@ -86,10 +88,12 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     //     component passes the cap, so a stack never holds more than eight per
     //     judged cell plus the seed.
     //   balance_component, tip_next, tip_carry, tip_displaced -- the balance check
-    //     gives up one past MAX_SUPPORT_CELLS, and a tipping body is a balance
-    //     component, so every one of these is bounded by it. (Each TipBody's own
-    //     two vectors are reserved the same way when the pool grows; see
-    //     start_tipping.)
+    //     gives up one past MAX_SUPPORT_CELLS, and a body is a balance or support
+    //     component, both capped there, so every one of these is bounded by it.
+    //     (Each Body's own two vectors are reserved the same way when the pool
+    //     grows; see start_body.)
+    //   load_cells, load_stack -- add_load stops finding cells after
+    //     2 * MAX_SUPPORT_CELLS, on top of the piece's own.
     //   fracture_component -- its cap is checked once per cell dequeued, before
     //     that cell's up-to-eight neighbours are pushed, so it can pass the cap by
     //     eight.
@@ -99,7 +103,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     // high-water mark and stay there: pending_support and the two resolve_support
     // queues hold one entry per structure cell disturbed this step, which a large
     // enough collapse makes as big as it likes. The tip_bodies pool likewise holds
-    // as many bodies as are tipping at once. tests/test_alloc.cpp holds the line
+    // as many bodies as are moving at once. tests/test_alloc.cpp holds the line
     // that matters -- a world replaying a step it has already reached allocates
     // nothing.
     support_component.reserve(MAX_SUPPORT_CELLS + 1);
@@ -110,8 +114,14 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     tip_next.reserve(MAX_SUPPORT_CELLS + 1);
     tip_carry.reserve(MAX_SUPPORT_CELLS + 1);
     tip_displaced.reserve(MAX_SUPPORT_CELLS + 1);
+    contacts.reserve(2 * MAX_CONTACT_FACES);
+    load_cells.reserve(3 * MAX_SUPPORT_CELLS + 2);
+    load_stack.reserve(2 * MAX_SUPPORT_CELLS + 2);
+    load_pieces.reserve(2 * MAX_SUPPORT_CELLS + 2);
+    std::fill(std::begin(tag_body), std::end(tag_body), int16_t{-1});
     fracture_component.reserve(MAX_SUPPORT_CELLS + 9);
     fracture_lowest.reserve(static_cast<size_t>(width));
+    snap_cols.reserve(static_cast<size_t>(width));
     level_queue.reserve(LIQUID_LEVEL_CELLS + 4);
 
     // Nothing to seed. The seed is stored and read straight out of world_seed by
@@ -133,6 +143,7 @@ void Grid::reset(uint64_t seed) {
     sweep_warm = true;
 
     pending_support.clear();
+    support_rejudge.clear();
     support_stack.clear();
     support_component.clear();
     support_seeds.clear();
@@ -153,7 +164,12 @@ void Grid::reset(uint64_t seed) {
     // not freed" rule as every other scratch vector here. tip_count is what says
     // none of them is live.
     tip_count = 0;
-    std::fill(std::begin(tip_tag_live), std::end(tip_tag_live), false);
+    std::fill(std::begin(tag_body), std::end(tag_body), int16_t{-1});
+    contacts.clear();
+    prev_contacts.clear();
+    std::fill(std::begin(warm_from), std::end(warm_from), 0);
+    std::fill(std::begin(warm_to), std::end(warm_to), 0);
+    face_count = 0;
     balance_component.clear();
     balance_stack.clear();
     tip_next.clear();
@@ -164,6 +180,11 @@ void Grid::reset(uint64_t seed) {
     balance_pass_start = 1;
     std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
     tip_epoch = 0;
+    std::fill(load_visit.begin(), load_visit.end(), uint8_t{0});
+    load_epoch = 0;
+    load_cells.clear();
+    load_stack.clear();
+    load_pieces.clear();
 
     frame_tag = 0;
     step_count = 0;
@@ -505,6 +526,13 @@ void Grid::resolve_support() {
         // whole way down inside a single pass.
         support_seeds.clear();
         support_seeds.swap(pending_support);
+        // The swap trades capacities too, so the queue alternates between two
+        // buffers from pass to pass, and a burst queued onto the smaller one grows
+        // it mid-step -- even replaying a step the world has been through before,
+        // if that step lands on the other buffer this time. Both are kept as large
+        // as either has had to be, which allocates only at a new high-water mark.
+        if (pending_support.capacity() < support_seeds.capacity())
+            pending_support.reserve(support_seeds.capacity());
 
         // A fresh epoch per pass. Every cell of travel is a new question about a
         // world that has just changed, so last pass's verdicts must not be read as
@@ -562,6 +590,13 @@ void Grid::resolve_support() {
     for (const int idx : pending_support) {
         if (cells[idx].ticks < 255) cells[idx].ticks++;
     }
+
+    // Pieces to weigh again because something they carry was weighed, joining
+    // the queue only now: queued during the passes, they would have been aged
+    // above as though they were falling, and judged next step as a piece in
+    // flight.
+    for (const int idx : support_rejudge) pending_support.push_back(idx);
+    support_rejudge.clear();
 
     resolving_support = false;
 }
@@ -735,7 +770,19 @@ void Grid::fall_if_unsupported(int x, int y) {
     }
 
     // The whole piece was explored and none of it was standing on anything.
-    drop_component();
+    //
+    // It comes loose as a body, from rest. Falling used to be its own motion --
+    // the piece translated a whole cell on the step it came loose and gained a
+    // cell per step every few steps, a staircase of speeds -- which read as a
+    // sudden lurch and then a sum being worked out, and dropped everything a body
+    // has the moment it lands: spin, sideways speed, a corner hitting first. As a
+    // body it accelerates smoothly from nothing, under the same gravity as every
+    // other loose thing, into air drag; lands on whatever reaches the ground first
+    // and is kicked by it; is lifted by liquid; and can be pushed on the way down.
+    const int64_t speed =
+        was_moving ? static_cast<int64_t>(fall_speed(cells[seed].ticks)) * fx::ONE : 0;
+    settle_marks(SupportState::Moved, -1);
+    start_body(support_component, 0, speed);
 }
 
 uint8_t Grid::alloc_piece_tag() {
@@ -748,9 +795,9 @@ uint8_t Grid::alloc_piece_tag() {
         next_piece_tag = static_cast<uint8_t>(next_piece_tag + 1);
         if (next_piece_tag == 0) next_piece_tag = 1;  // 0 means "never broken"
 
-        // A tipping body is in the air too, but is not in pending_support while it
-        // turns, so its tag has to be refused by name.
-        bool in_use = tip_tag_live[candidate];
+        // A body is in the air too, but is not in pending_support while it
+        // moves, so its tag has to be refused by name.
+        bool in_use = tag_body[candidate] >= 0;
         for (const int idx : pending_support) {
             if (cells[idx].ticks > 0 && cells[idx].piece_tag == candidate) {
                 in_use = true;
@@ -993,6 +1040,12 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
         // a pool does. Only what had nowhere to go rides up with the swap.
         if (is_liquid(cells[get_index(x, y + 1)].type)) disperse_liquid(x, y + 1);
         swap_elements(x, y, x, y + 1);
+
+        // A grain arriving on top of a structure is weight on it, and enough of
+        // it on one end of a plank tips the plank (see add_load). Asked once, as
+        // it arrives, rather than for every grain resting there every step.
+        if (y + 2 < height && is_structural(cells[idx + 2 * width].type))
+            queue_support_check(x, y + 2);
         return true;
     }
 
@@ -1032,6 +1085,8 @@ bool Grid::step_powder(int x, int y, const Material& mat) {
 
         if (is_liquid(cells[get_index(nx, y + 1)].type)) disperse_liquid(nx, y + 1);
         swap_elements(x, y, nx, y + 1);
+        if (y + 2 < height && is_structural(cells[get_index(nx, y + 2)].type))
+            queue_support_check(nx, y + 2);
         return true;
     }
 
@@ -1156,6 +1211,11 @@ void Grid::transfer_liquid(int fx, int fy, int tx, int ty, int amount) {
         // Emptied: Empty, at ambient, the way erasing a cell leaves it.
         s = Element{};
         s.updated_tag = frame_tag;
+
+        // A piece floating on this has just lost what it floated on. Drain the
+        // pool from under a raft and it settles with the water rather than
+        // hanging where the surface was.
+        if (fy > 0 && is_structural(cells[from - width].type)) queue_support_check(fx, fy - 1);
     }
     pixels[from] = pixel_of(s);
     pixels[to] = pixel_of(d);

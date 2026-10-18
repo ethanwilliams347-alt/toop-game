@@ -171,12 +171,15 @@ inline std::string describe_cell(const Grid& grid, int x, int y) {
     // Labelled CHUNK: rather than printed as a bare AWAKE/ASLEEP, because a bare one
     // would be a claim about the cell and this is not one: a falling structural
     // piece is carried by the support queue, not by the chunk rects, so its chunks
-    // are genuinely idle while it moves. FALL: below is the field that says this
+    // are genuinely idle while it moves. BODY below is the field that says this
     // cell is moving.
     s += grid.chunk_awake_at(x, y) ? " CHUNK:AWAKE" : " CHUNK:ASLEEP";
 
     switch (tick_role(e.type)) {
         case TickRole::FallClock:
+            // Loose structure moves as a body now, and a body keeps its motion in
+            // itself rather than in the cell; the clock is only ever left over.
+            if (grid.moving_at(x, y)) s += " BODY";
             if (e.ticks) s += " FALL:" + std::to_string(static_cast<int>(e.ticks));
             break;
         case TickRole::Lifetime:

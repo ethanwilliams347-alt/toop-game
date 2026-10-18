@@ -182,8 +182,9 @@ void test_start() {
               r.objective_placed && !r.objective_authored &&
                   run.objective_x() == boot::default_objective_column(400));
         check("start: ...and enemies are planted by the heuristic",
-              !r.enemies_authored && r.enemies_placed == run.enemies_alive() &&
-                  r.enemies_placed > 0);
+              !level::PLANT_ENEMIES || !r.enemies_authored &&
+                                           r.enemies_placed == run.enemies_alive() &&
+                                           r.enemies_placed > 0);
     }
 
     level_list::LevelDef lv;
@@ -204,8 +205,10 @@ void test_start() {
           r.objective_authored && r.objective_placed && run.objective_x() == 300 &&
               run.objective_y() == 180 - Player::HEIGHT / 2);
     check("start: authored enemies are exactly the ones listed",
-          r.enemies_authored && r.enemies_placed == 2 && run.enemies_alive() == 2 && r.trolls == 1);
+          !level::PLANT_ENEMIES || r.enemies_authored && r.enemies_placed == 2 &&
+                                       run.enemies_alive() == 2 && r.trolls == 1);
     check("start: ...each standing centred on its column", [&] {
+        if (!level::PLANT_ENEMIES) return true;
         bool troll = false, ghoul = false;
         for (const Enemy& e : run.enemies) {
             if (!e.is_alive()) continue;
@@ -216,11 +219,12 @@ void test_start() {
         return troll && ghoul;
     }());
     check("start: one that cannot stand is reported by its line",
-          r.enemy_lines_unplaced.size() == 1 && r.enemy_lines_unplaced[0] == 5);
+          !level::PLANT_ENEMIES ||
+              r.enemy_lines_unplaced.size() == 1 && r.enemy_lines_unplaced[0] == 5);
     bool warned = false;
     for (const level::Line& l : level::describe(r, def))
         warned |= l.warning && l.text.find("flat_level.txt:5") != std::string::npos;
-    check("start: ...and describe() names the file and line", warned);
+    check("start: ...and describe() names the file and line", !level::PLANT_ENEMIES || warned);
 
     // Restarting is the same call, and must be the same world -- that is the
     // whole claim a recording's start fingerprint relies on.
@@ -258,7 +262,8 @@ void test_shipped_scenes() {
               r.objective_placed && run.has_objective());
         check(("shipped: '" + def.name + "' stands the player on ground").c_str(),
               r.player_standing);
-        check(("shipped: '" + def.name + "' has enemies").c_str(), r.enemies_placed > 0);
+        check(("shipped: '" + def.name + "' has enemies").c_str(),
+              !level::PLANT_ENEMIES || r.enemies_placed > 0);
         check(("shipped: '" + def.name + "' places every enemy its level lists").c_str(),
               r.enemy_lines_unplaced.empty());
     }

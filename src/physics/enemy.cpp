@@ -64,8 +64,16 @@ fx::v hold_fraction(fx::v k, int keys) {
 
 }  // namespace
 
-void Enemy::spawn(int x, int y, const Species& k) {
+void Enemy::spawn(int x, int y, const Species& k, Chains* with) {
     *this = Enemy{};
+    // Left dead rather than spawned rigid: a tentacled species' parts are
+    // posed only along its chains, so without them its legs and lure would
+    // never move.
+    if (k.tentacles && !with) return;
+    if (k.tentacles) {
+        chains = with;
+        *chains = Chains{};
+    }
     kind = &k;
     alive = true;
     body.x = prev_x = x;
@@ -106,7 +114,7 @@ void Enemy::world_of(int x, int y, int& wx, int& wy) const {
                                         : rig::part_of(art, kind->rig, x, y);
     const int limb = kind->tentacles ? kind->tentacles->of(part) : -1;
     const rig::Point p =
-        limb >= 0 ? limbs[limb].fwd[tentacle::link_of(kind->tentacles->chain[limb], x, y)].at(x, y)
+        limb >= 0 ? arm(limb).fwd[tentacle::link_of(kind->tentacles->chain[limb], x, y)].at(x, y)
                   : pose.forward(part, x, y);
     wx = world_column(rig::nearest(p.x));
     wy = body.y - kind->offset_y() + rig::nearest(p.y);
@@ -297,6 +305,7 @@ int Enemy::shatter(Grid& grid, int wx, int wy, int radius) {
     const int before = remaining;
     const int r2 = radius * radius;
     const int frame_w = kind->frame_w();
+    bool stung = false;
     for (int fy = 0; fy < kind->frame_h(); ++fy) {
         for (int fx = 0; fx < frame_w; ++fx) {
             const int i = fy * frame_w + fx;
@@ -305,13 +314,26 @@ int Enemy::shatter(Grid& grid, int wx, int wy, int radius) {
             world_of(fx, fy, px, py);
             const int dx = px - wx;
             const int dy = py - wy;
-            if (dx * dx + dy * dy <= r2) crumble(grid, i);
+            if (dx * dx + dy * dy > r2) continue;
+            stung = stung || is_bulb(fx, fy);
+            crumble(grid, i);
         }
     }
     settle_after_loss(grid);
     // Rocks back from the hit, from the next step: the pose is not recomputed
     // here, so the rest of this step's arrows find the body where they aimed.
     if (alive && remaining < before) flinch = kind->rig.flinch_steps;
+    // The bulb is where a lure-striker is weakest, and the hardest thing on it
+    // to hit: it hangs out in front, swaying, and is only still at the top of
+    // a wind-up. Hit there, it thrashes, a strike being wound up never comes,
+    // and it is two recoveries before it can strike again -- the reward for
+    // the risky shot, standing in front of the thing that hits you.
+    if (alive && stung && lure_strikes()) {
+        windup = 0;
+        strike_follow = 0;
+        attack_timer = std::max(attack_timer, 2 * kind->attack_interval);
+        arm(lure_limb()).flourish = 2 * kind->tentacles->motion.lure_flourish;
+    }
     return before - remaining;
 }
 
@@ -468,10 +490,19 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     }
     advance_gait();
 
-    const bool landed = attack(grid, target_x, target_y, target_alive);
+    bool landed = attack(grid, target_x, target_y, target_alive);
+    if (kind->tentacles) carry_body();
     pose_parts();
     if (kind->tentacles) move_tentacles(grid, target_x, target_y);
     finish_pose();
+    // A lure strike lands when the bulb, as drawn this step, has touched the
+    // target on its way here -- tested after the pose, so what hits is what
+    // the player saw coming, and once a strike.
+    if (lure_strikes() && target_alive && !strike_hit && strike_live() &&
+        bulb_hits(target_x, target_y)) {
+        strike_hit = true;
+        landed = true;
+    }
     return landed;
 }
 
@@ -532,8 +563,14 @@ void Enemy::pose_parts() {
     // Lowest with the legs furthest apart, as a walking body is. Whole cells,
     // because a body half a cell down rounds half its columns one way and half
     // the other and tears along the rounding.
-    const int sink = rig::nearest(fx::mul(fx::from_int(r.bob), fx::mul(stride_sin, stride_sin)));
-    fx::v lean = chasing ? r.chase_lean : 0;
+    //
+    // A body on tentacle feet bobs and leans with where its feet are instead
+    // (carry_body): nothing about it runs on the stride.
+    const int sink =
+        kind->tentacles
+            ? rig::nearest(carried_sink.pos)
+            : rig::nearest(fx::mul(fx::from_int(r.bob), fx::mul(stride_sin, stride_sin)));
+    fx::v lean = (chasing ? r.chase_lean : 0) + (kind->tentacles ? carried_lean.pos : 0);
 
     // --- the breath --- always running, so a body standing still is not a
     // picture of one.
@@ -641,7 +678,7 @@ void Enemy::finish_pose() {
         rig::Box b{limit.x1, limit.y1, limit.x0, limit.y0};
         if (const int limb = kind->tentacles ? kind->tentacles->of(part) : -1; limb >= 0) {
             for (int k = 0; k < kind->tentacles->chain[limb].links(); ++k) {
-                const rig::Box& link = limbs[limb].box[k];
+                const rig::Box& link = arm(limb).box[k];
                 if (link.x0 >= link.x1 || link.y0 >= link.y1) continue;
                 b.x0 = std::min(b.x0, link.x0);
                 b.y0 = std::min(b.y0, link.y0);
@@ -692,18 +729,83 @@ rig::Point Enemy::to_frame(rig::Point w) const {
     return {face_left ? fx::from_int(kind->frame_w() - 1) - x : x, w.y - top};
 }
 
+void Enemy::carry_body() {
+    const tentacle::Set& set = *kind->tentacles;
+    const tentacle::Motion& m = set.motion;
+
+    // Each leg's foot against where it stands at rest, in the frame: positive
+    // is lower. A foot in the air counts where it is going (its home), so the
+    // body leans into a step before it lands rather than after. Last step's
+    // feet, which is what the body is standing on as this step's pose is made.
+    int legs = 0;
+    fx::v drop_sum = 0;
+    rig::Point rear{}, front{};
+    fx::v rear_drop = 0, front_drop = 0;
+    bool have_rear = false, have_front = false;
+    for (int k = 0; k < set.count; ++k) {
+        const tentacle::Chain& c = set.chain[k];
+        if (c.role != tentacle::Role::Leg) continue;
+        const Limb& limb = arm(k);
+        const rig::Joint rest = c.rest[c.links()];
+        const rig::Point at = to_frame(limb.swinging ? limb.home : limb.tip);
+        const fx::v drop = at.y - fx::from_int(rest.y);
+        drop_sum += drop;
+        ++legs;
+        if (c.part == rig::RearLeg) {
+            rear = at;
+            rear_drop = drop;
+            have_rear = true;
+        } else {
+            front = at;
+            front_drop = drop;
+            have_front = true;
+        }
+    }
+    // In the air the feet hang wherever they trail, which says nothing about
+    // ground: the body comes back level and to its height.
+    const bool airborne = !body.on_ground && body.vel_y != 0;
+    fx::v sink = 0, lean = 0;
+    if (legs > 0 && !airborne) {
+        const fx::v most = fx::from_int(m.body_sink);
+        sink = std::clamp(drop_sum / legs, -most, most);
+        if (have_rear && have_front) {
+            // The slope from rear foot to front foot, as an angle -- the
+            // small-angle tangent is close enough under body_tilt -- over at
+            // least ten cells, so two feet put down close together do not
+            // tip the body over.
+            const fx::v span = std::max(front.x - rear.x, fx::from_int(10));
+            const fx::v slope =
+                static_cast<fx::v>(int64_t{front_drop - rear_drop} * fx::ONE / span);
+            lean = std::clamp(slope, -m.body_tilt, m.body_tilt);
+        }
+    }
+    if (footfalls != footfalls_felt) {
+        carried_sink.vel += m.footfall_dip;
+        footfalls_felt = footfalls;
+    }
+    tentacle::follow(carried_sink, sink, m.body_follow);
+    tentacle::follow(carried_lean, lean, m.body_follow);
+}
+
 void Enemy::rest_tentacles() {
     const tentacle::Set& set = *kind->tentacles;
     limbs_face_left = face_left;
     wave_clock = 0;
     for (int k = 0; k < set.count; ++k) {
         const tentacle::Chain& c = set.chain[k];
-        Limb& limb = limbs[k];
+        Limb& limb = arm(k);
         limb.joint = tentacle::rest_points(c);
         limb.tip = to_world(limb.joint[c.links()]);
         limb.lift_off = limb.tip;
         limb.vel = {};
+        limb.aim = limb.tip;
+        limb.home = limb.tip;
+        limb.swing_t = 0;
         limb.swinging = false;
+        limb.grounded = false;
+        limb.drawn_was = limb.drawn_now = limb.tip;
+        limb.crack = -1;
+        limb.flourish = 0;
         // Unmoved, so every link's turn is exact identity (tentacle::link_turn)
         // and the rest pose maps every pixel to itself.
         place_links(k, limb.joint);
@@ -723,22 +825,31 @@ void Enemy::move_tentacles(const Grid& grid, int target_x, int target_y) {
     if (face_left != limbs_face_left) {
         const fx::v edge = fx::from_int(kind->frame_w() - 1);
         for (int k = 0; k < set.count; ++k)
-            for (rig::Point& p : limbs[k].joint) p.x = edge - p.x;
+            for (rig::Point& p : arm(k).joint) p.x = edge - p.x;
         limbs_face_left = face_left;
     }
 
     const fx::v phase = static_cast<fx::v>(int64_t{TURN} * wave_clock / m.wave_steps);
     const fx::SinCos bend = fx::sincos(m.max_bend);
     const rig::Box limit = pad_limit();
+
+    // The roots ride the body, wherever the lean and the bob have put them.
+    // All of them first, because which foot steps is decided between the legs
+    // (plan_steps) before either is solved.
+    tentacle::Points roots{};
+    for (int k = 0; k < set.count; ++k) {
+        const rig::Joint r0 = set.chain[k].rest[0];
+        roots[k] = rig::apply(pose.part[rig::Body], kind->rig.waist,
+                              {fx::from_int(r0.x), fx::from_int(r0.y)});
+    }
+    plan_steps(grid, roots);
+
     for (int k = 0; k < set.count; ++k) {
         const tentacle::Chain& c = set.chain[k];
-        Limb& limb = limbs[k];
+        Limb& limb = arm(k);
         const int n = c.links();
         const tentacle::Lengths len = tentacle::rest_lengths(c);
-
-        // The root rides the body, wherever the lean and the bob have put it.
-        const rig::Point root = rig::apply(pose.part[rig::Body], kind->rig.waist,
-                                           {fx::from_int(c.rest[0].x), fx::from_int(c.rest[0].y)});
+        const rig::Point root = roots[k];
         rig::Point goal = c.role == tentacle::Role::Leg ? leg_goal(grid, k, root)
                                                         : lure_goal(k, target_x, target_y);
         // Kept far enough inside the pad that a link round it, at its radius,
@@ -766,12 +877,19 @@ void Enemy::move_tentacles(const Grid& grid, int target_x, int target_y) {
         // only first, the round of reach after it bent joints past it again.
         // This way the last limit only corrects the little the reach undid. The
         // tentacles are a third of a wave apart, so they never ripple in step.
+        //
+        // A lure also carries the strike's two flourishes on the drawn copy:
+        // the bend rolling down it through the whip, and the thrash after.
         tentacle::Points shown = limb.joint;
-        tentacle::wave(shown, n, m.wave_amplitude, phase + k * (TURN / 3), m.wave_spread);
+        tentacle::wave(shown, n, m.wave_amplitude + limb.flourish, phase + k * (TURN / 3),
+                       m.wave_spread);
+        if (limb.crack >= 0) tentacle::pulse(shown, n, m.lure_crack, limb.crack);
         tentacle::limit_bend(shown, n, bend.c, bend.s);
         tentacle::reach(shown, len, n, root, goal, 1);
         tentacle::limit_bend(shown, n, bend.c, bend.s);
         place_links(k, shown);
+        limb.drawn_was = limb.drawn_now;
+        limb.drawn_now = to_world(shown[n]);
     }
 }
 
@@ -781,20 +899,99 @@ rig::Point lerp(rig::Point a, rig::Point b, fx::v k) {
     return {lerp(a.x, b.x, k), lerp(a.y, b.y, k)};
 }
 
-// The first row at or below `from` in column x that holds something to stand
-// on, no further down than `to`; or `to + 1` when there is none.
-int ground_row(const Grid& grid, int x, int from, int to) {
-    for (int y = from; y <= to; ++y)
-        if (is_solid(grid.get_element(x, y).type)) return y;
-    return to + 1;
+}  // namespace
+
+rig::Point Enemy::foot_home(const Grid& grid, int k, rig::Point root, bool& grounded) const {
+    const tentacle::Chain& c = kind->tentacles->chain[k];
+    const tentacle::Motion& m = kind->tentacles->motion;
+    const rig::Joint rest_tip = c.rest[c.links()];
+    rig::Point home = to_world({fx::from_int(rest_tip.x), fx::from_int(rest_tip.y)});
+
+    // Led ahead by the distance the body covered this step -- what it really
+    // moved, so a body held up by a wall or slowed by a climb leads less --
+    // times step_lead of a swing: the foot goes down where the body is going.
+    const fx::v moved = fx::from_int(body.x - prev_x) + body.rem_x - prev_rem_x;
+    home.x += fx::mul(moved * m.swing_steps, m.step_lead);
+
+    // Ground within reach: from the hip down as far as the tentacle goes, in
+    // home's column and then outward a column at a time, nearest first. A
+    // column solid at the hip is a wall, not a foothold, and a spot out of the
+    // leg's reach is no use either. A solid foothold wins over powder anywhere
+    // in the search: a foot on loose sand is a foot that will have to step
+    // again when the sand slides.
+    const rig::Point hip = to_world(root);
+    const fx::v full = tentacle::total_length(c);
+    const int top = rig::nearest(hip.y);
+    const int deepest = top + fx::trunc(full);
+    const int col = rig::nearest(home.x);
+    rig::Point loose{};
+    bool have_loose = false;
+    for (int i = 0; i <= 2 * m.foot_probe; ++i) {
+        const int d = (i + 1) / 2 * ((i & 1) != 0 ? 1 : -1);
+        const int x = col + d;
+        int y = top + 1;
+        while (y <= deepest && !is_solid(grid.get_element(x, y).type)) ++y;
+        if (y > deepest) continue;
+        const rig::Point spot{d == 0 ? home.x : fx::from_int(x), fx::from_int(y - 1)};
+        if (tentacle::length(spot.x - hip.x, spot.y - hip.y) > full - fx::ONE) continue;
+        if (material_of(grid.get_element(x, y).type).move == MoveKind::Static) {
+            grounded = true;
+            return spot;
+        }
+        if (!have_loose) {
+            loose = spot;
+            have_loose = true;
+        }
+    }
+    if (have_loose) {
+        grounded = true;
+        return loose;
+    }
+    // Nothing to stand on in reach -- over a drop -- so home is where the foot
+    // would hang, no lower than the leg reaches.
+    grounded = false;
+    home.y = std::min(home.y, fx::from_int(deepest));
+    return home;
 }
 
-}  // namespace
+void Enemy::plan_steps(const Grid& grid, const tentacle::Points& roots) {
+    const tentacle::Set& set = *kind->tentacles;
+    const tentacle::Motion& m = set.motion;
+    int swinging = -1, best = -1;
+    fx::v best_far = 0;
+    const bool standing = body.x == prev_x && body.rem_x == prev_rem_x;
+    // Standing, a foot steps to tidy itself under the body -- but not while a
+    // strike is wound up: the stillness is half the telegraph.
+    const bool tidy = windup == 0;
+    for (int k = 0; k < set.count; ++k) {
+        const tentacle::Chain& c = set.chain[k];
+        if (c.role != tentacle::Role::Leg) continue;
+        Limb& limb = arm(k);
+        limb.home = foot_home(grid, k, roots[k], limb.grounded);
+        if (limb.swinging) {
+            swinging = k;
+            continue;
+        }
+        if (standing && !tidy) continue;
+        const fx::v far = tentacle::length(limb.tip.x - limb.home.x, limb.tip.y - limb.home.y);
+        const fx::v trigger = fx::from_int(standing ? m.settle_trigger : m.step_trigger);
+        if (limb.grounded && far > trigger && far > best_far) {
+            best = k;
+            best_far = far;
+        }
+    }
+    // In the air nobody steps: leg_goal lets the feet trail instead.
+    if (swinging >= 0 || best < 0 || (!body.on_ground && body.vel_y != 0)) return;
+    Limb& limb = arm(best);
+    limb.swinging = true;
+    limb.swing_t = 0;
+    limb.lift_off = limb.tip;
+}
 
 rig::Point Enemy::leg_goal(const Grid& grid, int k, rig::Point root) {
     const tentacle::Chain& c = kind->tentacles->chain[k];
     const tentacle::Motion& m = kind->tentacles->motion;
-    Limb& limb = limbs[k];
+    Limb& limb = arm(k);
     const rig::Joint rest_tip = c.rest[c.links()];
     const rig::Point hang = to_world({fx::from_int(rest_tip.x), fx::from_int(rest_tip.y)});
 
@@ -807,52 +1004,38 @@ rig::Point Enemy::leg_goal(const Grid& grid, int k, rig::Point root) {
         return to_frame(limb.tip);
     }
 
-    // Where the foot belongs: under its rest spot, a quarter of a stride ahead
-    // while walking, on whatever ground is there -- searched from the hip down
-    // as far as the tentacle reaches.
-    const fx::v stride = fx::from_int(kind->rig.stride);
-    const bool walking = body.vel_x != 0;
-    rig::Point home = hang;
-    if (walking) home.x += face_left ? -stride / 4 : stride / 4;
-    const rig::Point hip = to_world(root);
-    const int col = rig::nearest(home.x);
-    const int deepest = rig::nearest(hip.y) + fx::trunc(tentacle::total_length(c));
-    const int ground = ground_row(grid, col, rig::nearest(hip.y), deepest);
-    home.y = fx::from_int(std::min(ground, deepest + 1) - 1);
-
-    // Each leg swings through its own half of the step cycle -- the rear leg
-    // the first half, the front leg the second -- so the two alternate by
-    // construction, and like every gait here the cycle runs on distance walked
-    // (advance_gait): a foot on the ground never skates. The two points the
-    // gait settles at when the body stops, 0 and half, are both stance for
-    // both legs.
-    const fx::v half = stride / 2;
-    const fx::v g = (gait + (c.part == rig::RearLeg ? 0 : half)) % stride;
-    if (g > 0 && g < half) {
-        if (!limb.swinging) {
-            limb.swinging = true;
-            limb.lift_off = limb.tip;
-        }
-        const fx::v t = static_cast<fx::v>(int64_t{g} * fx::ONE / half);
-        limb.tip = lerp(limb.lift_off, home, t);
-        limb.tip.y -= fx::mul(fx::from_int(m.step_lift), fx::sin(fx::mul(2 * fx::HALF_PI, t)));
-        return to_frame(limb.tip);
-    }
+    // Swinging: eased from where it left the ground to home -- re-aimed every
+    // step, so the foot follows a body that speeds up or slows under it --
+    // along an arc that peaks mid-swing, higher by half the climb when the
+    // step is up onto something.
     if (limb.swinging) {
-        // Down: where the swing was going.
-        limb.swinging = false;
-        limb.tip = home;
+        ++limb.swing_t;
+        if (limb.swing_t >= m.swing_steps) {
+            limb.swinging = false;
+            limb.tip = limb.home;
+            ++footfalls;
+            return to_frame(limb.tip);
+        }
+        const fx::v t = fx::from_ratio(limb.swing_t, m.swing_steps);
+        limb.tip = lerp(limb.lift_off, limb.home, ease(limb.swing_t, m.swing_steps));
+        const fx::v climb = std::max<fx::v>(0, limb.lift_off.y - limb.home.y);
+        const fx::v lift = fx::from_int(m.step_lift) + climb / 2;
+        limb.tip.y -= fx::mul(lift, fx::sin(fx::mul(2 * fx::HALF_PI, t)));
+        return to_frame(limb.tip);
     }
 
     // Planted, the foot stays where it is unless it cannot: dragged further
     // from the hip than the tentacle reaches -- a lift out of the body's own
     // dust, a landing far from where it took off -- it is put straight down
     // where it belongs; with nothing under it -- the ground dug or shot away --
-    // it drops a cell a step until it lands.
+    // it drops a cell a step until it lands, and the next plan steps it
+    // somewhere better once it is far enough from home.
+    const rig::Point hip = to_world(root);
     const fx::v full = tentacle::total_length(c);
     if (tentacle::length(limb.tip.x - hip.x, limb.tip.y - hip.y) > full + fx::from_int(2)) {
-        limb.tip = home;
+        limb.tip = limb.home;
     } else {
+        const int deepest = rig::nearest(hip.y) + fx::trunc(full);
         const int fx_col = rig::nearest(limb.tip.x), fy = rig::nearest(limb.tip.y);
         if (fy < deepest && !is_solid(grid.get_element(fx_col, fy + 1).type)) limb.tip.y += fx::ONE;
     }
@@ -863,7 +1046,7 @@ rig::Point Enemy::lure_goal(int k, int target_x, int target_y) {
     const tentacle::Chain& c = kind->tentacles->chain[k];
     const tentacle::Motion& m = kind->tentacles->motion;
     const rig::Rig& r = kind->rig;
-    Limb& limb = limbs[k];
+    Limb& limb = arm(k);
     constexpr fx::v TURN = 4 * fx::HALF_PI;
 
     // --- idle --- in front of the mouth, drifting in a slow figure of eight
@@ -889,21 +1072,33 @@ rig::Point Enemy::lure_goal(int k, int target_x, int target_y) {
     // the blow lands on (Enemy::impact_point), along a curve through lure_arc;
     // then left lying there for half the recovery before it is drawn back.
     const rig::Point raised{fx::from_int(m.lure_raise.x), fx::from_int(m.lure_raise.y)};
-    const rig::Point arc{fx::from_int(m.lure_arc.x), fx::from_int(m.lure_arc.y)};
     int ix = 0, iy = 0;
     impact_point(ix, iy);
     const rig::Point impact = to_frame({fx::from_int(ix), fx::from_int(iy - 1)});
+    // Over the top no further out than a little past where it is aimed: a
+    // strike aimed close in that arced out to the far point first swung out
+    // past its target and came back to it, which reads as a miss that hits.
+    const rig::Point arc{std::min(fx::from_int(m.lure_arc.x), impact.x + fx::from_int(6)),
+                         fx::from_int(m.lure_arc.y)};
     bool whip = false;
+    limb.crack = -1;
+    limb.flourish -= limb.flourish / 8;
     if (kind->attack == Attack::Slam && windup > 0) {
         const int t = kind->windup_steps - windup;
         const int raising = kind->windup_steps - r.strike_steps;
+        const int rear = std::max(1, raising - m.lure_hold);
         if (t < raising) {
-            want = lerp(want, raised, ease(t, raising));
+            want = lerp(want, raised, ease(t, rear));
+            // Held at the top, trembling a cell: about to go.
+            if (t >= rear) want.x += fx::sin(fx::from_int(t) * 2);
         } else {
-            // A quadratic curve, raise to impact pulled toward the arc point.
+            // A quadratic curve, raise to impact pulled toward the arc point,
+            // with a bend rolling down the stalk ahead of the bulb.
             const fx::v s = fraction(t - raising + 1, r.strike_steps);
             want = lerp(lerp(raised, arc, s), lerp(arc, impact, s), s);
             whip = true;
+            limb.crack = s;
+            if (s == fx::ONE) limb.flourish = m.lure_flourish;
         }
     } else if (attack_timer > 0) {
         const int interval = kind->attack_interval;
@@ -927,17 +1122,20 @@ rig::Point Enemy::lure_goal(int k, int target_x, int target_y) {
         limb.vel = {w.x - limb.tip.x, w.y - limb.tip.y};
         limb.tip = w;
     } else {
-        limb.vel.x += fx::mul(w.x - limb.tip.x, m.lure_spring) - fx::mul(limb.vel.x, m.lure_damp);
-        limb.vel.y += fx::mul(w.y - limb.tip.y, m.lure_spring) - fx::mul(limb.vel.y, m.lure_damp);
-        limb.tip.x += limb.vel.x;
-        limb.tip.y += limb.vel.y;
+        tentacle::Follow fx_{limb.tip.x, limb.vel.x, limb.aim.x};
+        tentacle::Follow fy{limb.tip.y, limb.vel.y, limb.aim.y};
+        tentacle::follow(fx_, w.x, m.lure_follow);
+        tentacle::follow(fy, w.y, m.lure_follow);
+        limb.tip = {fx_.pos, fy.pos};
+        limb.vel = {fx_.vel, fy.vel};
     }
+    limb.aim = w;
     return to_frame(limb.tip);
 }
 
 void Enemy::place_links(int k, const tentacle::Points& p) {
     const tentacle::Chain& c = kind->tentacles->chain[k];
-    Limb& limb = limbs[k];
+    Limb& limb = arm(k);
     const rig::Box limit = pad_limit();
     // Every pixel of a link lies within the chain's radius of it, and a link
     // also draws its neighbours' pixels into the notch at the outside of a
@@ -982,7 +1180,7 @@ void Enemy::place_links(int k, const tentacle::Points& p) {
 
 int Enemy::tentacle_pixel(int k, int px, int py) const {
     const tentacle::Chain& c = kind->tentacles->chain[k];
-    const Limb& limb = limbs[k];
+    const Limb& limb = arm(k);
     const body_art::Art& art = *kind->art;
     const uint8_t mine = static_cast<uint8_t>(1 + c.part);
     const auto in = [&](const rig::Box& b) {
@@ -1079,6 +1277,7 @@ bool Enemy::target_in_reach(int target_x, int target_y) const {
 
 bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
     if (attack_timer > 0) --attack_timer;
+    if (strike_follow > 0) --strike_follow;
 
     if (kind->attack == Attack::Swipe) {
         // Lands the step the boxes touch, and only while it still has an arm to
@@ -1102,6 +1301,12 @@ bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
         // the fish's hand -- and the ground under the blow is left as it was.
         if (kind->crush_radius > 0) slam(grid);
         attack_timer = kind->attack_interval;
+        // A lure lands by touching (update, after the pose), not by reach,
+        // and is still moving to hurt for lure_live steps from here.
+        if (lure_strikes()) {
+            strike_follow = kind->tentacles->motion.lure_live;
+            return false;
+        }
         // Tested where the target is now, not where it was when the wind-up
         // began: that difference is the whole point of winding up.
         return target_alive && target_in_reach(target_x, target_y);
@@ -1117,10 +1322,52 @@ bool Enemy::attack(Grid& grid, int target_x, int target_y, bool target_alive) {
     if (dx != 0) face_left = dx < 0;
     if (target_in_reach(target_x, target_y)) {
         windup = kind->windup_steps;
+        // A lure is aimed now, at where the target stands, within its reach
+        // and clear of its own front: what the player has the wind-up to step
+        // out from under. The club's spot is fixed and needs no aim.
+        if (lure_strikes()) {
+            const int front = face_left ? body.x - 1 : body.x + kind->width;
+            const int at = target_x + Player::WIDTH / 2;
+            strike_out = std::clamp(face_left ? front - at : at - front, 2, kind->reach - 1);
+            strike_hit = false;
+        }
     } else {
         face_left = was_left;
     }
     return false;
+}
+
+int Enemy::lure_limb() const {
+    if (!kind->tentacles) return -1;
+    for (int k = 0; k < kind->tentacles->count; ++k)
+        if (kind->tentacles->chain[k].role == tentacle::Role::Lure) return k;
+    return -1;
+}
+
+bool Enemy::lure_strikes() const { return kind->attack == Attack::Slam && lure_limb() >= 0; }
+
+// The whip, and the follow-through after it lands (strike_follow). Its own
+// count rather than read off the recovery timer: a sting's longer recovery
+// passes through the same values on its way down, and an idle bulb swaying
+// into the player then is not a blow.
+bool Enemy::strike_live() const {
+    if (windup > 0) return windup <= kind->rig.strike_steps;
+    return strike_follow > 0;
+}
+
+bool Enemy::bulb_hits(int target_x, int target_y) const {
+    const Limb& lure = arm(lure_limb());
+    const fx::v r = fx::from_int(kind->tentacles->motion.bulb_radius);
+    return tentacle::sweep_touches(lure.drawn_was, lure.drawn_now, r, target_x, target_y,
+                                   target_x + Player::WIDTH, target_y + Player::HEIGHT);
+}
+
+bool Enemy::is_bulb(int x, int y) const {
+    const int k = lure_limb();
+    if (k < 0) return false;
+    const tentacle::Chain& c = kind->tentacles->chain[k];
+    return pixel(y * kind->frame_w() + x) == 1 + c.part &&
+           tentacle::link_of(c, x, y) == c.links() - 1;
 }
 
 void Enemy::impact_point(int& x, int& y) const {
@@ -1128,7 +1375,7 @@ void Enemy::impact_point(int& x, int& y) const {
     // inside it, on the row the feet stand on top of. Far enough out, too, that
     // the debris thrown back toward the troll lands clear of its own feet -- see
     // slam() -- rather than in its footing rows, where it would lift the body.
-    const int out = kind->reach - kind->crush_radius - 1;
+    const int out = lure_strikes() ? strike_out : kind->reach - kind->crush_radius - 1;
     x = face_left ? body.x - 1 - out : body.x + kind->width + out;
     y = body.y + kind->height;
 }

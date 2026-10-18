@@ -434,12 +434,30 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             // the outside of a bend within two cells of its pixel (tentacle.h).
             .smoothing = fx::from_ratio(1, 4),
             .max_bend = rig::deg(35),
+            // A fifth of a second a swing. At chase speed the body covers
+            // eight cells in that; at patrol, under four. A foot steps once it
+            // is ten cells from home: about a box width's stride at a walk,
+            // longer at a run, inside what a leg reaches either way.
+            .swing_steps = 12,
+            .step_trigger = 10,
+            .settle_trigger = 3,
+            .step_lead = fx::from_ratio(1, 2),
+            .foot_probe = 4,
             .step_lift = 5,
-            .bow = fx::from_ratio(1, 3),
+            .bow = fx::ONE,
+            // A body that settles in about half a second and just overshoots,
+            // so a footfall reads as weight landing rather than a spring. Two
+            // cells and twelve degrees either way: enough to see on a slope and
+            // in a hollow, not so much the box it stands in shows.
+            .body_follow = tentacle::response(30, fx::from_ratio(3, 4), 0),
+            .body_sink = 2,
+            .body_tilt = rig::deg(12),
+            .footfall_dip = fx::from_ratio(1, 4),
             // About a third of a second to swing across to a new spot, and a
-            // little past it.
-            .lure_spring = fx::from_ratio(1, 12),
-            .lure_damp = fx::from_ratio(1, 5),
+            // little past it. The spring this replaced (1/12 of the gap, 1/5
+            // of the speed lost a step) is a 22-step swing damped at 9/26,
+            // with no response term; kept that, so the idle sway is unchanged.
+            .lure_follow = tentacle::response(22, fx::from_ratio(9, 26), 0),
             .lure_sway = 3,
             .lure_reach = 10,
             // Back over the head, high above the dorsal fin -- near the lure's
@@ -448,6 +466,17 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             // snout on the way down.
             .lure_raise = {32, -26},
             .lure_arc = {88, -24},
+            // Six steps held at the top of the wind-up: a tenth of a second of
+            // stillness before the whip, on top of the thirty of rearing back.
+            // A crook four cells across rolling down the stalk, and a thrash
+            // three cells fuller on landing. Live for three steps past the
+            // landing, which is the whip's follow-through, and three cells
+            // round: the glow, not just the core.
+            .lure_hold = 6,
+            .lure_crack = fx::from_int(4),
+            .lure_flourish = fx::from_int(3),
+            .lure_live = 3,
+            .bulb_radius = 3,
         },
 };
 
@@ -492,11 +521,10 @@ inline constexpr Species ANGLER{
             .front_shoulder = {angler_art::SHOULDER_X, angler_art::SHOULDER_Y},
             .rear_hip = {38, 52},
             .front_hip = {53, 52},
-            // A step cycle of 24 cells: each foot lands six cells ahead of where
-            // it stands at rest and is left six behind. Bounded by the first
-            // stance after standing still, which starts with the foot under the
-            // body rather than ahead and so ends twelve behind: at 32 that was
-            // past the tentacle's reach, and the foot was snapped forward.
+            // The tentacle feet step when they need to (Motion::step_trigger),
+            // not on this cycle, and the body's bob comes from the feet
+            // (pose_parts), so nothing of the angler reads the stride. Kept at
+            // the 24 it walked on before, because every rig must have one.
             .stride = 24,
             // The legs and the lure are chains (ANGLER_TENTACLES), so the rig's
             // swings and strike angles for them are never read. Zero, so the
@@ -603,13 +631,24 @@ public:
     static constexpr uint8_t BURN_TEMPERATURE = Player::BURN_TEMPERATURE;
     static constexpr int BURN_INTERVAL_STEPS = Player::BURN_INTERVAL_STEPS;
 
+    // The chains of a tentacled species (Species::tentacles), held outside the
+    // body: see `chains` below. Defined further down, after the Limb it holds.
+    struct Chains;
+
     // A dead slot. Run keeps a fixed pool of these so nothing on the step path
     // allocates; spawn() brings one to life.
     Enemy() = default;
 
     // Puts a whole, fresh body of the given species with its box's top-left at
-    // (x, y).
-    void spawn(int x, int y, const Species& kind = species::GHOUL);
+    // (x, y). A tentacled species also needs `chains`, which spawn clears and
+    // the body then uses as its own until it is spawned again; without them
+    // the slot is left dead, as if refused. A body copied while it holds
+    // chains shares them with the copy, so only one of the two may be stepped.
+    void spawn(int x, int y, const Species& kind = species::GHOUL, Chains* chains = nullptr);
+
+    // The chains this body was spawned with, or null. For Run, to tell which of
+    // its chain slots a live body is using.
+    const Chains* chain_slot() const { return chains; }
 
     bool is_alive() const { return alive; }
     const Species& species() const { return *kind; }
@@ -675,6 +714,17 @@ public:
 
     bool facing_left() const { return face_left; }
     bool is_chasing() const { return chasing; }
+    bool on_ground() const { return body.on_ground; }
+    // Tentacle feet in the middle of a step, and feet put down since spawn.
+    // Public for tests and the probe: "never two feet lifted at once" is a rule
+    // about steps taken, and a foot left dangling over a drop it cannot reach
+    // down to is not one, so it cannot be judged from where the feet are drawn.
+    int feet_swinging() const {
+        int n = 0;
+        for (int k = 0; kind->tentacles && k < kind->tentacles->count; ++k) n += arm(k).swinging;
+        return n;
+    }
+    int footfall_count() const { return footfalls; }
 
     // Held key poses rather than a continuous turn -- see "snapped poses" in
     // enemy.cpp. Where pixels are is where they are hit, so this is simulation
@@ -737,6 +787,13 @@ private:
     int attack_timer = 0;
     // Slam only: steps until the club lands, 0 when not winding up.
     int windup = 0;
+    // A lure strike (lure_strikes): how far past the front edge it is aimed,
+    // fixed when the wind-up starts -- where the target stood then, within
+    // reach -- and whether it has already hit this time.
+    int strike_out = 0;
+    bool strike_hit = false;
+    // Steps of the strike's follow-through left, in which the bulb still hurts.
+    int strike_follow = 0;
     int burn_timer = 0;
 
     // Four bits per frame pixel: 0 once it is gone, and while it exists, one
@@ -808,12 +865,54 @@ private:
         std::array<rig::Affine, tentacle::MAX_LINKS> joint_bwd{};
         rig::Point tip{};       // world fx: the foot, or the bulb
         rig::Point vel{};       // world fx per step: the bulb's swing
+        rig::Point aim{};       // world fx: where the bulb wanted to be last step
         rig::Point lift_off{};  // world fx: where a swinging foot left the ground
+        rig::Point home{};      // world fx: where this foot belongs now (plan_steps)
+        int swing_t = 0;        // steps into the current swing
         bool swinging = false;
+        bool grounded = false;  // home has ground under it within reach
+        // The lure: where its tip was drawn last step and this one (world fx),
+        // which the strike's sweep runs between; how far down the stalk the
+        // whip's bend has rolled (0 root to ONE tip, -1 when not whipping);
+        // and the extra wave of the thrash after it lands.
+        rig::Point drawn_was{};
+        rig::Point drawn_now{};
+        fx::v crack = -1;
+        fx::v flourish = 0;
     };
-    std::array<Limb, tentacle::MAX_TENTACLES> limbs{};
+
+public:
+    // The Limbs, kept out of the body because they are most of a tentacled
+    // body's size -- about 3.7 KB of the angler's 8.3 KB, the placed links being
+    // a dozen affines each -- and nothing else uses them. Held in every slot
+    // they grew a Run's 24 enemies from about 110 KB to 190 KB for the one
+    // species that reads them, so Run keeps a smaller pool of these beside its
+    // enemies (Run::MAX_CHAINED) and hands one to each tentacled body it
+    // spawns. A pointer rather than an index into that pool so that a body
+    // answers posed_pixel, which the renderer calls, without being told where
+    // the pool is -- which is also why a Run cannot be copied.
+    struct Chains {
+    private:
+        friend class Enemy;
+        std::array<Limb, tentacle::MAX_TENTACLES> limb{};
+    };
+
+private:
+    Chains* chains = nullptr;
+    // Limb k of the chains. Only a tentacled body calls these, and spawn
+    // leaves one of those dead unless it was given chains.
+    Limb& arm(int k) { return chains->limb[static_cast<size_t>(k)]; }
+    const Limb& arm(int k) const { return chains->limb[static_cast<size_t>(k)]; }
     // Steps into the current wave, [0, Motion::wave_steps).
     int wave_clock = 0;
+    // Feet put down since spawn: the body reads a change in it as a footfall
+    // to dip under (carry_body), and the probe counts steps by it.
+    int footfalls = 0;
+    int footfalls_felt = 0;
+    // The body's lean and sink as its feet carry it (carry_body), in fx
+    // radians and fx cells, read by pose_parts.
+    tentacle::Follow carried_lean;
+    tentacle::Follow carried_sink;
     // The facing the chains were last solved in: on a turn they are mirrored
     // with the frame, so they stay where they were in the world.
     bool limbs_face_left = false;
@@ -825,7 +924,10 @@ private:
     void pose_parts();
     void finish_pose();
     void rest_tentacles();
+    void carry_body();
     void move_tentacles(const Grid& grid, int target_x, int target_y);
+    void plan_steps(const Grid& grid, const tentacle::Points& roots);
+    rig::Point foot_home(const Grid& grid, int limb, rig::Point root, bool& grounded) const;
     rig::Point leg_goal(const Grid& grid, int limb, rig::Point root);
     rig::Point lure_goal(int limb, int target_x, int target_y);
     void place_links(int limb, const tentacle::Points& chain);
@@ -862,6 +964,14 @@ private:
     // target.
     bool attack(Grid& grid, int target_x, int target_y, bool target_alive);
     bool target_in_reach(int target_x, int target_y) const;
+    // Which tentacle is a lure, or -1. A species whose slam is made with one
+    // hits with the bulb itself (bulb_hits) rather than with its reach, and is
+    // stung by an arrow there (is_bulb).
+    int lure_limb() const;
+    bool lure_strikes() const;
+    bool strike_live() const;
+    bool bulb_hits(int target_x, int target_y) const;
+    bool is_bulb(int x, int y) const;
     void slam(Grid& grid);
     void shove_powder(Grid& grid);
 

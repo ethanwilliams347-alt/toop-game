@@ -45,6 +45,32 @@ struct EnemySprite {
     bool facing_left;
 };
 
+// One loose body -- a piece of structure toppling, tumbling, sliding or
+// floating -- drawn as the one solid thing it is. `src` is its picture in the
+// body atlas, unturned; (x, y) is where its centre of mass is in world cells,
+// already interpolated; (pivot_x, pivot_y) is where that centre sits in `src`,
+// in cells from its top-left corner; it is drawn turned by `angle_deg` about
+// that point, clockwise. Its cells are left out of the cell texture while it
+// moves, so the grid does not draw it a second time, a cell at a time.
+struct BodySprite {
+    SDL_Rect src;
+    float x, y;
+    float pivot_x, pivot_y;
+    float angle_deg;
+};
+
+// A cell of a loose body, left out of the cell texture, and what to draw there
+// instead. The sprite is drawn where the body continuously is and its cells sit
+// at the nearest whole-cell pose, so the two can be up to a cell apart, and
+// wherever the sprite does not cover a cell the cell shows. Transparent, in a
+// pool, that sliver is a gap of backdrop around a stone sinking through water;
+// `fill` is the liquid or grain beside the body instead, so it reads as what the
+// body is pushing through. 0 (transparent) in air.
+struct HiddenCell {
+    int index;
+    uint32_t fill;
+};
+
 // One arrow: where its tip is, in world cells, and which way it points as a
 // unit vector. A direction of (0, 0) -- an arrow at rest -- is drawn pointing
 // down, which is how a dropped arrow lies.
@@ -155,6 +181,10 @@ struct Params {
     SDL_Texture* enemy_atlas = nullptr;
     const std::vector<EnemySprite>* enemies = nullptr;
     const std::vector<ArrowSprite>* arrows = nullptr;
+
+    // The loose bodies, the same way: null or empty draws nothing.
+    SDL_Texture* body_atlas = nullptr;
+    const std::vector<BodySprite>* bodies = nullptr;
 
     // The field is read for any_light() and its block extent; the texture is what
     // gets drawn, and the caller has already uploaded it.

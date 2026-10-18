@@ -195,6 +195,28 @@ void draw_cells(SDL_Renderer* renderer, const Params& p) {
     SDL_RenderCopyF(renderer, p.cells, nullptr, &world_dst);
 }
 
+// --- loose bodies ---
+//
+// Straight after the cells, because they are the cells: a body is a piece of the
+// world that happens to be moving, and everything drawn over the world is drawn
+// over it too. Turned about its centre of mass by the angle it really has and put
+// where it really is, between steps -- not where the grid rounded its cells to --
+// so a toppling post sweeps round as one object instead of being repainted a
+// cell at a time.
+void draw_bodies(SDL_Renderer* renderer, const Params& p) {
+    if (!p.bodies || p.bodies->empty() || !p.body_atlas) return;
+    const Camera& camera = *p.camera;
+    const float scale = static_cast<float>(camera.scale_length(1));
+    for (const BodySprite& b : *p.bodies) {
+        const SDL_FRect dst{
+            camera.world_to_screen_x(b.x - b.pivot_x), camera.world_to_screen_y(b.y - b.pivot_y),
+            static_cast<float>(b.src.w) * scale, static_cast<float>(b.src.h) * scale};
+        const SDL_FPoint centre{b.pivot_x * scale, b.pivot_y * scale};
+        SDL_RenderCopyExF(renderer, p.body_atlas, &b.src, &dst, static_cast<double>(b.angle_deg),
+                          &centre, SDL_FLIP_NONE);
+    }
+}
+
 // --- the objective marker ---
 //
 // Drawn in world cells, not screen pixels, which is the opposite choice
@@ -374,11 +396,12 @@ void draw_light(SDL_Renderer* renderer, const Params& p) {
 // the frame back to front, and a band is a row here rather than an insertion
 // between two comments in a long function.
 constexpr Layer TABLE[] = {
-    {"clear", Lighting::Lit, draw_clear},           {"backdrop", Lighting::Lit, draw_backdrop},
-    {"props", Lighting::Lit, draw_props},           {"cells", Lighting::Lit, draw_cells},
-    {"objective", Lighting::Lit, draw_objective},   {"enemies", Lighting::Lit, draw_enemies},
-    {"player", Lighting::Lit, draw_player},         {"arrows", Lighting::Lit, draw_arrows},
-    {"foreground", Lighting::Lit, draw_foreground}, {"light", Lighting::Light, draw_light},
+    {"clear", Lighting::Lit, draw_clear},     {"backdrop", Lighting::Lit, draw_backdrop},
+    {"props", Lighting::Lit, draw_props},     {"cells", Lighting::Lit, draw_cells},
+    {"bodies", Lighting::Lit, draw_bodies},   {"objective", Lighting::Lit, draw_objective},
+    {"enemies", Lighting::Lit, draw_enemies}, {"player", Lighting::Lit, draw_player},
+    {"arrows", Lighting::Lit, draw_arrows},   {"foreground", Lighting::Lit, draw_foreground},
+    {"light", Lighting::Light, draw_light},
     // Nothing after the light pass: the UI drawn after it lives in
     // render/overlay.cpp, outside the world and outside this table.
 };

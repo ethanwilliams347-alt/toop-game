@@ -53,6 +53,32 @@ static_assert(ENEMY_ATLAS_W <= 2048 && ENEMY_ATLAS_H <= 2048,
 void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                    std::vector<frame::EnemySprite>& out);
 
+// --- the body atlas ----------------------------------------------------------
+//
+// Every loose body's picture, unturned, packed into one texture in rows, redrawn
+// every frame from the cells it is made of now -- so a beam that chars as it
+// falls is drawn charring. A body whose picture does not fit what is left of the
+// atlas this frame is simply not packed, and its cells stay in the cell texture
+// and are drawn there instead: drawn the old way, never not drawn.
+inline constexpr int BODY_ATLAS_W = 1024;
+inline constexpr int BODY_ATLAS_H = 1024;
+
+// Paints every loose body into `atlas` (BODY_ATLAS_W x BODY_ATLAS_H ARGB) and
+// appends one sprite per body packed to `out`, at `alpha` between the last two
+// steps. `hidden` gets every cell of every body packed, for the cell upload to
+// draw its fill in instead (frame::HiddenCell). Each sprite's `src` is the
+// rectangle written.
+//
+// A body about to go back to being cells is drawn easing onto them over its last
+// SETTLE_STEPS steps, so the hand-back is not a jump. Its cells are a whole-cell
+// pose of where it continuously is -- up to half a cell off from rounding, and a
+// staircase of shears at an angle -- and the sprite is the continuous pose, so
+// without the ease the last frame of one and the first of the other differ by
+// that much, all at once.
+inline constexpr int SETTLE_STEPS = 10;
+void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
+                  std::vector<frame::BodySprite>& out, std::vector<frame::HiddenCell>& hidden);
+
 // One sprite per arrow in flight or at rest, interpolated like the enemies but
 // never snapped: an arrow is never relocated, only moved.
 void arrows(const Run& run, float alpha, std::vector<frame::ArrowSprite>& out);

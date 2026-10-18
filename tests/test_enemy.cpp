@@ -1352,11 +1352,50 @@ int main() {
               "link=" + std::to_string(tentacle::link_of(lure_chain, bulb_x, bulb_y)));
     }
 
+    // --- second-order followers ---
+    {
+        // A target that jumps from 0 to 10 cells, followed for 200 steps:
+        // where the follower got to, how far past 10 it went, and how far
+        // below 0 it went first.
+        struct Track {
+            fx::v end, peak, dip;
+        };
+        auto track = [](const tentacle::Response& k) {
+            tentacle::Follow f;
+            Track t{0, 0, 0};
+            for (int i = 0; i < 200; ++i) {
+                tentacle::follow(f, fx::from_int(10), k);
+                t.peak = std::max(t.peak, f.pos);
+                t.dip = std::min(t.dip, f.pos);
+            }
+            t.end = f.pos;
+            return t;
+        };
+        const Track loose = track(tentacle::response(20, fx::from_ratio(1, 3), 0));
+        const Track firm = track(tentacle::response(20, fx::ONE, 0));
+        const Track wary = track(tentacle::response(20, fx::ONE, -fx::ONE));
+        const Track wild = track(tentacle::response(1, fx::ONE / 10, fx::from_int(4)));
+        check("a follower settles on its target",
+              std::abs(loose.end - fx::from_int(10)) < fx::ONE / 8 &&
+                  std::abs(firm.end - fx::from_int(10)) < fx::ONE / 8,
+              "loose=" + std::to_string(loose.end) + " firm=" + std::to_string(firm.end));
+        check("underdamped, it swings past the target first", loose.peak > fx::from_int(11),
+              "peak=" + std::to_string(loose.peak));
+        check("critically damped, it does not", firm.peak <= fx::from_int(10) + fx::ONE / 16,
+              "peak=" + std::to_string(firm.peak));
+        check("with a negative response, it dips the wrong way first (anticipation)",
+              wary.dip < -fx::ONE / 2 && firm.dip == 0, "dip=" + std::to_string(wary.dip));
+        check("the stability clamp keeps even a wild tuning bounded",
+              wild.peak < fx::from_int(100) && wild.dip > -fx::from_int(100),
+              "peak=" + std::to_string(wild.peak) + " dip=" + std::to_string(wild.dip));
+    }
+
     // --- a fresh angler ---
     {
         Grid g = make_world();
+        Enemy::Chains chains;
         Enemy e;
-        e.spawn(100, FLOOR_Y - AN.height, AN);
+        e.spawn(100, FLOOR_Y - AN.height, AN, &chains);
         // At rest every pixel is drawn exactly where the art has it, including
         // every tentacle pixel through its own link.
         int misplaced = 0;
@@ -1451,6 +1490,83 @@ int main() {
         check("every walking angler pose draws what is hit, within its pad", sound, why);
     }
 
+    // --- uneven ground: feet find footholds, still one at a time ---
+    {
+        // A step five cells high across the angler's path. Feet are placed on
+        // whatever ground is in reach of their home, so on the way over the
+        // step each foot is put down on the step's top or the floor, never in
+        // the wall, and the turn-taking holds whatever the ground does.
+        //
+        // Not "never both feet off the ground": standing on the step's corner,
+        // the box five cells up, the rear foot cannot reach the floor and hangs.
+        const auto run_owner = angler_arena(WORLD_W * 4);
+        Run& run = *run_owner;
+        const int step_x0 = 160, step_x1 = 210, step_top = FLOOR_Y - 5;
+        for (int x = step_x0; x < step_x1; ++x)
+            for (int y = step_top; y < FLOOR_Y; ++y) run.grid.set_element(x, y, ElementType::Wall);
+        {
+            Input in;
+            in.command = Command{Command::Kind::TogglePoseSnap, 0};
+            run.step(in);
+        }
+        const rig::Joint tips[2] = {rear_tip, front_tip};
+        int both_up = 0, buried = 0, on_top = 0;
+        // Two body pixels a row apart in height at rest -- the first and last
+        // of the body's on a row through the middle of the fish -- so the body's
+        // tilt is the difference in their heights: negative is nose up.
+        const int mid_row = AN.rig.hip_row - 20;
+        int tail_x = -1, nose_x = -1;
+        for (int x = 0; x < AA.w; ++x) {
+            if (!AA.is_body(x, mid_row) || rig::part_of(AA, AN.rig, x, mid_row) != rig::Body)
+                continue;
+            if (tail_x < 0) tail_x = x;
+            nose_x = x;
+        }
+        int nose_up = 0, flat_tilt = 0, flat_seen = 0;
+        bool sound = true;
+        std::string why;
+        for (int i = 0; i < 600 && sound; ++i) {
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            sound = pose_is_sound(e, why);
+            for (int k = 0; k < 2; ++k) {
+                const int x = world_x(e, tips[k].x, tips[k].y),
+                          y = world_y(e, tips[k].x, tips[k].y);
+                // The cell above the tip solid: a foot put down inside the step
+                // rather than on it, by more than a cell of rounding.
+                if (is_solid(run.grid.get_element(x, y - 1).type)) ++buried;
+                // Standing on the step: the step's top within a cell or two.
+                if (x >= step_x0 && x < step_x1 && y < step_top && y >= step_top - 3) ++on_top;
+            }
+            const int tilt = world_y(e, nose_x, mid_row) - world_y(e, tail_x, mid_row);
+            // Climbing on, the front foot is up on the step and the rear one
+            // still on the floor: the body leans back, nose up.
+            if (tilt <= -3) ++nose_up;
+            // Back on even ground, past the step's far end by more than a
+            // stride -- a rear foot can still be up on the step at ten cells
+            // past it, and the body rightly leans down to it -- it levels.
+            if (e.cell_x() > step_x1 + 20) {
+                ++flat_seen;
+                if (std::abs(tilt) > 2) ++flat_tilt;
+            }
+            // Counted from the body, not from where feet are drawn: a foot
+            // dangling over a drop it cannot reach down to is not a step.
+            if (e.feet_swinging() > 1) ++both_up;
+        }
+        check("over a step, an angler never has two feet in the middle of a step", both_up == 0,
+              "both=" + std::to_string(both_up));
+        check("and keeps stepping", run.enemies[0].footfall_count() > 20,
+              "footfalls=" + std::to_string(run.enemies[0].footfall_count()));
+        check("never put down inside the step", buried == 0, "buried=" + std::to_string(buried));
+        check("climbing on, its body leans back with its feet, nose up", nose_up > 3,
+              "nose_up=" + std::to_string(nose_up));
+        check("and levels again on even ground", flat_seen > 20 && flat_tilt == 0,
+              "seen=" + std::to_string(flat_seen) + " tilted=" + std::to_string(flat_tilt));
+        check("and stand on its top on the way over", on_top > 20,
+              "on_top=" + std::to_string(on_top));
+        check("every angler pose over a step draws what is hit", sound, why);
+    }
+
     // --- the strike: reared back over the head, whipped down in front ---
     {
         const auto run_owner = angler_arena(100 + AN.width + 4);
@@ -1468,20 +1584,102 @@ int main() {
                 overhead = true;
             if (run.player.damage_this_step() > 0) {
                 hit_at = i;
-                const int bx = world_x(e, bulb_x, bulb_y);
-                const int front = e.facing_left() ? e.cell_x() : e.cell_x() + AN.width;
-                forward_at_impact = (e.facing_left() ? bx < front : bx > front) &&
-                                    world_y(e, bulb_x, bulb_y) >= FLOOR_Y - 6;
+                // The bulb is what hit: drawn on or beside the player.
+                const int bx = world_x(e, bulb_x, bulb_y), by = world_y(e, bulb_x, bulb_y);
+                const int px = run.player.cell_x(), py = run.player.cell_y();
+                const int near = TS.motion.bulb_radius + 3;
+                forward_at_impact = bx >= px - near && bx < px + Player::WIDTH + near &&
+                                    by >= py - near && by < py + Player::HEIGHT + near;
             }
         }
         check("an angler with you in reach winds up a strike", wound_up_at >= 0);
         check("the bulb rears back high over its head", overhead);
-        check("the strike lands after the wind-up", hit_at - wound_up_at == AN.windup_steps,
+        // The bulb hits what it touches, so the blow lands on the step of the
+        // whip that reaches the player -- not before the whip, and not after
+        // its follow-through.
+        const int whip_from = AN.windup_steps - AN.rig.strike_steps;
+        check("the strike lands in the whip, after the wind-up",
+              hit_at - wound_up_at > whip_from &&
+                  hit_at - wound_up_at <= AN.windup_steps + TS.motion.lure_live,
               "wound=" + std::to_string(wound_up_at) + " hit=" + std::to_string(hit_at));
-        check("with the bulb on the ground in front of the body", forward_at_impact);
+        check("with the bulb where the player is", forward_at_impact);
         check("for the angler's damage", run.player.health() == Player::MAX_HEALTH - AN.damage,
               "hp=" + std::to_string(run.player.health()));
         check("every angler pose through a strike draws what is hit, within its pad", sound, why);
+    }
+
+    // --- the bulb's sweep: what it passed through, not only where it stopped ---
+    {
+        // A ball three cells round crossing a box two cells wide, starting
+        // eight cells left of it and ending eight right: neither end is
+        // anywhere near the box, and the sweep still finds it. One passing a
+        // cell above its reach does not.
+        const fx::v r = fx::from_int(3);
+        const rig::Point a{fx::from_int(0), fx::from_int(10)},
+            b{fx::from_int(20), fx::from_int(10)};
+        check("a bulb that jumps clean over a thin target in one step still hits it",
+              tentacle::sweep_touches(a, b, r, 9, 5, 11, 15));
+        check("a bulb whose path passes clear of it does not",
+              !tentacle::sweep_touches(a, b, r, 9, 14, 11, 20));
+        check("and a bulb that only ends near it, short of its reach, does not",
+              !tentacle::sweep_touches(a, {fx::from_int(5), fx::from_int(10)}, r, 9, 5, 11, 15));
+    }
+
+    // --- dodged: stepped out from under the wind-up, nothing lands ---
+    {
+        // In reach when it starts winding up; then gone, far behind it, before
+        // the whip. The bulb hits only what it touches, so the strike lands on
+        // the empty spot it was aimed at. A box test made where the player was
+        // at the start would have hit them anyway; one made where they are at
+        // the end would hit a player standing anywhere in reach, however far
+        // the bulb came down from them.
+        const auto run_owner = angler_arena(100 + AN.width + 4);
+        Run& run = *run_owner;
+        bool moved = false;
+        for (int i = 0; i < AN.windup_steps * 3; ++i) {
+            run.step(Input{});
+            const Enemy& e = run.enemies[0];
+            if (!moved && e.windup_left() > 0 && e.windup_left() < AN.windup_steps / 2) {
+                run.player = Player(100 + AN.width + 40, FLOOR_Y - Player::HEIGHT);
+                moved = true;
+            }
+            if (moved && e.windup_left() == 0) break;
+        }
+        for (int i = 0; i < 4; ++i) run.step(Input{});
+        check("a player who steps out from under the wind-up is not hit",
+              moved && run.player.health() == Player::MAX_HEALTH,
+              "moved=" + std::to_string(moved) + " hp=" + std::to_string(run.player.health()));
+    }
+
+    // --- stung: an arrow in the bulb calls the strike off ---
+    {
+        const auto run_owner = angler_arena(100 + AN.width + 4);
+        Run& run = *run_owner;
+        bool stung = false;
+        int recovery = 0;
+        for (int i = 0; i < 400 && !stung; ++i) {
+            run.step(Input{});
+            Enemy& e = run.enemies[0];
+            // At the top of the wind-up, where the bulb is held still.
+            if (e.windup_left() == AN.rig.strike_steps + 1) {
+                e.shatter(run.grid, world_x(e, bulb_x, bulb_y), world_y(e, bulb_x, bulb_y),
+                          Quiver::BITE_RADIUS);
+                stung = true;
+                recovery = e.attack_recovery();
+                check("an arrow in the held bulb calls the wound-up strike off",
+                      e.windup_left() == 0, "windup=" + std::to_string(e.windup_left()));
+            }
+        }
+        // Long enough for the strike it would have made and the start of the
+        // next decision: nothing lands while it recovers.
+        for (int i = 0; i < AN.attack_interval + AN.rig.strike_steps; ++i) run.step(Input{});
+        check("and it lands nothing while it recovers from the sting",
+              stung && run.player.health() == Player::MAX_HEALTH,
+              "hp=" + std::to_string(run.player.health()));
+        // attack_recovery counts steps since the blow; two intervals left to
+        // wait reads as one interval before it.
+        check("and it has twice its usual recovery to sit out", recovery == -AN.attack_interval,
+              "recovery=" + std::to_string(recovery));
     }
 
     // --- the turn: chased from behind, it comes round, and the chains with it ---
@@ -1498,11 +1696,74 @@ int main() {
         check("and has turned", run.enemies[0].facing_left());
     }
 
+    // --- chain slots ---
+    {
+        // The chains live in Run's own small pool (Enemy::Chains), so a Run
+        // holds only so many anglers at once; past that it refuses one as it
+        // refuses a twenty-fifth enemy, and still has room for the rest.
+        const auto run_owner = angler_arena(WORLD_W * 4);
+        Run& run = *run_owner;
+        for (int i = 1; i < Run::MAX_CHAINED; ++i) run.spawn_enemy(100, FLOOR_Y - AN.height, AN);
+        bool distinct = true;
+        for (int i = 0; i < Run::MAX_CHAINED; ++i)
+            for (int j = 0; j < i; ++j)
+                distinct = distinct && run.enemies[i].chain_slot() &&
+                           run.enemies[i].chain_slot() != run.enemies[j].chain_slot();
+        check("every angler in a run has chains of its own",
+              run.enemies_alive() == Run::MAX_CHAINED && distinct,
+              "alive=" + std::to_string(run.enemies_alive()));
+        check("one more than the chain pool holds is refused",
+              !run.spawn_enemy(100, FLOOR_Y - AN.height, AN));
+        check("but an enemy without tentacles still spawns",
+              run.spawn_enemy(40, FLOOR_Y - G.height, G) &&
+                  run.enemies[Run::MAX_CHAINED].chain_slot() == nullptr);
+        // Killed outright, an angler gives its chains back for the next one.
+        Enemy& first = run.enemies[0];
+        const Enemy::Chains* freed = first.chain_slot();
+        first.shatter(run.grid, first.center_x(), first.center_y(), 200);
+        const bool died = !first.is_alive();
+        const bool respawned = run.spawn_enemy(100, FLOOR_Y - AN.height, AN);
+        check("a dead angler's chains go to the next one spawned",
+              died && respawned && run.enemies[0].is_alive() &&
+                  run.enemies[0].chain_slot() == freed);
+        Enemy bare;
+        bare.spawn(100, FLOOR_Y - AN.height, AN);
+        check("an angler spawned without chains is left dead", !bare.is_alive());
+    }
+    {
+        // And no angler moves another's tentacles: the first of two bodies
+        // walking in one run is posed as one walking alone, step for step.
+        const auto alone_owner = angler_arena(WORLD_W * 4);
+        const auto pair_owner = angler_arena(WORLD_W * 4);
+        Run& alone = *alone_owner;
+        Run& pair = *pair_owner;
+        pair.spawn_enemy(230, FLOOR_Y - AN.height, AN);
+        int differ = -1;
+        for (int i = 0; i < 300 && differ < 0; ++i) {
+            for (Run* r : {&alone, &pair}) {
+                r->grid.update();
+                for (Enemy& e : r->enemies)
+                    if (e.is_alive()) e.update(r->grid, -10000, -10000, false);
+            }
+            const Enemy& a = alone.enemies[0];
+            const Enemy& b = pair.enemies[0];
+            const rig::Box box = a.pose_bounds();
+            bool same = a.cell_x() == b.cell_x() && a.cell_y() == b.cell_y();
+            for (int y = box.y0; y < box.y1 && same; ++y)
+                for (int x = box.x0; x < box.x1 && same; ++x)
+                    same = a.posed_pixel(x, y) == b.posed_pixel(x, y);
+            if (!same) differ = i;
+        }
+        check("an angler beside another is posed as it would be alone", differ < 0,
+              "first differs at step " + std::to_string(differ));
+    }
+
     // --- cuts ---
     {
         Grid g = make_world();
+        Enemy::Chains chains;
         Enemy e;
-        e.spawn(100, FLOOR_Y - AN.height, AN);
+        e.spawn(100, FLOOR_Y - AN.height, AN, &chains);
         const int before = e.pixel_count();
         // Through the rear tentacle at its middle joint: everything below is cut
         // off from the heart, and the other tentacle still stands.

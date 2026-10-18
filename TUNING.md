@@ -134,14 +134,39 @@ cooldown, governed by three constants:
 
 ---
 
-## Toppling
+## Loose bodies
 
-[src/physics/grid.h](src/physics/grid.h)
+[src/physics/grid.h](src/physics/grid.h), [src/physics/material.h](src/physics/material.h)
+
+A piece going anywhere other than straight down -- toppling, tumbling, sliding,
+being knocked over, floating -- is a rigid body with momentum and spin (see
+"loose bodies" in `grid.h`). The per-material columns `weight`, `grip`,
+`bounce` and `strength` in `MATERIALS` are physical properties rather than
+knobs: real bulk densities in tenths of g/cm³ (stone 26, wood 6, charcoal 4,
+sand 16, water 10), friction and restitution in percent, and bending strength
+(wood 20000 all but never snaps, stone 3000 cracks on a hard landing, charcoal
+300 crumbles). `tests/body_probe.cpp` shows
+what each scene does in numbers and pictures; run it after turning any of these.
 
 | Knob | File | Now | What it does |
 |---|---|---|---|
-| `TIP_GRAVITY` | [grid.h](src/physics/grid.h) | 1/4 cell/step² | How hard a piece leaning over its edge is pulled round. Tied to `TICKS_PER_SPEEDUP` so tipping and falling share one gravity. Higher topples faster. |
-| `TIP_MAX_STEPS` | [grid.h](src/physics/grid.h) | 600 | Safety cap: a piece still tipping after this many steps is frozen where it is. A real topple ends long before. |
+| `BODY_GRAVITY` | [grid.h](src/physics/grid.h) | 9/40 cell/step² | Gravity on every loose piece, falling or toppling (falling pieces are bodies too). Higher topples, tumbles and falls faster. |
+| `AIR_DRAG` | [grid.h](src/physics/grid.h) | 1/250 | Air drag, per step, times speed squared. Sets the speed a fall eases into, sqrt(gravity / drag), about 7.5 cells/step. Higher falls slower and floatier. |
+| `WARM_START` | [grid.h](src/physics/grid.h) | 1/4 | Share of last step's contact impulse each contact starts from. What lets a stack carry its top block's weight to the bottom one. At 1 a toppling stack threw its blocks across the scene; at 1/2 it scattered. |
+| `GRIP_ROUGHNESS` | [grid.h](src/physics/grid.h) | 20 | Percent either way a surface's grip varies from spot to spot, so a slide catches and slips. 0 is perfectly uniform. |
+| `NUDGE_SPIN` | [grid.h](src/physics/grid.h) | 1/1500 rad/step | Most spin a piece is given as it comes loose. 0 makes every topple of a shape identical. |
+| `BALANCE_MARGIN` | [grid.h](src/physics/grid.h) | 1/2 cell | A loose piece whose centre is this close to the edge of its footing is left to the solver instead of being ruled standing. 0 is the knife edge. |
+| `IMPACT_LOAD_MAX` | [grid.h](src/physics/grid.h) | 6 | Most times its own weight a landing loads a body with when deciding whether an overhang snaps. Higher breaks more on landing. Strength itself is per material: `strength` in [material.h](src/physics/material.h). |
+| `BODY_SOLVER_PASSES` | [grid.h](src/physics/grid.h) | 32 | Contact solver passes per step. At 8 a six-block stack could not carry its top blocks' weight down to the bottom one and never went over. Cost is per contact (about two per face), so it is cheap. |
+| `BODY_SLEEP_DRIFT` | [grid.h](src/physics/grid.h) | 1/2 cell | A body held by something that has drifted less than this over `BODY_SLEEP_STEPS` has stopped. |
+| `BODY_SLEEP_STEPS` | [grid.h](src/physics/grid.h) | 30 | Half a second. Shorter risks stopping a topple that starts from the very edge of balance before it is past half a cell. |
+| `ROLLING_ARM` | [grid.h](src/physics/grid.h) | 1/16 cell | Rolling resistance. Higher stops discs and rubble sooner, but a post only just past its balance point needs more torque than this to get going. |
+| `BOUNCE_MIN_SPEED` | [grid.h](src/physics/grid.h) | 3/4 cell/step | Impacts slower than this do not bounce. Lower makes landings livelier and resting bodies jitter. |
+| `WAKE_SPEED` | [grid.h](src/physics/grid.h) | 3/8 cell/step | How fast a body must strike a piece at rest to wake it and push it. |
+| `PUSH_WAKE` | [grid.h](src/physics/grid.h) | 1/64 cell/step | How hard a body must lean sideways on a piece at rest to wake it -- a domino gone over onto the next. |
+| `LIQUID_DRAG` | [grid.h](src/physics/grid.h) | 96 | Share of a fully submerged body's velocity lost per step, /256. At 48 a floating raft bobbed on its own waves for ever; at 96 it settles in about three seconds and stone sinks at about 24 cells/s. |
+| `LOAD_SCAN` | [grid.h](src/physics/grid.h) | 48 | Tallest column of sand counted as load on a piece. Taller is a ceiling that holds itself. |
+| `BODY_MAX_STEPS` | [grid.h](src/physics/grid.h) | 1800 | Safety cap: a body still moving after this many steps is frozen where it is. |
 
 ---
 
@@ -276,11 +301,21 @@ moved by `ANGLER_TENTACLES` in [enemy.h](src/physics/enemy.h):
 | smoothing | [enemy.h](src/physics/enemy.h) | 1/4 | Share of the way each middle joint relaxes toward straight before the solve. Irons out the folds a slack chain makes. |
 | max bend | [enemy.h](src/physics/enemy.h) | 35 deg | The furthest any joint may bend. Just over the lure's sharpest joint at rest (34); also bounds the gap filled at the outside of a bend. |
 | step lift | [enemy.h](src/physics/enemy.h) | 5 | Cells a foot rises mid-swing. |
-| bow | [enemy.h](src/physics/enemy.h) | 1/3 | Cells a step each leg's middle is pushed outward (rear back, front forward), so slack bows the same way every time. |
-| stride | [enemy.h](src/physics/enemy.h) | 24 | Cells walked per step cycle; each foot lands a quarter-stride ahead. At 32 the first stance after standing ended past the tentacle's reach. |
-| lure spring / damp | [enemy.h](src/physics/enemy.h) | 1/12, 1/5 | The bulb's spring toward where it wants to be: loose and underdamped, so it sways past and swings back. |
+| bow | [enemy.h](src/physics/enemy.h) | 1 | Cells a step each leg's middle is pushed outward (rear back, front forward), so slack bows the same way every time -- and so a near-straight leg can buckle toward a foot brought in closer. |
+| swing steps | [enemy.h](src/physics/enemy.h) | 12 | Steps a foot is in the air, whatever the speed: faster walking makes longer strides, not quicker ones. |
+| step / settle trigger | [enemy.h](src/physics/enemy.h) | 10 / 3 | Cells a planted foot may fall behind its home before it steps; once the body has stopped, before it steps to tidy itself under the body. |
+| step lead | [enemy.h](src/physics/enemy.h) | 1/2 | Share of a swing's travel home is led ahead by, so a foot lands where the body is going. |
+| foot probe | [enemy.h](src/physics/enemy.h) | 4 | Columns either side of home searched for a foothold, nearest first; solid ground is preferred to powder within it. |
+| stride | [enemy.h](src/physics/enemy.h) | 24 | Not read by the angler: its feet step on `step trigger` and its bob comes from its feet. Kept because every rig has one. |
+| body follow | [enemy.h](src/physics/enemy.h) | 30 steps, zeta 3/4, r 0 | Second-order follower (period, damping, response -- see `tentacle::response`) the body's lean and sink take from the feet. |
+| body sink / tilt | [enemy.h](src/physics/enemy.h) | 2 / 12 deg | Most the body sinks or rises with the feet's average height, and tilts toward the lower foot. |
+| footfall dip | [enemy.h](src/physics/enemy.h) | 1/4 | Cells a step of downward speed each footfall knocks into the body. |
+| lure follow | [enemy.h](src/physics/enemy.h) | 22 steps, zeta 9/26, r 0 | Second-order follower the bulb swings on. The same motion as the spring it replaced (1/12 of the gap, 1/5 of the speed a step): loose and underdamped, it sways past and swings back. |
 | lure sway / reach | [enemy.h](src/physics/enemy.h) | 3 / 10 | Cells the bulb drifts with each breath; cells further forward it is held while chasing. |
-| lure raise / arc | [enemy.h](src/physics/enemy.h) | (32,-26) / (88,-24) | Frame points: where the wind-up rears the bulb to (near the lure's full length, so it cannot fold), and what the strike curves over on its way to the ground. |
+| lure raise / arc | [enemy.h](src/physics/enemy.h) | (32,-26) / (88,-24) | Frame points: where the wind-up rears the bulb to (near the lure's full length, so it cannot fold), and what the strike curves over on its way to the ground -- no further out than 6 past where it is aimed. |
+| lure hold | [enemy.h](src/physics/enemy.h) | 6 | Steps the bulb is held, trembling, at the top of the wind-up before the whip. |
+| lure crack / flourish | [enemy.h](src/physics/enemy.h) | 4 / 3 | Cells across of the bend rolled down the stalk through the whip, and extra wave of the thrash after it lands. |
+| lure live / bulb radius | [enemy.h](src/physics/enemy.h) | 3 / 3 | The bulb hurts through the whip and this many steps after it lands, and only what its swept path (this many cells round) touches. The strike is aimed when the wind-up starts, at the target's spot within `reach`. An arrow in the bulb calls a wind-up off and doubles the recovery. |
 | `pad` | [enemy.h](src/physics/enemy.h) | 40 | Under the troll's 56, so the renderer's atlas slots are unchanged. |
 
 ### Animation (`Species::rig`, see [src/physics/rig.h](src/physics/rig.h))
@@ -401,6 +436,19 @@ Record adjustments to tuning parameters and their rationale here.
   given to the first link); a slack chain folded into zigzags until `smoothing`
   and `max bend` went in; and `stride` came down from 32 to 24, because the first
   stance after standing still dragged a foot past the tentacle's reach.
+- **2026-10-17 -- angler: feet step when they need to, the bulb is the hitbox.**
+  First pass of the procedural-animation plan, judged in `angler_probe` frames.
+  The lure's spring became a second-order follower with the same motion
+  (`lure follow`), and the same follower carries the body on its feet (`body
+  follow`, `sink / tilt`, `footfall dip`). Feet now step on distance from a
+  led home with a ground search (`swing steps`, `step / settle trigger`, `step
+  lead`, `foot probe`) instead of on the `stride` cycle. `bow` went from 1/3 to
+  1: at 1/3 a near-straight front leg could not buckle toward a foot swung in
+  closer, missed its goal by six cells and was drawn never lifting. The strike
+  now hurts only through the bulb's swept path (`lure live / bulb radius`),
+  aimed when the wind-up starts, with a hold, a rolled bend and a thrash
+  (`lure hold`, `crack / flourish`); before, a box test at the last wind-up step
+  hit whatever stood in reach, wherever the bulb came down.
 - **2026-10-17 -- water slightly less viscous.** A playtest found water too
   thick. `LIQUID_ACCEL` and `LIQUID_DAMP` were already at their stability limit,
   and the speed ceiling was not water's but the velocity byte's: at
@@ -418,3 +466,23 @@ Record adjustments to tuning parameters and their rationale here.
   2.9x), inside what was judged when 0.75 was picked. 8 is as far out as the art goes:
   at 7 the 688-wide hills tile in `bg_tarn_wide` would show twice on a 3440
   screen. The valley and forest scenes stay at 10.
+- **2026-10-17 -- loose bodies replace toppling.** `TIP_GRAVITY` and
+  `TIP_MAX_STEPS` are gone with the hinge they tuned. A piece that topples is
+  now a rigid body with momentum, friction and restitution, so it flies off a
+  ledge in an arc, tumbles, bounces and knocks other pieces over. `BODY_GRAVITY`
+  keeps the 1/4 cell/step² both shared. `BODY_MAX_STEPS` is 1800 against the old
+  600, since bodies now end by stopping and the cap is only a backstop.
+  Materials gained `weight`, `grip` and `bounce` columns, from real densities.
+  `LIQUID_DRAG` went 20 -> 48 -> 96 in the body probe's float scene: below 96 a
+  wooden block never stopped bobbing. `BODY_SOLVER_PASSES` went 8 -> 32 for the
+  stack scene, as above.
+- **2026-10-17 -- falling is a body too; less ideal.** A playtest found falls
+  5-10% too fast and sudden, momentum missing, balance too ideal and motion
+  mathematical. Every unsupported piece is now a body, so it accelerates from
+  rest instead of lurching a cell and climbing a staircase of speeds.
+  `BODY_GRAVITY` 1/4 -> 9/40; new `AIR_DRAG` 1/250 eases a fall toward its
+  top speed instead of a hard cap. `GRIP_ROUGHNESS` 20, `NUDGE_SPIN` 1/1500 and
+  `BALANCE_MARGIN` 1/2 take the perfection out of surfaces, starts and
+  balance. Overhangs snap by bending strength (material `strength`,
+  `IMPACT_LOAD_MAX` 6), which replaces fracture-on-landing for bodies.
+  `WARM_START` 1/4 added for stacks.

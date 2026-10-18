@@ -78,6 +78,133 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
     }
 }
 
+void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
+                  std::vector<frame::BodySprite>& out, std::vector<frame::HiddenCell>& hidden) {
+    out.clear();
+    hidden.clear();
+    atlas.resize(static_cast<size_t>(BODY_ATLAS_W) * BODY_ATLAS_H, 0u);
+    const Grid& g = run.grid;
+    const std::vector<uint32_t>& pixels = g.get_pixels();
+    const int grid_w = g.get_width(), grid_h = g.get_height();
+
+    // What a hidden cell shows instead of the body (frame::HiddenCell): the
+    // nearest liquid or grain along the four directions, looking past the body's
+    // own cells for up to two -- sprite and cells can be about a cell apart, so
+    // the sliver that shows can be the rim or the row inside it. Sideways first,
+    // because what a sinking body is pushing through is beside it; what lands on
+    // top of it is what it displaced a step ago. Anything else stops the look,
+    // so a stone beside a wall with a pool behind it does not borrow the pool.
+    const auto fill_of = [&](int x, int y, uint8_t tag) -> uint32_t {
+        static constexpr int DX[4] = {-1, 1, 0, 0};
+        static constexpr int DY[4] = {0, 0, 1, -1};
+        for (int d = 0; d < 4; ++d) {
+            for (int reach = 1; reach <= 2; ++reach) {
+                const int nx = x + DX[d] * reach, ny = y + DY[d] * reach;
+                if (nx < 0 || ny < 0 || nx >= grid_w || ny >= grid_h) break;
+                const Element e = g.get_element(nx, ny);
+                if (is_structural(e.type) && e.piece_tag == tag) continue;  // the body itself
+                if (is_liquid(e.type) || material_of(e.type).move == MoveKind::Powder)
+                    return pixels[static_cast<size_t>(ny) * grid_w + nx];
+                break;
+            }
+        }
+        return 0u;
+    };
+
+    // Shelves: left to right along a row as tall as its tallest picture, then the
+    // next row down.
+    int shelf_x = 0, shelf_y = 0, shelf_h = 0;
+    for (int i = 0; i < g.tipping_count(); ++i) {
+        const std::vector<Grid::BodyCell>& shape = g.body_shape(i);
+        const std::vector<int>& at = g.body_cells(i);
+        if (shape.empty()) continue;
+
+        int min_x = shape[0].x, max_x = shape[0].x, min_y = shape[0].y, max_y = shape[0].y;
+        for (const Grid::BodyCell& c : shape) {
+            min_x = std::min<int>(min_x, c.x);
+            max_x = std::max<int>(max_x, c.x);
+            min_y = std::min<int>(min_y, c.y);
+            max_y = std::max<int>(max_y, c.y);
+        }
+        const int w = max_x - min_x + 1, h = max_y - min_y + 1;
+        if (w > BODY_ATLAS_W || h > BODY_ATLAS_H) continue;
+        if (shelf_x + w > BODY_ATLAS_W) {
+            shelf_x = 0;
+            shelf_y += shelf_h;
+            shelf_h = 0;
+        }
+        if (shelf_y + h > BODY_ATLAS_H) continue;  // full this frame: drawn as cells
+
+        const SDL_Rect src{shelf_x, shelf_y, w, h};
+        for (int y = 0; y < h; ++y)
+            std::fill_n(atlas.begin() +
+                            (static_cast<std::ptrdiff_t>(shelf_y + y) * BODY_ATLAS_W + shelf_x),
+                        w, 0u);
+        const uint8_t tag = g.get_element(at[0] % grid_w, at[0] / grid_w).piece_tag;
+        for (size_t k = 0; k < shape.size(); ++k) {
+            const int ax = shelf_x + shape[k].x - min_x, ay = shelf_y + shape[k].y - min_y;
+            atlas[static_cast<size_t>(ay) * BODY_ATLAS_W + ax] = pixels[static_cast<size_t>(at[k])];
+            hidden.push_back({at[k], fill_of(at[k] % grid_w, at[k] / grid_w, tag)});
+        }
+        shelf_x += w;
+        shelf_h = std::max(shelf_h, h);
+
+        const Grid::BodyState s = g.body_state(i);
+        const float lcx = fx::to_float(s.shape_cx), lcy = fx::to_float(s.shape_cy);
+        float cx = fx::to_float(s.prev_x) + (fx::to_float(s.x) - fx::to_float(s.prev_x)) * alpha;
+        float cy = fx::to_float(s.prev_y) + (fx::to_float(s.y) - fx::to_float(s.prev_y)) * alpha;
+        float th = fx::to_float(s.prev_theta) +
+                   (fx::to_float(s.theta) - fx::to_float(s.prev_theta)) * alpha;
+
+        // Easing onto its cells before it becomes them: see SETTLE_STEPS. Lying
+        // near square, it will be set down square (Grid::REST_SQUARE_ANGLE), and
+        // the body says where; drawn there, the sprite is those cells pixel for
+        // pixel. Otherwise it rests at an angle, and its cells are a staircase no
+        // turned picture matches; it keeps its angle and eases only onto the
+        // offset that fits them best, found from the cells themselves.
+        //
+        // Done a step early, so the last frames before the hand-back are already
+        // exactly the pose it hands back in -- and at an exact quarter turn, which
+        // the renderer draws without resampling. A hair off one, it resamples, and
+        // every edge of the picture can land a screen pixel from the cell's.
+        float angle_deg = th * 57.29578f;
+        const float ease =
+            1.0f - (static_cast<float>(s.steps_to_sleep) - 1.0f - alpha) / SETTLE_STEPS;
+        if (ease > 0.0f) {
+            float target = th, tx = 0.0f, ty = 0.0f;
+            if (s.squares) {
+                target = fx::to_float(s.rest_theta);
+                tx = fx::to_float(s.rest_x);
+                ty = fx::to_float(s.rest_y);
+            } else {
+                const float c = std::cos(th), sn = std::sin(th);
+                for (size_t k = 0; k < shape.size(); ++k) {
+                    const float dx = static_cast<float>(shape[k].x) + 0.5f - lcx;
+                    const float dy = static_cast<float>(shape[k].y) + 0.5f - lcy;
+                    tx += static_cast<float>(at[k] % grid_w) + 0.5f - (dx * c - dy * sn);
+                    ty += static_cast<float>(at[k] / grid_w) + 0.5f - (dx * sn + dy * c);
+                }
+                tx /= static_cast<float>(shape.size());
+                ty /= static_cast<float>(shape.size());
+            }
+            if (ease >= 1.0f) {
+                cx = tx;
+                cy = ty;
+                angle_deg = s.squares ? 90.0f * static_cast<float>(fx::quarters(s.rest_theta))
+                                      : th * 57.29578f;
+            } else {
+                const float smooth = ease * ease * (3.0f - 2.0f * ease);
+                cx += (tx - cx) * smooth;
+                cy += (ty - cy) * smooth;
+                angle_deg = (th + (target - th) * smooth) * 57.29578f;
+            }
+        }
+
+        out.push_back(frame::BodySprite{src, cx, cy, lcx - static_cast<float>(min_x),
+                                        lcy - static_cast<float>(min_y), angle_deg});
+    }
+}
+
 void arrows(const Run& run, float alpha, std::vector<frame::ArrowSprite>& out) {
     out.clear();
     for (const Arrow& a : run.quiver.arrows()) {

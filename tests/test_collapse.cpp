@@ -177,7 +177,7 @@ int main() {
               shape_of(g, ElementType::Wood) == before);
 
         const int cells_before = count_of(g, ElementType::Wood);
-        step(g, 60);  // long enough to reach the floor and settle
+        step(g, 240);  // long enough to reach the floor, roll and settle
 
         // Landing does not preserve the shape: fracture breaks a piece that arrives
         // with speed on it, and a disc lands on a handful of contact cells, which is
@@ -208,10 +208,26 @@ int main() {
 
         fill(g, 20, 53, 20, 54, ElementType::Empty);  // kick the leg out
 
-        step(g, 200);
-        check("a slab landing on a single stub stays a slab",
-              rect_exactly_at(g, 20, 49, 40, 53, ElementType::Wood),
-              "top wood row " + std::to_string(top_row_of(g, ElementType::Wood)));
+        const int before = count_of(g, ElementType::Wood);
+        step(g, 300);
+        // Where it ends up is the solver's business: a slab that big on a pebble
+        // that small may well rock off it onto one end. What may not happen is
+        // the search shedding cells, or the slab coming apart over the stub.
+        int tag = -1;
+        bool one_piece = true;
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 60; ++x) {
+                const Element e = g.get_element(x, y);
+                if (e.type != ElementType::Wood) continue;
+                if (tag < 0) tag = e.piece_tag;
+                if (e.piece_tag != tag) one_piece = false;
+            }
+        check("a slab landing on a single stub stays one slab",
+              one_piece && count_of(g, ElementType::Wood) == before,
+              std::to_string(count_of(g, ElementType::Wood)) + " of " + std::to_string(before));
+        check("the stub it landed on is still there",
+              g.get_element(30, 54).type == ElementType::Wall);
+        check("and the slab comes to rest", !g.has_pending_support_checks());
     }
 
     // --- the same slab arriving fast breaks over the stub, and loses nothing ---
@@ -250,13 +266,27 @@ int main() {
         // Cut the prop out from under it.
         fill(g, 25, 35, 25, 49, ElementType::Empty);
 
+        // It comes loose from rest: nothing on the first step, then faster and
+        // faster, as a whole slab at every step.
         step(g, 1);
-        check("one step after being cut free, the slab has moved down exactly one cell",
-              rect_exactly_at(g, 20, 31, 30, 35, ElementType::Wall));
+        check("cut free, the slab comes loose gently rather than lurching a cell",
+              rect_exactly_at(g, 20, 30, 30, 34, ElementType::Wall) ||
+                  rect_exactly_at(g, 20, 31, 30, 35, ElementType::Wall));
 
-        step(g, 1);
-        check("it keeps falling on its own without being disturbed again",
-              rect_exactly_at(g, 20, 32, 30, 36, ElementType::Wall));
+        int top = 30;
+        bool whole = true, falling = true;
+        for (int s = 0; s < 8; ++s) {
+            g.update();
+            int now = -1;
+            for (int y = 30; y < 50 && now < 0; ++y)
+                if (g.get_element(25, y).type == ElementType::Wall) now = y;
+            if (now < top) falling = false;
+            top = now;
+            if (!rect_exactly_at(g, 20, top, 30, top + 4, ElementType::Wall)) whole = false;
+        }
+        check("it keeps falling on its own without being disturbed again", falling && top > 31,
+              "top row " + std::to_string(top));
+        check("and stays a whole slab the way down", whole);
 
         // Not rect_exactly_at() here: the piece has landed on a Wall floor, so there
         // is legitimately Wall directly under it. Check its own cells, and clear air
@@ -288,15 +318,11 @@ int main() {
         fill(g, 23, 28, 30, 30, ElementType::Wood); // foot of the L
 
         g.set_element(20, 20, ElementType::Empty);  // disturb it; nothing is grounded
-        step(g, 1);
-
-        const bool arm = g.get_element(21, 21).type == ElementType::Wood &&
-                         g.get_element(22, 31).type == ElementType::Wood;
-        const bool foot = g.get_element(30, 31).type == ElementType::Wood &&
-                          g.get_element(23, 29).type == ElementType::Wood;
-        const bool corner_empty = g.get_element(30, 28).type == ElementType::Empty;
+        const std::vector<std::pair<int, int>> before = shape_of(g, ElementType::Wood);
+        step(g, 10);
         check("an L-shaped piece falls with its corner intact",
-              arm && foot && corner_empty);
+              shape_of(g, ElementType::Wood) == before && top_row_of(g, ElementType::Wood) > 21,
+              "top wood row " + std::to_string(top_row_of(g, ElementType::Wood)));
     }
 
     // --- Wall and Wood hold each other up ---
@@ -366,10 +392,10 @@ int main() {
     }
 
     // --- a falling piece picks up speed ---
-    // At a flat one cell per step everything drifts down at the same rate whatever
-    // it is and however far it has fallen, which reads as floating rather than
-    // falling. Speed has to start at one -- a piece must not jump the moment it
-    // comes loose -- rise, and stop rising at the ceiling.
+    // At a flat rate everything drifts down the same whatever it is and however
+    // far it has fallen, which reads as floating rather than falling. Speed has to
+    // start from nothing -- a piece must not jump the moment it comes loose --
+    // rise, and never pass the ceiling.
     {
         Grid g(20, 300);
         fill(g, 5, 2, 10, 6, ElementType::Wall);
@@ -384,18 +410,20 @@ int main() {
             prev = now;
         }
 
-        check("a piece comes loose at one cell per step", delta.front() == 1,
+        check("a piece comes loose from rest, not at a cell a step", delta.front() <= 1,
               "first step moved " + std::to_string(delta.front()));
 
+        // Speed in whole cells a step can read one less than the step before as
+        // the fraction carries over, so "never slows" is judged over pairs.
         bool monotonic = true, capped = true;
         for (size_t i = 0; i < delta.size(); ++i) {
-            if (i > 0 && delta[i] < delta[i - 1]) monotonic = false;
+            if (i > 2 && delta[i] + delta[i - 1] < delta[i - 2] + delta[i - 3] - 1)
+                monotonic = false;
             if (delta[i] > Grid::MAX_FALL_SPEED) capped = false;
         }
         check("it never slows down on the way", monotonic);
         check("it never travels further in a step than the ceiling allows", capped);
-        check("it reaches the ceiling and stays there",
-              delta.back() == Grid::MAX_FALL_SPEED,
+        check("it is falling several cells a step by the end", delta.back() >= 4,
               "last step moved " + std::to_string(delta.back()));
         check("acceleration actually gets it somewhere a flat rate would not",
               prev - 2 > 40,
@@ -433,9 +461,12 @@ int main() {
         // pelt the next time it was dug free, minutes later.
         fill(g, 0, 200, 19, 200, ElementType::Empty);  // pull the shelf out
         g.update();
+        const int first = top_row_of(g, ElementType::Wood) - 195;
+        step(g, 10);
         check("a piece that has landed comes loose from rest again",
-              top_row_of(g, ElementType::Wood) == 196,
-              "top wood row " + std::to_string(top_row_of(g, ElementType::Wood)));
+              first <= 1 && top_row_of(g, ElementType::Wood) > 196,
+              "moved " + std::to_string(first) + " on the first step, top row " +
+                  std::to_string(top_row_of(g, ElementType::Wood)) + " ten steps on");
     }
 
     // --- shape survives the whole speed range ---
@@ -529,51 +560,79 @@ int main() {
               count_of(g, ElementType::Wood) == cells_before);
     }
 
-    // --- fracture: a slab dropped onto a step comes apart over the drop ---
-    // The positive case, and it doubles as the proof that a crack persists, which is
-    // the property the entire design rests on.
-    //
-    // Rigid, this slab lands on the high side of the step and stays perfectly level,
-    // with the whole overhang held in the air by the far end. Broken, the half over
-    // the low side is a piece of its own with nothing under it, so it carries on
-    // down and the slab ends up at two heights.
-    //
-    // And it can only carry on down if the crack outlived the step it was made on:
-    // the fill that runs on the following step starts from a cell in the overhang,
-    // and unless it refuses to cross the crack it walks straight into the grounded
-    // half, concludes "supported", and nothing ever moves. A break that did not
-    // persist would leave this test looking exactly like no break at all.
+    // --- fracture: a stone slab dropped onto a step snaps over the drop ---
+    // The positive case. Rigid, this slab lands on the high side of the step and
+    // stays perfectly level, half of it held out over the drop by the other half.
+    // Stone is weak in tension: landing loads that overhang several times its
+    // weight, more than its section at the edge can carry, so it snaps there
+    // (Grid::snap_overhang) and the half over the low side carries on down. Stone
+    // rather than wood because that is which of the two really does this; a
+    // wooden slab is strong enough to land whole and stay that way.
     {
         Grid g(80, 80);
         fill(g, 40, 60, 79, 79, ElementType::Wall);  // high ground, right half only
         fill(g, 0, 75, 39, 79, ElementType::Wall);  // low ground, left half
-        fill(g, 10, 20, 69, 26, ElementType::Wood);  // a wide slab, high up
+        fill(g, 10, 20, 69, 26, ElementType::Wall);  // a wide stone slab, high up
         // Placing structure deliberately does not queue a support check -- that is
         // what lets the brush draw a floating platform on purpose -- so the slab has
         // to be disturbed before it is asked whether it is standing on anything.
         g.set_element(10, 20, ElementType::Empty);
 
-        const int cells_before = count_of(g, ElementType::Wood);
-        step(g, 300);
+        // The slab is the stone that is not the ground: nothing of it can end up
+        // inside the ground, which stays exactly where it is.
+        const auto ground = [](int x, int y) {
+            return (x >= 40 && y >= 60) || (x < 40 && y >= 75);
+        };
+        const auto slab_cells = [&] {
+            int n = 0;
+            for (int y = 0; y < 80; ++y)
+                for (int x = 0; x < 80; ++x)
+                    if (!ground(x, y) && g.get_element(x, y).type == ElementType::Wall) ++n;
+            return n;
+        };
+        const int cells_before = slab_cells();
+        step(g, 600);
 
-        // Deepest and shallowest column the wood reaches, over the two sides.
+        // Deepest and shallowest row the slab reaches, over the two sides.
         int lowest = -1, highest = 80;
         for (int y = 0; y < 80; ++y)
             for (int x = 0; x < 80; ++x)
-                if (g.get_element(x, y).type == ElementType::Wood) {
+                if (!ground(x, y) && g.get_element(x, y).type == ElementType::Wall) {
                     if (y > lowest) lowest = y;
                     if (y < highest) highest = y;
                 }
 
-        check("a slab dropped across a step does not stay one rigid level",
+        check("a stone slab dropped across a step does not stay one rigid level",
               lowest - highest > 6,  // taller than the slab's own 7 rows
               "rows " + std::to_string(highest) + ".." + std::to_string(lowest));
-        check("the piece over the drop actually went down it",
-              lowest >= 70, "lowest wood row " + std::to_string(lowest));
-        check("a crack neither creates nor destroys matter",
-              count_of(g, ElementType::Wood) == cells_before,
-              std::to_string(count_of(g, ElementType::Wood)) + " of " + std::to_string(cells_before));
+        check("the piece over the drop actually went down it", lowest >= 70,
+              "lowest slab row " + std::to_string(lowest));
+        check("a crack neither creates nor destroys matter", slab_cells() == cells_before,
+              std::to_string(slab_cells()) + " of " + std::to_string(cells_before));
         check("the wreckage comes to rest", !g.has_pending_support_checks());
+    }
+
+    // --- a wooden slab dropped onto the same step lands whole ---
+    // The other half of the claim: what snaps stone does not snap wood.
+    {
+        Grid g(80, 80);
+        fill(g, 40, 60, 79, 79, ElementType::Wall);
+        fill(g, 0, 75, 39, 79, ElementType::Wall);
+        fill(g, 10, 20, 69, 26, ElementType::Wood);
+        g.set_element(10, 20, ElementType::Empty);
+        const int before = count_of(g, ElementType::Wood);
+        step(g, 600);
+        std::vector<int> tags;
+        for (int y = 0; y < 80; ++y)
+            for (int x = 0; x < 80; ++x) {
+                const Element e = g.get_element(x, y);
+                if (e.type == ElementType::Wood &&
+                    std::find(tags.begin(), tags.end(), e.piece_tag) == tags.end())
+                    tags.push_back(e.piece_tag);
+            }
+        check("a wooden slab dropped across a step lands in one piece", tags.size() == 1,
+              std::to_string(tags.size()) + " pieces");
+        check("and keeps every cell", count_of(g, ElementType::Wood) == before);
     }
 
     // --- a piece too large to judge is left alone ---
@@ -855,6 +914,165 @@ int main() {
             return g.get_pixels();
         };
         check("two runs of the same topple end pixel-identical", run() == run());
+    }
+
+    // ------------------------------------------------------------------------
+    // Loose bodies. A piece that topples is a rigid body with momentum: it
+    // pushes what it hits, carries what it is carrying, floats if it is lighter
+    // than what it is in, and slides down what is steeper than its grip. Each of
+    // these was impossible while toppling was a hinge about one corner.
+    // tests/body_probe.cpp shows the same scenes as pictures.
+    // ------------------------------------------------------------------------
+
+    // --- a row of posts goes down like dominoes ---
+    // Only the first is off balance. Every other one is knocked over by the one
+    // before it, which takes a body striking, or leaning on, a piece at rest
+    // and waking it.
+    {
+        Grid g(120, 40);
+        fill(g, 0, 34, 119, 39, ElementType::Wall);
+        for (int i = 0; i < 8; ++i) fill(g, 10 + i * 10, 18, 11 + i * 10, 33, ElementType::Wood);
+        fill(g, 12, 18, 17, 20, ElementType::Wood);  // a head that puts the first past its foot
+        nudge(g, 11, 17);
+
+        const int before = count_of(g, ElementType::Wood);
+        int most = 0;
+        for (int s = 0; s < 900; ++s) {
+            g.update();
+            most = std::max(most, g.tipping_count());
+        }
+        bool last_down = true;
+        for (int y = 18; y < 24; ++y)
+            for (int x = 80; x <= 81; ++x)
+                if (g.get_element(x, y).type == ElementType::Wood) last_down = false;
+        check("every domino in the row is knocked over", last_down && most == 8,
+              std::to_string(most) + " bodies at most");
+        check("and the row keeps every cell", count_of(g, ElementType::Wood) == before);
+        check("and comes to rest", !g.has_pending_support_checks());
+    }
+
+    // --- a plank across a post tips under sand poured on one end ---
+    // Load is weighed with the piece: the sand is not part of the plank, but it
+    // is resting on it, and that is what moves the plank's centre past the post.
+    {
+        Grid g(80, 40);
+        fill(g, 0, 36, 79, 39, ElementType::Wall);
+        fill(g, 38, 30, 41, 35, ElementType::Wall);  // fulcrum
+        fill(g, 15, 28, 64, 29, ElementType::Wood);  // balanced across it
+        nudge(g, 40, 27);
+        step(g, 60);
+        check("a plank balanced on a post stands until it is loaded",
+              rect_exactly_at(g, 15, 28, 64, 29, ElementType::Wood));
+
+        for (int s = 0; s < 240; ++s) {
+            if (s % 2 == 0)
+                for (int x = 56; x <= 62; ++x) g.set_element(x, 2, ElementType::Sand);
+            g.update();
+        }
+        step(g, 300);
+        int left = -1, right = -1;  // lowest wood row at each end
+        for (int y = 0; y < 40; ++y) {
+            if (g.get_element(16, y).type == ElementType::Wood) left = y;
+            if (g.get_element(63, y).type == ElementType::Wood) right = y;
+        }
+        check("sand heaped on one end tips the plank down on that end", right > left + 4,
+              "left end row " + std::to_string(left) + ", right end row " + std::to_string(right));
+    }
+
+    // --- wood floats; stone sinks ---
+    {
+        Grid g(80, 50);
+        fill(g, 0, 45, 79, 49, ElementType::Wall);
+        fill(g, 0, 20, 0, 44, ElementType::Wall);
+        fill(g, 79, 20, 79, 44, ElementType::Wall);
+        fill(g, 1, 25, 78, 44, ElementType::Water);
+        fill(g, 15, 5, 26, 10, ElementType::Wood);
+        fill(g, 50, 5, 57, 10, ElementType::Wall);
+        nudge(g, 20, 4);
+        nudge(g, 53, 4);
+
+        const int64_t water = liquid::total(g, ElementType::Water);
+        const int wood = count_of(g, ElementType::Wood);
+        step(g, 900);
+
+        int wood_top = -1, wood_bottom = -1, stone_bottom = -1;
+        for (int y = 0; y < 45; ++y)
+            for (int x = 1; x < 79; ++x) {
+                const ElementType t = g.get_element(x, y).type;
+                if (t == ElementType::Wood) {
+                    if (wood_top < 0) wood_top = y;
+                    wood_bottom = y;
+                }
+                if (t == ElementType::Wall) stone_bottom = y;
+            }
+        check("a wooden block dropped in a pool floats with its top out of the water",
+              wood_top >= 0 && wood_top < 25 && wood_bottom >= 25,
+              "wood rows " + std::to_string(wood_top) + ".." + std::to_string(wood_bottom));
+        check("a stone block dropped in the same pool sinks to the bottom", stone_bottom == 44,
+              "lowest stone row " + std::to_string(stone_bottom));
+        check("floating and sinking conserve the water",
+              liquid::total(g, ElementType::Water) == water);
+        check("and the wood", count_of(g, ElementType::Wood) == wood);
+        check("and both come to rest", !g.has_pending_support_checks());
+    }
+
+    // --- a stack that leans past its base comes down ---
+    // Every block is balanced on the one under it; the stack as a whole is not.
+    // Only weighing each block with everything resting on it finds that.
+    {
+        Grid g(60, 50);
+        fill(g, 0, 45, 59, 49, ElementType::Wall);
+        for (int i = 0; i < 6; ++i) {
+            const ElementType t = i % 2 == 0 ? ElementType::Wood : ElementType::Wall;
+            fill(g, 20 + 2 * i, 40 - 5 * i, 27 + 2 * i, 44 - 5 * i, t);
+        }
+        const int wood = count_of(g, ElementType::Wood);
+        nudge(g, 31, 14);
+        step(g, 900);
+        check("a stack leaning past its base does not stay as it was built",
+              !rect_exactly_at(g, 30, 15, 37, 19, ElementType::Wall));
+        check("and keeps every cell", count_of(g, ElementType::Wood) == wood);
+        check("and comes to rest", !g.has_pending_support_checks());
+    }
+
+    // --- a block dropped on a slope goes down it ---
+    // The block lands on one corner of a staircase. It used to hang there by
+    // that corner -- the support fill joins diagonal neighbours -- and a body
+    // would have caught on each step of the staircase without normals read off
+    // the slope's shape.
+    {
+        Grid g(80, 60);
+        for (int x = 0; x < 80; ++x)
+            fill(g, x, 59 - (x < 50 ? 50 - x : 0), x, 59, ElementType::Wall);
+        fill(g, 12, 10, 17, 13, ElementType::Wood);
+        nudge(g, 14, 9);
+        step(g, 600);
+        int min_x = 80;
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 80; ++x)
+                if (g.get_element(x, y).type == ElementType::Wood) min_x = std::min(min_x, x);
+        check("a block dropped on a slope ends at its foot", min_x >= 45,
+              "leftmost wood x " + std::to_string(min_x));
+        check("and keeps every cell", count_of(g, ElementType::Wood) == 24);
+        check("and comes to rest", !g.has_pending_support_checks());
+    }
+
+    // --- bodies replay exactly ---
+    // Contacts, impulses and buoyancy are where a float or an order dependence
+    // would hide, so the busiest scene is run twice.
+    {
+        const auto run = [] {
+            Grid g(120, 40, 77);
+            fill(g, 0, 34, 119, 39, ElementType::Wall);
+            for (int i = 0; i < 8; ++i)
+                fill(g, 10 + i * 10, 18, 11 + i * 10, 33, ElementType::Wood);
+            fill(g, 12, 18, 17, 20, ElementType::Wood);
+            fill(g, 95, 25, 118, 33, ElementType::Water);
+            nudge(g, 11, 17);
+            step(g, 400);
+            return g.get_pixels();
+        };
+        check("two runs of the same domino run end pixel-identical", run() == run());
     }
 
     return report();

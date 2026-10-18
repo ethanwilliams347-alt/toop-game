@@ -77,8 +77,12 @@ void clear_backdrop(frame::Backdrop& backdrop);
 void blank_cells(SDL_Texture* cells);
 
 // Uploads the camera's view of the grid into `cells`, `visible_w` x `visible_h`
-// cells. `scratch` is only used when the view reaches past the grid's edge.
+// cells. `scratch` is only used when the view reaches past the grid's edge, or
+// when `hidden` names cells to draw something else in -- the cells of the loose
+// bodies drawn as sprites (present::paint_bodies), which would otherwise be
+// drawn twice, once of them a cell at a time. Each gets its `fill` instead.
 void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, int visible_w,
-                  int visible_h, std::vector<uint32_t>& scratch);
+                  int visible_h, std::vector<uint32_t>& scratch,
+                  const std::vector<frame::HiddenCell>* hidden = nullptr);
 
 } // namespace shell
