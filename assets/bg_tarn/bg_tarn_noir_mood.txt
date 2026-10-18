@@ -13,7 +13,19 @@
 #   - fog that eats the far shore and the mountains, so depth reads as layers
 #     of haze (Rain World's depth fog too).
 #
-# Units, as this file assumes them (the parser in src/render/mood.h is the
+# Units (src/render/mood.h is the authority; tune in game with F6 hot reload):
+#   colours      linear; `ambient`/`sun`/`fog` take r g b as three words,
+#                `color=`/`tint=` take r,g,b; light = albedo x (ambient + sun + lights)
+#   sun dir=     x,y the way the light TRAVELS (x right, y DOWN), each -1..1
+#   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
+#   bloom        threshold on linear luminance 0..16; strength 0..4
+#   weather      density 0..1, angle degrees from straight down (+ leans right),
+#                speed cells/s
+#   light x/y    whole world cells, y down; radius in cells; flicker 0..1
+#   material     Name as physics/material.h spells it; tint multiplies the
+#                albedo; texture=<stem> is assets/materials/<stem>.bmp (omit for
+#                no tile); strength is s in albedo*(1+s*(tile-0.5)); rim,
+#                reflect, spec and depth 0..1 (assets/materials/README.md)
 # authority; tune the numbers in game with F6 hot reload):
 #   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
@@ -34,7 +46,7 @@ light_model multiply
 # moon, high and slightly left, cold and weak, and still casts shadow so the
 # rain-dark rock keeps a lit top edge.
 ambient 0.10 0.13 0.18
-sun 0.14 0.18 0.28 dir=-0.30,-1.00 shadow=on
+sun 0.14 0.18 0.28 dir=0.30,1.00 shadow=on
 
 # Heavy, cold fog from the near pines back. near=0.10 starts it just behind the
 # world plane, so the player stays crisp and the far shore is half gone.
@@ -73,11 +85,11 @@ light x=628 y=252 color=0.15,0.85,1.00 radius=36 flicker=0.06
 # (Backbone's muted base), the light does the warming. Rock and sand are rain
 # soaked: darker, more reflect and spec, so the lamps sparkle on them. Water
 # goes deeper and more mirror-like; fire stays untinted, it must never be muted.
-material sand     tint=0.78,0.78,0.82 texture=none     strength=0.00 rim=0.30 reflect=0.20 spec=0.45 depth=0.00
-material water    tint=0.80,0.92,1.00 texture=caustics strength=0.30 rim=0.00 reflect=0.80 spec=0.85 depth=0.85
-material wall     tint=0.86,0.90,0.96 texture=rock     strength=0.70 rim=0.60 reflect=0.15 spec=0.35 depth=0.00
-material wood     tint=0.84,0.86,0.90 texture=wood     strength=0.60 rim=0.40 reflect=0.05 spec=0.20 depth=0.00
-material oil      tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.45 spec=1.00 depth=0.40
-material steam    tint=0.85,0.92,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
-material fire     tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
-material charred  tint=0.90,0.90,0.94 texture=charred  strength=0.75 rim=0.25 reflect=0.05 spec=0.20 depth=0.00
+material Sand tint=0.78,0.78,0.82 strength=0.00 rim=0.30 reflect=0.20 spec=0.45 depth=0.00
+material Water tint=0.80,0.92,1.00 texture=materials_caustics strength=0.30 rim=0.00 reflect=0.80 spec=0.85 depth=0.85
+material Wall tint=0.86,0.90,0.96 texture=materials_rock strength=0.70 rim=0.60 reflect=0.15 spec=0.35 depth=0.00
+material Wood tint=0.84,0.86,0.90 texture=materials_wood strength=0.60 rim=0.40 reflect=0.05 spec=0.20 depth=0.00
+material Oil tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.45 spec=1.00 depth=0.40
+material Steam tint=0.85,0.92,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Fire tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Charred tint=0.90,0.90,0.94 texture=materials_charred strength=0.75 rim=0.25 reflect=0.05 spec=0.20 depth=0.00

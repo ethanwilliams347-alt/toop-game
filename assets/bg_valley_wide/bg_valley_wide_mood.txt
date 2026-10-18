@@ -2,7 +2,19 @@
 # extended out of its own pixels and the two should read as one place. Keep
 # them in step: a change to one is a change to both, except the grade file.
 #
-# Units, as this file assumes them (the parser in src/render/mood.h is the
+# Units (src/render/mood.h is the authority; tune in game with F6 hot reload):
+#   colours      linear; `ambient`/`sun`/`fog` take r g b as three words,
+#                `color=`/`tint=` take r,g,b; light = albedo x (ambient + sun + lights)
+#   sun dir=     x,y the way the light TRAVELS (x right, y DOWN), each -1..1
+#   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
+#   bloom        threshold on linear luminance 0..16; strength 0..4
+#   weather      density 0..1, angle degrees from straight down (+ leans right),
+#                speed cells/s
+#   light x/y    whole world cells, y down; radius in cells; flicker 0..1
+#   material     Name as physics/material.h spells it; tint multiplies the
+#                albedo; texture=<stem> is assets/materials/<stem>.bmp (omit for
+#                no tile); strength is s in albedo*(1+s*(tile-0.5)); rim,
+#                reflect, spec and depth 0..1 (assets/materials/README.md)
 # authority; tune the numbers in game with F6 hot reload):
 #   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
@@ -18,7 +30,7 @@ light_model multiply
 # Full sun is about 1.1, shade about 0.55: a high midday sun, so shadows are
 # short and the ambient carries more than at the tarn's golden hour.
 ambient 0.50 0.55 0.58
-sun 0.62 0.58 0.50 dir=-0.40,-1.00 shadow=on
+sun 0.62 0.58 0.50 dir=0.40,1.00 shadow=on
 
 # A teal haze on the far hills, matching the painted mountains.
 fog 0.55 0.70 0.72 near=0.50 far=1.00 amount=0.20
@@ -31,11 +43,11 @@ weather none
 
 # One row per material, all eight, so tuning one is editing a number rather
 # than remembering a default. Daylight: no tints; the albedo is the colour.
-material sand     tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.35 reflect=0.00 spec=0.10 depth=0.00
-material water    tint=1.00,1.00,1.00 texture=caustics strength=0.50 rim=0.00 reflect=0.50 spec=0.55 depth=0.70
-material wall     tint=1.00,1.00,1.00 texture=rock     strength=0.60 rim=0.50 reflect=0.00 spec=0.08 depth=0.00
-material wood     tint=1.00,1.00,1.00 texture=wood     strength=0.55 rim=0.40 reflect=0.00 spec=0.05 depth=0.00
-material oil      tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.30 spec=0.80 depth=0.40
-material steam    tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
-material fire     tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
-material charred  tint=1.00,1.00,1.00 texture=charred  strength=0.70 rim=0.20 reflect=0.00 spec=0.05 depth=0.00
+material Sand tint=1.00,1.00,1.00 strength=0.00 rim=0.35 reflect=0.00 spec=0.10 depth=0.00
+material Water tint=1.00,1.00,1.00 texture=materials_caustics strength=0.50 rim=0.00 reflect=0.50 spec=0.55 depth=0.70
+material Wall tint=1.00,1.00,1.00 texture=materials_rock strength=0.60 rim=0.50 reflect=0.00 spec=0.08 depth=0.00
+material Wood tint=1.00,1.00,1.00 texture=materials_wood strength=0.55 rim=0.40 reflect=0.00 spec=0.05 depth=0.00
+material Oil tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.30 spec=0.80 depth=0.40
+material Steam tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Fire tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Charred tint=1.00,1.00,1.00 texture=materials_charred strength=0.70 rim=0.20 reflect=0.00 spec=0.05 depth=0.00

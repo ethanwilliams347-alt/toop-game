@@ -9,7 +9,7 @@ is a starting point the Wave 4 checkpoint tunes, and the mood files
 purpose: no `backdrop.txt`, no scene, no layers. It keeps the rest of the
 convention -- one folder, every file prefixed with the folder name
 (`materials_<name>.bmp`), every file reached from a manifest (a mood file's
-`material ... texture=<name>`), and a named generator:
+`material <Name> texture=materials_<name>`, the full file stem), and a named generator:
 `python tools/make_material_tiles.py` writes every BMP here and the contact
 sheet `art_src/previews/materials.png`. Edit the script, not the BMPs.
 
