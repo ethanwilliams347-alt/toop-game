@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL.h>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include "game/camera.h"
 #include "game/display.h"
@@ -20,7 +21,38 @@
 // executable. The decisions it used to make inline that do not need SDL --
 // which mode to open at, what a backdrop file says, what the HUD reads -- are in
 // game/display.h, render/backdrop_set.h and present/present.h, each with a suite.
+namespace gpu {
+class GlCanvas;
+}
+
 namespace shell {
+
+// The window and the backend that draws into it. `canvas` is what everything
+// draws through; `gl` is the same object when the backend is OpenGL (for its
+// GL-only debug keys, F5 and F12) and null otherwise; `renderer` is set only for
+// the SDL backend.
+struct Display {
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    std::unique_ptr<gfx::Canvas> canvas;
+    gpu::GlCanvas* gl = nullptr;
+};
+
+// Opens the window at `mode` with the backend `want` asks for. GL that fails at
+// any step -- no 3.3 core context, a missing entry point, a shader that will not
+// compile, an incomplete framebuffer -- is reported on stderr and replaced by the
+// SDL renderer on a fresh window, so asking for GL never costs a session. Returns
+// false only when SDL itself cannot open a window, which is fatal either way.
+bool open_display(const DisplayMode& mode, RendererChoice want, Display& out);
+
+// Releases the canvas, then the renderer, then the window -- the order each
+// depends on the next. Every texture the canvas made must be destroyed first.
+void close_display(Display& d);
+
+// Writes the GL canvas's current frame -- between frames, the one last
+// presented -- to `path` as a 32-bit BMP. False, with the reason on stderr, if
+// the file cannot be written.
+bool save_frame_bmp(gpu::GlCanvas& gl, const char* path);
 
 // Loads a plain (non-scene) authored BMP as a texture -- the backdrop and prop
 // art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see

@@ -1,6 +1,9 @@
 #pragma once
 #include "camera.h"
 #include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
 
 // The window sizes the game can be run at, and the one place that knows how a
 // window size turns into a viewport.
@@ -143,10 +146,67 @@ inline ModeChoice choose_display_mode(const bool* fits, int count, int stored) {
 // swallowed: a setting that silently does not persist is worse than one that
 // says it could not, because the player's only evidence either way is what
 // happens on the next launch.
+//
+// Every other setting line already in the file is kept, in order: the file
+// holds more than the resolution now (renderer=, below), and a mode switch that
+// quietly reset the renderer would lose a setting by touching a different one.
+// Comment and blank lines are dropped and the header rewritten.
 inline bool save_display_mode(const DisplayMode& mode, const char* path = SETTINGS_PATH) {
+    std::vector<std::string> keep;
+    if (std::FILE* in = std::fopen(path, "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), in)) {
+            if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+            if (std::strncmp(line, "resolution=", 11) == 0) continue;
+            keep.emplace_back(line);
+            if (keep.back().back() != '\n') keep.back() += '\n';
+        }
+        std::fclose(in);
+    }
     std::FILE* f = std::fopen(path, "w");
     if (!f) return false;
     std::fprintf(f, "# SLOP Pixel Physics settings. Rewritten whenever a setting changes.\n");
     std::fprintf(f, "resolution=%dx%d\n", mode.window_w, mode.window_h);
+    for (const std::string& l : keep) std::fputs(l.c_str(), f);
     return std::fclose(f) == 0;
+}
+
+// Which gfx::Canvas backend draws the game: `renderer=sdl` (SDL_Renderer, the
+// default) or `renderer=gl` (OpenGL 3.3 core, src/gpu/). Hand-edited in
+// settings.txt, or overridden for one run with --renderer=gl|sdl on the command
+// line; the settings menu does not offer it yet.
+//
+// SDL stays the default while the GL backend is a parity backend: it draws the
+// same frame, so there is nothing yet to choose it for, and an untested driver is
+// a reason to opt in rather than out. GL falls back to SDL at startup on any
+// failure (no 3.3 context, a missing entry point, a shader that will not
+// compile), so asking for it never costs a session.
+enum class RendererChoice { Sdl, Gl };
+
+// One value, "gl" or "sdl", with or without a line ending. Anything else is no
+// answer and leaves `out` as it was.
+inline bool parse_renderer_choice(const char* value, RendererChoice& out) {
+    size_t n = std::strlen(value);
+    while (n > 0 && (value[n - 1] == '\n' || value[n - 1] == '\r' || value[n - 1] == ' ')) --n;
+    if (n == 2 && std::strncmp(value, "gl", 2) == 0) {
+        out = RendererChoice::Gl;
+        return true;
+    }
+    if (n == 3 && std::strncmp(value, "sdl", 3) == 0) {
+        out = RendererChoice::Sdl;
+        return true;
+    }
+    return false;
+}
+
+inline RendererChoice load_renderer_choice(const char* path = SETTINGS_PATH) {
+    RendererChoice choice = RendererChoice::Sdl;
+    std::FILE* f = std::fopen(path, "r");
+    if (!f) return choice;
+    char line[128];
+    while (std::fgets(line, sizeof(line), f)) {
+        if (std::strncmp(line, "renderer=", 9) == 0) parse_renderer_choice(line + 9, choice);
+    }
+    std::fclose(f);
+    return choice;
 }

@@ -3,8 +3,84 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include "gpu/gl_canvas.h"
+#include "render/sdl_canvas.h"
 
 namespace shell {
+
+namespace {
+
+SDL_Window* make_window(const DisplayMode& mode, Uint32 extra_flags) {
+    return SDL_CreateWindow("SLOP Pixel Physics", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                            mode.window_w, mode.window_h, SDL_WINDOW_SHOWN | extra_flags);
+}
+
+} // namespace
+
+bool open_display(const DisplayMode& mode, RendererChoice want, Display& out) {
+    if (want == RendererChoice::Gl) {
+        gpu::GlCanvas::set_window_attributes();
+        SDL_Window* window = make_window(mode, SDL_WINDOW_OPENGL);
+        std::string why = SDL_GetError();
+        if (window) {
+            std::unique_ptr<gpu::GlCanvas> gl =
+                gpu::GlCanvas::create(window, "assets/shaders", true, why);
+            if (gl) {
+                std::printf("Renderer: OpenGL (%s)\n", gl->describe().c_str());
+                out.window = window;
+                out.gl = gl.get();
+                out.canvas = std::move(gl);
+                return true;
+            }
+            // A fresh window for the SDL renderer rather than this one: a window
+            // made for GL has had its pixel format chosen for GL, and SDL would
+            // otherwise have to recreate it under the renderer anyway.
+            SDL_DestroyWindow(window);
+        }
+        std::fprintf(stderr, "OpenGL renderer unavailable (%s); falling back to SDL.\n",
+                     why.c_str());
+    }
+
+    SDL_Window* window = make_window(mode, 0);
+    if (!window) {
+        std::fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
+        return false;
+    }
+    SDL_Renderer* renderer =
+        SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer) {
+        std::fprintf(stderr, "Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
+        return false;
+    }
+    std::printf("Renderer: SDL\n");
+    out.window = window;
+    out.renderer = renderer;
+    out.gl = nullptr;
+    out.canvas = std::make_unique<gfx::SdlCanvas>(renderer);
+    return true;
+}
+
+void close_display(Display& d) {
+    d.gl = nullptr;
+    d.canvas.reset();  // the GL context goes with its canvas, before its window
+    if (d.renderer) SDL_DestroyRenderer(d.renderer);
+    if (d.window) SDL_DestroyWindow(d.window);
+    d.renderer = nullptr;
+    d.window = nullptr;
+}
+
+bool save_frame_bmp(gpu::GlCanvas& gl, const char* path) {
+    std::vector<uint32_t> px;
+    gl.read_pixels(px);
+    SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(
+        px.data(), gl.target_w(), gl.target_h(), 32,
+        gl.target_w() * static_cast<int>(sizeof(uint32_t)), SDL_PIXELFORMAT_ARGB8888);
+    const bool ok = s && SDL_SaveBMP(s, path) == 0;
+    if (!ok) std::fprintf(stderr, "Could not save %s: %s\n", path, SDL_GetError());
+    SDL_FreeSurface(s);
+    return ok;
+}
 
 // Loads a plain (non-scene) authored BMP as a texture -- the backdrop and prop
 // art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see

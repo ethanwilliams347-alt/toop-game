@@ -170,6 +170,39 @@ void test_choose_display_mode() {
     }
 }
 
+// settings.txt holds two keys now, and each is written by a different path: the
+// menu rewrites the file on a mode switch, and renderer= is hand-edited. A
+// rewrite that dropped the hand-edited line would switch the renderer back
+// without anyone asking.
+void test_settings_file() {
+    const char* path = "boot_test_settings.tmp";
+    {
+        std::FILE* f = std::fopen(path, "w");
+        std::fputs("# old header\nresolution=1x1\nrenderer=gl\n", f);
+        std::fclose(f);
+    }
+    check("settings: renderer=gl is read", load_renderer_choice(path) == RendererChoice::Gl);
+    check("settings: saving the mode succeeds", save_display_mode(DISPLAY_MODES[0], path));
+    check("settings: saving the mode keeps renderer=",
+          load_renderer_choice(path) == RendererChoice::Gl);
+    check("settings: saving the mode stores the mode", load_display_mode(path) == 0);
+    {
+        std::FILE* f = std::fopen(path, "w");
+        std::fputs("renderer=vulkan\n", f);
+        std::fclose(f);
+    }
+    check("settings: an unknown renderer is the default",
+          load_renderer_choice(path) == RendererChoice::Sdl);
+    std::remove(path);
+    check("settings: no file is the default", load_renderer_choice(path) == RendererChoice::Sdl);
+
+    RendererChoice c = RendererChoice::Sdl;
+    check("settings: the command-line spelling parses",
+          parse_renderer_choice("gl", c) && c == RendererChoice::Gl);
+    check("settings: a bad value is refused and changes nothing",
+          !parse_renderer_choice("g", c) && c == RendererChoice::Gl);
+}
+
 // The empty scene's spawn. A world with no terrain at all is a legitimate scene
 // -- assets/scenes.txt ships one so the backdrop can be looked at with nothing
 // standing in front of it -- and the body has to end up somewhere real in it.
@@ -502,6 +535,7 @@ int main() {
     test_stand_player_on_floor();
     test_free_first_landing();
     test_choose_display_mode();
+    test_settings_file();
     test_shipped_fixture();
     test_scene_resolve();
     test_scene_resolve_shipped_rows();

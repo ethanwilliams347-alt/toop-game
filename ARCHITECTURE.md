@@ -84,6 +84,7 @@ textures, draw calls.
 | HUD, reticle, hotbar, menu drawing | `src/render/overlay.*`, `src/ui/*` | `golden_frame_test` |
 | Parallax backdrops | `src/render/backdrop_set.*`, `backdrop_wrap.h`, `depth_rig.h`; generators in `tools/generate_bg_*.py` | `backdrop_test`, `backdrop_set_test`, `rig_test` |
 | Textures, render targets, cell upload | `src/shell/shell.*` | `shell_test` |
+| OpenGL backend, shaders | `src/gpu/` (`gl_canvas.*`, loader list `gl_funcs.inl`), `assets/shaders/` | `gl_frame_test` (GL vs SDL within +-3 levels on 99.5% of pixels; skips without a GL context) |
 | Frame loop, wiring | `src/main.cpp` (its header comment lists what moved out and where) | |
 | Build / which target links what | `CMakeLists.txt` (each set has a comment explaining its boundary) | `sdl_boundary_test` |
 
@@ -117,6 +118,7 @@ Arrows point from includer to included.
 | `src/present/` | `game/`, `physics/`, `render/frame.h` record types | `shell/` | headers only (via `frame.h`), no calls |
 | `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig, mood | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
 | `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
+| `src/gpu/` | `render/canvas.h`, std | everything else in `src/` | yes (SDL's GL context and `SDL_opengl.h`; only `gl.h` includes the latter) |
 | `src/shell/`, `src/main.cpp` | anything | | yes |
 
 ## Code map
@@ -231,19 +233,40 @@ Arrows point from includer to included.
   consume it. Format: `src/render/mood.h`, summary in `assets/README.md`.
 - `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
   fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
-  `sdl_canvas.*` -- `gfx::SdlCanvas`, the one backend, and the only render file
-  that calls SDL's renderer; golden_frame_test checksums it over a software renderer.
+  `sdl_canvas.*` -- `gfx::SdlCanvas`, the SDL_Renderer backend, and the only render
+  file that calls SDL's renderer; golden_frame_test checksums it over a software
+  renderer. The other backend is `gpu::GlCanvas` (below).
 - Draw through `gfx::Canvas`: `frame.*` -- `frame::compose`, walks `frame::LAYERS`
   in draw order; `overlay.*` -- screen-space layer (reticle, HUD, hotbar, run-over
   wash, settings screen) drawn after the world.
 - `player_sprite.h` -- generated; don't edit.
 
+### `src/gpu/` -- the OpenGL 3.3 core backend
+
+- `gl_canvas.*` -- `gpu::GlCanvas`, a `gfx::Canvas` that batches every fill and
+  blit as quads (one shader, `assets/shaders/sprite.*`; fills sample a 1x1 white
+  texture) into an offscreen framebuffer the window's size, then blits it to
+  the window and swaps on `present()`. For now a parity backend: same blend
+  equations as SDL, and destination rects truncated field by field the way
+  SDL's software renderer does, so the frame matches `SdlCanvas`'s. Reads the
+  window size at the first draw of each frame, so `shell::apply_mode` resizing
+  the window is all a mode change needs. `reload_shaders()` (F5) keeps the old
+  program on a failed compile; `read_pixels()` feeds `gl_frame_test` and F12.
+- `gl.h` / `gl.cpp` / `gl_funcs.inl` -- the loader: an X-macro list of every
+  entry point used, as `gpu::gl::Name` pointers filled by
+  `SDL_GL_GetProcAddress`. No GLAD/GLEW, nothing links opengl32.lib. A function
+  must be listed before it is called; a driver missing one fails creation.
+- Selected by `renderer=gl|sdl` in `settings.txt` (default `sdl`) or
+  `--renderer=gl|sdl`; `shell::open_display` falls back to SDL on any GL
+  failure (no context, missing entry point, shader compile, incomplete FBO).
+
 ### `src/ui/`, `src/shell/`, `src/main.cpp`
 
 - `ui/text.*` (3x5 bitmap font), `ui/hotbar.*` (the eight number-key materials
   and icons): ASCII art drawn to a `gfx::Canvas`.
-- `shell/shell.*` -- render targets, display-mode switching, BMP textures,
-  backdrop textures, visible-grid upload. Game executable only.
+- `shell/shell.*` -- opening the window with its backend (`open_display`, GL
+  with SDL fallback), render targets, display-mode switching, BMP textures,
+  backdrop textures, visible-grid upload, F12 frame BMPs. Game executable only.
 - `main.cpp` -- creates the window, owns the state the event switch dispatches
   to (menu, debug keys, recorder, scene index), runs the frame loop.
 
@@ -340,6 +363,7 @@ target).
 | `SCENE_PROP_SOURCES` | `slop_scene_props` | rest of `scene/` | no |
 | `PRESENT_SOURCES` | `slop_present` | `present/present` (needs engine) | include path only |
 | `FRAME_SOURCES` | `slop_frame` | `render/frame`, `render/overlay`, `ui/*` | yes |
+| `GPU_SOURCES` | `slop_gpu` | `gpu/gl`, `gpu/gl_canvas` | yes |
 | `SHELL_SOURCES` | -- (game only) | `shell/shell` | yes |
 
 `SlopPhysics` links all of them plus SDL2. Each test links the fewest sets it
@@ -356,7 +380,9 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
   Suites keep each `Run` on the heap, so the ASan build (`just asan`) needs no
   raised stack.
 - Guards worth knowing: `golden_frame_test` (checksum of a composited frame --
-  any visible change), `alloc_test` (allocations in a replayed step),
+  any visible change), `gl_frame_test` (the same kind of frame through
+  `GlCanvas` vs `SdlCanvas`; needs a GL 3.3 context, returns 77 = skipped
+  without one), `alloc_test` (allocations in a replayed step),
   `tuning_test` (`TUNING.md` vs. the constants it names), `sdl_boundary_test`.
 - `tests/bench_grid.cpp` -> `grid_bench`: timings incl. a replayed session. Not
   a test.

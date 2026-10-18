@@ -214,6 +214,25 @@ add_library(slop_present OBJECT ${PRESENT_SOURCES})
 target_include_directories(slop_present PUBLIC src)
 target_link_libraries(slop_present PUBLIC SDL2-static)
 
+# The OpenGL backend of gfx::Canvas (src/gpu/): a 3.3 core context on an SDL
+# window, a hand-written loader (gpu/gl_funcs.inl, filled through
+# SDL_GL_GetProcAddress, so there is no GLAD/GLEW and no opengl32.lib on any link
+# line), and the sprite batcher. Its own library rather than more FRAME_SOURCES:
+# golden_frame_test, preview_bodies and preview_backdrop link slop_frame to draw
+# through the SDL backend and have no use for GL, and gl_frame_test, which does,
+# links both.
+#
+# The shaders it compiles are files, assets/shaders/*.{vert,frag}, staged with
+# the rest of assets/ by SlopPhysics' POST_BUILD step; gl_frame_test reads them
+# from the source tree.
+set(GPU_SOURCES
+    src/gpu/gl.cpp
+    src/gpu/gl_canvas.cpp
+)
+add_library(slop_gpu OBJECT ${GPU_SOURCES})
+target_include_directories(slop_gpu PUBLIC src)
+target_link_libraries(slop_gpu PUBLIC SDL2-static)
+
 # /MP lets cl compile a library's files side by side, which matters most for
 # slop_engine: every other target waits for it, and its ten files took seven
 # seconds one after another. Only the libraries get it, because every other
@@ -226,7 +245,8 @@ target_link_libraries(slop_present PUBLIC SDL2-static)
 # the old per-target source lists would have been 20 projects of 10 to 26
 # files each. /MP implies /FS, so the ASan build's /Zi PDBs are safe.
 if(MSVC)
-    foreach(_lib slop_engine slop_render slop_backdrop slop_scene_props slop_frame slop_present)
+    foreach(_lib slop_engine slop_render slop_backdrop slop_scene_props slop_frame slop_present
+                 slop_gpu)
         target_compile_options(${_lib} PRIVATE /MP)
     endforeach()
 endif()
@@ -247,10 +267,11 @@ target_include_directories(SlopPhysics PRIVATE src)
 
 # SDL2main is required on Windows to abstract WinMain. SDL2-static is named
 # here although slop_frame would bring it anyway: every target that gets SDL
-# says so on its own link line, so a search for SDL2-static finds all four
-# (this, golden_frame_test, present_test, preview_backdrop) and nothing else.
+# says so on its own link line, so a search for SDL2-static finds every target
+# that has it (this, golden_frame_test, gl_frame_test, present_test,
+# preview_bodies, preview_backdrop).
 target_link_libraries(SlopPhysics PRIVATE slop_engine slop_render slop_backdrop slop_scene_props
-                      slop_frame slop_present SDL2main SDL2-static)
+                      slop_frame slop_present slop_gpu SDL2main SDL2-static)
 
 # main.cpp loads assets by a path relative to the working directory, not
 # relative to the source tree, so they have to sit next to the built executable
@@ -450,6 +471,20 @@ if(BUILD_TESTING)
     target_include_directories(golden_frame_test PRIVATE src tests)
     target_link_libraries(golden_frame_test PRIVATE slop_engine slop_render slop_frame SDL2-static)
     add_test(NAME golden_frame_test COMMAND golden_frame_test)
+
+    # The GL backend against the SDL one: the same frame composed through both,
+    # compared pixel by pixel. Unlike golden_frame_test it needs a real GL 3.3
+    # context, which means a video driver -- a hidden window, never shown. With no
+    # context to be had (a headless build machine, a remote session without GL)
+    # it returns 77 and ctest counts it as skipped, not passed: a skip is "not
+    # checked", and must not read as "checked and fine". Runs from the source
+    # tree for assets/shaders/.
+    add_executable(gl_frame_test tests/test_gl_frame.cpp)
+    target_include_directories(gl_frame_test PRIVATE src tests)
+    target_link_libraries(gl_frame_test PRIVATE slop_engine slop_render slop_frame slop_gpu
+                          SDL2-static)
+    add_test(NAME gl_frame_test COMMAND gl_frame_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(gl_frame_test PROPERTIES SKIP_RETURN_CODE 77)
 
     # The presenter, headless: the enemy atlas painted from a stepped Run and
     # checked cell by cell against what an arrow would hit there, the arrow
