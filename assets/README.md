@@ -90,7 +90,7 @@ is required unless marked optional.
 | `light` (repeatable, up to 64) | `x=c y=c color=r,g,b radius=c [flicker=f]` | world cells 0..999999; colour 0..8; 0 < radius <= 1024 cells; flicker 0..1 optional | -- |
 | `material` (repeatable, once per material) | `<Name> [tint=r,g,b] [texture=stem] [strength=] [rim=] [reflect=] [spec=] [depth=]` | Name spelled as in `MATERIALS` (`Sand Water Wall Wood Oil Steam Fire Charred`, not `Empty`); at least one field; tint 0..2 each; the rest 0..1 | tint 1, no texture, rest 0 |
 
-A full example, `assets/bg_tarn/bg_tarn_noir_mood.txt`:
+An example, trimmed from `assets/bg_tarn/bg_tarn_noir_mood.txt`:
 
 ```
 light_model multiply
@@ -105,7 +105,7 @@ weather rain density=0.7 angle=12 speed=60
 light x=210 y=150 color=1,0.62,0.25 radius=48 flicker=0.1   # sodium lamp
 light x=420 y=140 color=0.2,0.9,1.4 radius=30 flicker=0.3   # neon
 material Water tint=0.7,0.85,0.9 reflect=0.6 spec=0.4 depth=0.5
-material Wall texture=wall_rock strength=0.35 rim=0.5
+material Wall texture=materials_rock strength=0.35 rim=0.5
 ```
 
 The smallest mood is the single line `light_model legacy`, which loads equal
