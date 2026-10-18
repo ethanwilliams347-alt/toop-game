@@ -17,14 +17,24 @@
 //   2  raw: the pack's bytes as the colour, (r, g, b, a) -> red, green, blue,
 //      alpha, unblended. gl_frame_test reads it back to check the upload and
 //      the texel order against CellPack::texels() byte for byte.
+//
+// The second output is the emissive attachment of a lit frame (the multiply
+// light model, src/gpu/pass_graph.h): the light a cell gives off itself, linear,
+// u_emissive[type] of its own colour (LightField::gpu_constants: a flame all of
+// its colour, everything else none). Its alpha is the colour's, so a part-full
+// cell blends its glow as it blends its paint. Outside a lit frame only
+// attachment 0 is drawn to and it goes nowhere, so the legacy output above is
+// still exactly a blit.
 in vec2 v_uv;
 in vec4 v_color;
 
 uniform sampler2D u_tex;
 uniform usampler2D u_cells;
 uniform int u_mode;
+uniform float u_emissive[16];  // by ElementType
 
-out vec4 o_color;
+layout(location = 0) out vec4 o_color;
+layout(location = 1) out vec4 o_emissive;
 
 // render/cell_pack.h: A's bits.
 const uint FLAG_HIDDEN = 1u;
@@ -54,14 +64,22 @@ vec3 type_colour(uint t) {
     return vec3(1.0, 0.0, 1.0);                // a type this file does not know yet
 }
 
+vec3 to_linear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
 void main() {
     vec4 colour = texture(u_tex, v_uv) * v_color;
+    ivec2 p = ivec2(floor(v_uv * vec2(textureSize(u_tex, 0))));
+    uvec4 c = cell_at(p);
+    // A hidden cell's type is the fill around a loose body, not the body; the
+    // body's sprite is what is drawn there, and it gives off nothing.
+    float glow = (c.a & FLAG_HIDDEN) != 0u ? 0.0 : u_emissive[int(min(c.r, 15u))];
+    o_emissive = vec4(to_linear(colour.rgb) * glow, colour.a);
     if (u_mode == 0) {
         o_color = colour;
         return;
     }
-    ivec2 p = ivec2(floor(v_uv * vec2(textureSize(u_tex, 0))));
-    uvec4 c = cell_at(p);
     if (u_mode == 2) {
         o_color = vec4(c) / 255.0;
         return;

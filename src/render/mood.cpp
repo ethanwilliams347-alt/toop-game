@@ -1,5 +1,6 @@
 #include "render/mood.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -444,6 +445,35 @@ Mood load_for_scene(const std::string& field, const std::string& assets_dir, std
     Mood m;
     load(assets_dir + field, m, error);  // legacy() on failure, with *error set
     return m;
+}
+
+static_assert(MAX_LIGHTS <= lit::MAX_POINT_LIGHTS,
+              "the GL light pass holds fewer point lights than a mood may name");
+
+void fill_lit(const Mood& m, lit::LitFrame& out) {
+    out.ambient[0] = m.ambient.r;
+    out.ambient[1] = m.ambient.g;
+    out.ambient[2] = m.ambient.b;
+    out.sun_on = m.sun.on;
+    out.sun[0] = m.sun.color.r;
+    out.sun[1] = m.sun.color.g;
+    out.sun[2] = m.sun.color.b;
+    out.sun_dir[0] = m.sun.dir_x;
+    out.sun_dir[1] = m.sun.dir_y;
+    out.sun_shadow = m.sun.shadow;
+    out.light_count = std::min(m.lights.size(), lit::MAX_POINT_LIGHTS);
+    for (size_t i = 0; i < out.light_count; ++i) {
+        const PointLight& l = m.lights[i];
+        // Centred on the cell, so a lamp at x=72 is lit around that cell's middle
+        // rather than its corner.
+        out.lights[i] = lit::PointLight{static_cast<float>(l.x) + 0.5f,
+                                        static_cast<float>(l.y) + 0.5f,
+                                        l.color.r,
+                                        l.color.g,
+                                        l.color.b,
+                                        l.radius,
+                                        l.flicker};
+    }
 }
 
 }  // namespace mood

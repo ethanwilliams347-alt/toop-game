@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "physics/material.h"
+#include "render/lit_frame.h"
 
 // A scene's mood: how its light, air and materials look, Rain World style. A
 // daylight scene stays daylight; a noir scene gets night, rain, fog and neon.
@@ -232,5 +233,11 @@ bool load(const std::string& path, Mood& out, std::string* error);
 // empty, else load(assets_dir + field). A failure returns legacy() with
 // `*error` set, so the caller only has to print it.
 Mood load_for_scene(const std::string& field, const std::string& assets_dir, std::string* error);
+
+// The mood's half of a frame of the GL multiply light model (render/lit_frame.h):
+// ambient, sun, point lights. Leaves the frame half (origin, screen rect, time)
+// as it found it. Meaningful only when light_model is Multiply; a Legacy mood
+// is drawn by the CPU light pass and never gets here.
+void fill_lit(const Mood& m, lit::LitFrame& out);
 
 }  // namespace mood

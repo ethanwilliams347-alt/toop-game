@@ -80,6 +80,7 @@ const float LOG_CELL_AIR = std::log(TRANSMIT_CLEAR) / static_cast<float>(LightFi
 // call for every cell of every block, every frame -- ~311k per frame at 1080p,
 // most of the dark-frame cost. Defined after LOG_CELL_AIR because it reads it, and
 // both are in this translation unit, so initialisation order is declaration order.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): std::log and an array of floats; nothing here throws
 const std::array<float, static_cast<size_t>(ElementType::Count)> LOG_TRANSMIT = [] {
     std::array<float, static_cast<size_t>(ElementType::Count)> t{};
     for (size_t i = 0; i < t.size(); ++i) {
@@ -210,6 +211,7 @@ inline void cpu_relax() {
 #pragma warning(push)
 #pragma warning(disable : 4324)
 #endif
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding): the padding is the alignas lines below, on purpose
 class SweepPool {
 public:
     static constexpr int MAX_THREADS = 8;
@@ -568,9 +570,40 @@ void LightField::update(const Grid& grid, int origin_x, int origin_y) {
     // --- pack ---
     for (size_t i = 0; i < count; ++i) {
         const auto channel = [](float v) -> uint32_t {
+            // Non-negative after the clamp, where +0.5 and truncate is round-half-up.
+            // NOLINTNEXTLINE(bugprone-incorrect-roundings)
             return static_cast<uint32_t>(std::clamp(tone_map(v), 0.0f, 1.0f) * 255.0f + 0.5f);
         };
         texels[i] = 0xFF000000u | (channel(front[i].r) << 16) |
                     (channel(front[i].g) << 8) | channel(front[i].b);
     }
+}
+
+lit::LightConstants LightField::gpu_constants() {
+    static_assert(static_cast<int>(ElementType::Count) <= lit::MAX_TYPES,
+                  "lit::LightConstants' per-type tables are too short for ElementType");
+    lit::LightConstants c;
+    c.block = BLOCK;
+    c.iterations = ITERATIONS;
+    c.smooth_passes = SMOOTH_PASSES;
+    for (size_t i = 0; i < LOG_TRANSMIT.size(); ++i) {
+        const ElementType type = static_cast<ElementType>(i);
+        c.log_transmit[i] = LOG_TRANSMIT[i];
+        // Toward the sun, air passes everything: TRANSMIT_CLEAR is the falloff
+        // that sets how far a flame carries, and applied to a sunbeam it would
+        // put open sky in shadow a few dozen cells from any overhang.
+        c.sun_transmit[i] = type == ElementType::Empty ? 1.0f : std::exp(LOG_TRANSMIT[i]);
+        // A flame is the one cell whose own colour is light; everything else
+        // that glows does so through the propagated field.
+        c.emissive[i] = type == ElementType::Fire ? 1.0f : 0.0f;
+    }
+    c.log_solid = std::log(CELL_SOLID);
+    c.transmit_clear = TRANSMIT_CLEAR;
+    c.transmit_solid = TRANSMIT_SOLID;
+    c.glow_threshold = static_cast<float>(GLOW_THRESHOLD);
+    c.max_emission = MAX_EMISSION;
+    c.coverage_floor = COVERAGE_FLOOR;
+    c.min_visible = MIN_VISIBLE;
+    c.smooth_centre = SMOOTH_CENTRE;
+    return c;
 }

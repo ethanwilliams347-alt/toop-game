@@ -2,9 +2,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include "gpu/gl.h"
+#include "gpu/program.h"
 
 namespace gpu {
 namespace {
@@ -46,33 +45,6 @@ void apply_blend(gfx::Blend mode) {
         case gfx::Blend::None: break;
     }
     gl::Disable(GL_BLEND);
-}
-
-bool read_file(const std::string& path, std::string& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    std::ostringstream s;
-    s << f.rdbuf();
-    out = s.str();
-    return true;
-}
-
-// Compiles one stage. On failure the shader is deleted and the log says why.
-GLuint compile(GLenum type, const std::string& source, const std::string& name, std::string& log) {
-    const GLuint s = gl::CreateShader(type);
-    const GLchar* text = source.c_str();
-    gl::ShaderSource(s, 1, &text, nullptr);
-    gl::CompileShader(s);
-    GLint ok = 0;
-    gl::GetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char buf[2048] = {};
-        gl::GetShaderInfoLog(s, sizeof(buf), nullptr, buf);
-        log = name + ": " + buf;
-        gl::DeleteShader(s);
-        return 0;
-    }
-    return s;
 }
 
 // SDL's software renderer truncates each field of a float destination rect on
@@ -122,7 +94,7 @@ bool GlCanvas::init(std::string& why) {
     }
 
     std::string log;
-    if (!build_programs(program_, cells_program_, log)) {
+    if (!build_programs(program_, cells_program_, log) || !pipeline_.build(shader_dir_, log)) {
         why = log;
         return false;
     }
@@ -187,6 +159,8 @@ GlCanvas::~GlCanvas() {
             if (white_) gl::DeleteTextures(1, &white_);
             if (fbo_) gl::DeleteFramebuffers(1, &fbo_);
             if (fbo_tex_) gl::DeleteTextures(1, &fbo_tex_);
+            if (emissive_tex_) gl::DeleteTextures(1, &emissive_tex_);
+            pipeline_.release();
         }
         SDL_GL_DeleteContext(context_);
     }
@@ -194,41 +168,7 @@ GlCanvas::~GlCanvas() {
 
 bool GlCanvas::build_program(const char* vert, const char* frag, unsigned& out,
                              std::string& log) const {
-    const std::string vpath = shader_dir_ + "/" + vert;
-    const std::string fpath = shader_dir_ + "/" + frag;
-    std::string vsrc, fsrc;
-    if (!read_file(vpath, vsrc)) {
-        log = "cannot read " + vpath;
-        return false;
-    }
-    if (!read_file(fpath, fsrc)) {
-        log = "cannot read " + fpath;
-        return false;
-    }
-    const GLuint vs = compile(GL_VERTEX_SHADER, vsrc, vpath, log);
-    if (!vs) return false;
-    const GLuint fs = compile(GL_FRAGMENT_SHADER, fsrc, fpath, log);
-    if (!fs) {
-        gl::DeleteShader(vs);
-        return false;
-    }
-    const GLuint p = gl::CreateProgram();
-    gl::AttachShader(p, vs);
-    gl::AttachShader(p, fs);
-    gl::LinkProgram(p);
-    gl::DeleteShader(vs);  // flagged; freed with the program
-    gl::DeleteShader(fs);
-    GLint ok = 0;
-    gl::GetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char buf[2048] = {};
-        gl::GetProgramInfoLog(p, sizeof(buf), nullptr, buf);
-        log = fpath + " program: " + buf;
-        gl::DeleteProgram(p);
-        return false;
-    }
-    out = p;
-    return true;
+    return gpu::build_program(shader_dir_, vert, frag, out, log);
 }
 
 // Both or neither: the sprite program and the cells program share sprite.vert,
@@ -252,11 +192,67 @@ void GlCanvas::bind_cell_uniforms() {
     gl::Uniform1i(gl::GetUniformLocation(cells_program_, "u_cells"), 1);
     cu_scale_ = gl::GetUniformLocation(cells_program_, "u_scale");
     cu_mode_ = gl::GetUniformLocation(cells_program_, "u_mode");
+    cu_emissive_ = gl::GetUniformLocation(cells_program_, "u_emissive");
+    gl::Uniform1fv(cu_emissive_, lit::MAX_TYPES, constants_.emissive);
     gl::UseProgram(program_);
+}
+
+void GlCanvas::set_light_constants(const lit::LightConstants& c) {
+    flush();
+    constants_ = c;
+    bind_cell_uniforms();
+    if (frame_open_) gl::UseProgram(program_);
+}
+
+// One attachment outside a lit frame, two inside one. Set whenever the frame's
+// target is bound, since a pass may have left another framebuffer's set.
+void GlCanvas::apply_draw_buffers() {
+    static constexpr GLenum BOTH[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    gl::DrawBuffers(lit_ ? 2 : 1, BOTH);
+}
+
+void GlCanvas::begin_lit_frame() {
+    flush();
+    lit_ = true;
+    if (frame_open_) {
+        gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+        apply_draw_buffers();
+    }
+}
+
+bool GlCanvas::resolve_lit(const lit::LitFrame& f) {
+    begin_frame();
+    flush();
+    Pipeline::Inputs in;
+    in.albedo_tex = fbo_tex_;
+    in.emissive_tex = emissive_tex_;
+    in.frame_fbo = fbo_;
+    in.target_w = target_w_;
+    in.target_h = target_h_;
+    in.pack_tex = cell_tex_;
+    in.pack_w = cell_tex_w_;
+    in.pack_h = cell_tex_h_;
+    in.constants = &constants_;
+    in.frame = &f;
+    const bool ok = lit_ && pipeline_.run(in, error_);
+    // Back to the canvas's own state, whatever the passes left bound: the UI
+    // draws next, into attachment 0 only.
+    lit_ = false;
+    gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    apply_draw_buffers();
+    gl::Viewport(0, 0, target_w_, target_h_);
+    gl::BindVertexArray(vao_);
+    gl::UseProgram(program_);
+    gl::ActiveTexture(GL_TEXTURE0);
+    blend_known_ = false;
+    return ok;
 }
 
 bool GlCanvas::reload_shaders() {
     flush();
+    // The light passes first: they keep their old programs on a failure, so a
+    // broken pass shader leaves everything as it was.
+    if (!pipeline_.build(shader_dir_, error_)) return false;
     unsigned sprite = 0, cells = 0;
     if (!build_programs(sprite, cells, error_)) return false;
     gl::DeleteProgram(program_);
@@ -288,20 +284,33 @@ bool GlCanvas::resize_target(int w, int h) {
                    nullptr);
     gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    // The emissive attachment of a lit frame (see begin_lit_frame): linear light,
+    // so half-float, and the same size as the albedo it is resolved against.
+    GLuint emissive = 0;
+    gl::GenTextures(1, &emissive);
+    gl::BindTexture(GL_TEXTURE_2D, emissive);
+    gl::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     gl::GenFramebuffers(1, &fbo);
     gl::BindFramebuffer(GL_FRAMEBUFFER, fbo);
     gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, emissive, 0);
     if (gl::CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
         gl::DeleteFramebuffers(1, &fbo);
         gl::DeleteTextures(1, &tex);
+        gl::DeleteTextures(1, &emissive);
         error_ = "the offscreen framebuffer is incomplete";
         return false;
     }
     if (fbo_) gl::DeleteFramebuffers(1, &fbo_);
     if (fbo_tex_) gl::DeleteTextures(1, &fbo_tex_);
+    if (emissive_tex_) gl::DeleteTextures(1, &emissive_tex_);
     fbo_ = fbo;
     fbo_tex_ = tex;
+    emissive_tex_ = emissive;
+    apply_draw_buffers();
     target_w_ = w;
     target_h_ = h;
     gl::Viewport(0, 0, w, h);
@@ -320,6 +329,7 @@ void GlCanvas::begin_frame() {
     // margin, which is a bad frame rather than a crash.
     if (w != target_w_ || h != target_h_) resize_target(w, h);
     gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    apply_draw_buffers();
     gl::Viewport(0, 0, target_w_, target_h_);
     gl::BindVertexArray(vao_);
     gl::UseProgram(program_);
@@ -379,7 +389,16 @@ void GlCanvas::set_blend(gfx::Blend mode) { draw_blend_ = mode; }
 void GlCanvas::clear() {
     begin_frame();
     flush();
-    gl::ClearColor(color_[0] / 255.0f, color_[1] / 255.0f, color_[2] / 255.0f, color_[3] / 255.0f);
+    const GLfloat c[4] = {color_[0] / 255.0f, color_[1] / 255.0f, color_[2] / 255.0f,
+                          color_[3] / 255.0f};
+    if (lit_) {
+        // The albedo takes the clear colour; the emissive buffer starts dark.
+        static constexpr GLfloat DARK[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        gl::ClearBufferfv(GL_COLOR, 0, c);
+        gl::ClearBufferfv(GL_COLOR, 1, DARK);
+        return;
+    }
+    gl::ClearColor(c[0], c[1], c[2], c[3]);
     gl::Clear(GL_COLOR_BUFFER_BIT);
 }
 
