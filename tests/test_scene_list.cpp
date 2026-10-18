@@ -339,6 +339,53 @@ int main() {
                   r.rejected(), r.error);
         }
     }
+    // --- mood= ---------------------------------------------------------------
+    {
+        const Result r = parse("empty - - - floor\n");
+        check("mood: a row without mood= has none (the legacy mood)",
+              r.scenes.size() == 1 && r.scenes[0].mood.empty(), r.error);
+    }
+    {
+        const Result r = parse("bg_x - - - floor backdrop=bg_x mood=bg_x/bg_x_noir_mood.txt\n");
+        check("mood: a mood in the scene's own backdrop folder is kept",
+              r.scenes.size() == 1 && r.scenes[0].mood == "bg_x/bg_x_noir_mood.txt", r.error);
+    }
+    {
+        const Result r = parse("plain - - - floor mood=plain_mood.txt\n");
+        check("mood: a mood at the assets/ root is kept",
+              r.scenes.size() == 1 && r.scenes[0].mood == "plain_mood.txt", r.error);
+    }
+    {
+        const Result r = parse("bg_x - - - floor backdrop=bg_x mood=bg_y/bg_y_mood.txt\n");
+        check("mood: a mood in another set's folder is refused",
+              r.rejected() && r.error.find("own backdrop= folder") != std::string::npos, r.error);
+    }
+    {
+        const Result r = parse("bad - - - floor mood=bg_x/bg_x_mood.txt\n");
+        check("mood: a mood in a folder, in a scene with no backdrop, is refused", r.rejected(),
+              r.error);
+    }
+    {
+        const Result r = parse("bad - - - floor mood=a_mood.txt mood=b_mood.txt\n");
+        check("mood: mood= twice is refused",
+              r.rejected() && r.error.find("twice") != std::string::npos, r.error);
+    }
+    {
+        const char* bad[] = {"night.txt",           "_mood.txt",      "bg_x/_mood.txt",
+                             "a_mood.bmp",          "a_mood",         "bg_x/../a_mood.txt",
+                             "bg_x/sub/a_mood.txt", "a_mood.txt.bak", ""};
+        for (const char* file : bad) {
+            const Result r =
+                parse(std::string("bg_x - - - floor backdrop=bg_x mood=") + file + "\n");
+            check((std::string("mood: '") + file + "' is refused").c_str(), r.rejected(), r.error);
+        }
+    }
+    {
+        const Result r = parse("good - - - floor\nbad - - - floor mood=night.txt\n");
+        check("mood: a bad mood= on one row loses the whole list",
+              r.rejected() && r.error.find(":2:") != std::string::npos, r.error);
+    }
+
     {
         const Result r = parse("bad noextension noextension - floor\n");
         check("a filename with no extension is refused", r.rejected(), r.error);

@@ -32,6 +32,7 @@
 #include "render/backdrop_set.h"
 #include "render/frame.h"
 #include "render/light.h"
+#include "render/mood.h"
 #include "render/overlay.h"
 #include "render/player_anim.h"
 #include "render/sdl_canvas.h"
@@ -182,6 +183,11 @@ int main(int argc, char* argv[]) {
     // that names none.
     frame::Backdrop backdrop;
     backdrop_set::Anchor backdrop_anchor = backdrop_set::Anchor::Corner;
+
+    // The loaded scene's mood (render/mood.h). Loaded on every scene switch and
+    // not yet drawn: the GL passes that read it come later, and until then the
+    // SDL path draws what legacy() describes whatever this holds.
+    mood::Mood scene_mood = mood::legacy();
 
     // Scratch for the cell upload when the window reaches past the grid. Resized
     // at the upload site rather than here, because the display mode can change
@@ -535,6 +541,13 @@ int main(int argc, char* argv[]) {
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
         backdrop_anchor = shell::load_backdrop(canvas, def, camera.scale(), backdrop);
+        {
+            std::string mood_error;
+            scene_mood = mood::load_for_scene(def.mood, "assets/", &mood_error);
+            if (!mood_error.empty())
+                std::fprintf(stderr, "ERROR: %s\n         drawing scene '%s' in the legacy mood.\n",
+                             mood_error.c_str(), def.name.c_str());
+        }
 
         // The world itself: one call, shared with the replay bench and the tests,
         // so there is no second path that puts a world together. See game/level.h

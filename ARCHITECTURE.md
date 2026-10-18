@@ -36,8 +36,8 @@ task seems to require breaking one, stop and say so rather than working around i
   anything reachable from `Run::step()`. `alloc_test` counts allocations and
   fails if a replayed step makes any.
 - **Parsers reject the whole file, never a single line.** `load_prop_list`,
-  `load_level`, `backdrop_set::load`, `load_scene_list`, and
-  `load_sprite_manifest` return empty and set `*error` on
+  `load_level`, `backdrop_set::load`, `mood::load`, `load_scene_list`, and
+  `load_sprite_manifest` return empty (a mood: `legacy()`) and set `*error` on
   the first malformed record; callers log to `stderr` and continue degraded. Don't
   add per-line skip-and-continue — a scene that renders wrong silently is the
   failure this design prevents (`src/scene/props.h` has the full argument).
@@ -74,7 +74,7 @@ textures, draw calls.
 | Recording / replay | `src/game/input_log.*` | `grid_bench` replays `session.rec` |
 | Camera, window modes | `src/game/camera.h`, `src/game/display.h` | `camera_test` |
 | Debug keys, settings menu | `src/game/debug_view.h`, `src/game/settings_menu.h`, `src/main.cpp` (event switch) | `debug_test` |
-| Asset file format | the parser in `src/scene/` (or `src/render/backdrop_set.*`), `src/util/text_record.h` | the file's own header in `assets/`; `*_list_test`, `props_test`, `sprites_test`, `backdrop_set_test` |
+| Asset file format | the parser in `src/scene/` (or `src/render/backdrop_set.*`, `src/render/mood.*`), `src/util/text_record.h` | the file's own header in `assets/`; `*_list_test`, `props_test`, `sprites_test`, `backdrop_set_test`, `mood_test` |
 | New scene | `assets/scenes.txt`, a level file, BMPs | `scene_test`, `scene_list_test` |
 | Bind a sprite | `python tools/load_sprite.py <key> <file.bmp>` | never hardcode asset paths |
 | What appears on screen from game state | `src/present/present.*` | `present_test` |
@@ -115,7 +115,7 @@ Arrows point from includer to included.
 | `src/util/` | std | everything in `src/` | never (and not includable from `physics/`: it uses float) |
 | `src/game/` | `physics/`, `scene/` | `render/` record types, `present/`, `shell/` | no |
 | `src/present/` | `game/`, `physics/`, `render/frame.h` record types | `shell/` | headers only (via `frame.h`), no calls |
-| `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
+| `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig, mood | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
 | `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
 | `src/shell/`, `src/main.cpp` | anything | | yes |
 
@@ -192,7 +192,7 @@ Arrows point from includer to included.
 ### `src/scene/` -- authored files into records (no SDL; each parser rejects a malformed file whole)
 
 - `scene_list.*` -- `assets/scenes.txt`: five positional fields, then named
-  (`mode=`, `size=WxH`, `scale=`, `level=`, `backdrop=`).
+  (`mode=`, `size=WxH`, `scale=`, `level=`, `backdrop=`, `mood=`).
 - `bmp.*` -- reads material and albedo BMPs without SDL; `legend.h` is the
   frozen colour -> material table they're authored in.
 - `scene.*` -- `Scene`, `load_scene` (stamps into a `Grid`).
@@ -206,7 +206,7 @@ Arrows point from includer to included.
 - `text_record.h` -- shared reading for every line-per-record file: `#`
   comments, the name check that keeps paths inside `assets/`, strict number
   readers (whole field or error), the `path:line: why` error format. Used by
-  `scene/` and `render/backdrop_set`. Header-only, in no source set.
+  `scene/`, `render/backdrop_set` and `render/mood`. Header-only, in no source set.
 
 ### `src/present/`
 
@@ -223,7 +223,12 @@ Arrows point from includer to included.
   for a cell shader; reads `Grid::cell_data()` const and never
   `Element::color`; the bit layout a shader mirrors is in its header),
   `hidden_cell.h` (`frame::HiddenCell`, split out of `frame.h` so this layer
-  can read it; `fill_type` is set by `present::paint_bodies`).
+  can read it; `fill_type` is set by `present::paint_bodies`), `mood.*` (parses a scene's
+  `*_mood.txt`: light model, ambient/sun, fog, bloom, grade LUT, vignette,
+  grain, weather, point lights, per-material looks; `mood::legacy()` is
+  today's look and what a scene with no `mood=` gets). The mood is loaded on
+  scene switch in `main.cpp` and not yet drawn -- the planned GL passes
+  consume it. Format: `src/render/mood.h`, summary in `assets/README.md`.
 - `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
   fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
   `sdl_canvas.*` -- `gfx::SdlCanvas`, the one backend, and the only render file
@@ -331,7 +336,7 @@ target).
 |---|---|---|---|
 | `ENGINE_SOURCES` | `slop_engine` | `physics/*.cpp`, `game/run`, `game/level`, `game/input_log`, `scene/scene` | no -- links nothing |
 | `RENDER_SOURCES` | `slop_render` | `render/light`, `render/player_anim`, `render/cell_pack` (need engine) | no |
-| `BACKDROP_SOURCES` | `slop_backdrop` | `render/backdrop_set` (no engine) | no |
+| `BACKDROP_SOURCES` | `slop_backdrop` | `render/backdrop_set`, `render/mood` (no engine) | no |
 | `SCENE_PROP_SOURCES` | `slop_scene_props` | rest of `scene/` | no |
 | `PRESENT_SOURCES` | `slop_present` | `present/present` (needs engine) | include path only |
 | `FRAME_SOURCES` | `slop_frame` | `render/frame`, `render/overlay`, `ui/*` | yes |
@@ -371,5 +376,6 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
 `assets/` is copied next to the exe at build time (minus `assets/wip/`); source
 art is in `art_src/`. `assets/scenes.txt` lists scenes (material BMP, albedo
 BMP, optional prop list, then `mode=`, `size=`, `scale=`, `backdrop=` a
-`bg_*/backdrop.txt` directory, `level=`). `assets/sprites.txt` maps sprite keys
+`bg_*/backdrop.txt` directory, `level=`, `mood=` a `*_mood.txt` in that
+directory). `assets/sprites.txt` maps sprite keys
 to BMPs. Each format is documented at the top of its file and in its parser.
