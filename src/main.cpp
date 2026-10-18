@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <string>
 #include <vector>
@@ -35,7 +36,7 @@
 #include "render/mood.h"
 #include "render/overlay.h"
 #include "render/player_anim.h"
-#include "render/sdl_canvas.h"
+#include "gpu/gl_canvas.h"
 #include "present/present.h"
 #include "scene/level_files.h"
 #include "scene/props.h"
@@ -69,9 +70,25 @@ constexpr int GRID_HEIGHT = boot::GRID_HEIGHT;
 // down is scene setup, not rendering.
 using frame::Prop;
 
+// Ask hybrid-graphics laptops for the discrete GPU. The drivers look for these
+// two names exported from the executable itself, so they are here and not in
+// src/gpu/; they also steer the SDL renderer's Direct3D device, which is wanted.
+#ifdef _WIN32
+extern "C" {
+__declspec(dllexport) unsigned long NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    // renderer= in settings.txt, overridden for this run by --renderer=gl|sdl.
+    RendererChoice renderer_choice = load_renderer_choice();
+    for (int i = 1; i < argc; ++i) {
+        if (std::strncmp(argv[i], "--renderer=", 11) == 0 &&
+            !parse_renderer_choice(argv[i] + 11, renderer_choice))
+            std::fprintf(stderr, "Ignoring %s: expected --renderer=gl or --renderer=sdl.\n",
+                         argv[i]);
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
@@ -129,28 +146,17 @@ int main(int argc, char* argv[]) {
     std::printf("Display: %dx%d (%dx%d cells at %dx)\n", mode.window_w, mode.window_h,
                 mode.viewport_w(view_scale), mode.viewport_h(view_scale), view_scale);
 
-    SDL_Window* window = SDL_CreateWindow(
-        "SLOP Pixel Physics",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        mode.window_w, mode.window_h,
-        SDL_WINDOW_SHOWN
-    );
-    if (!window) {
-        std::fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
+    // The window and its backend, GL or SDL (shell::open_display falls back from
+    // GL to SDL on its own). Everything below draws, and makes and fills
+    // textures, through `canvas` (render/canvas.h) and never asks which it is,
+    // apart from the GL-only debug keys, which go through display.gl.
+    shell::Display display;
+    if (!shell::open_display(mode, renderer_choice, display)) {
         SDL_Quit();
         return 1;
     }
-
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) {
-        std::fprintf(stderr, "Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-    // Everything below draws, and makes and fills textures, through this
-    // (render/canvas.h); the renderer itself is touched again only to destroy it.
-    gfx::SdlCanvas canvas(renderer);
+    SDL_Window* window = display.window;
+    gfx::Canvas& canvas = *display.canvas;
 
     // The world's ARGB8888 streaming texture and the light texture, both sized
     // to the viewport rather than to the whole grid, and both rebuilt by this
@@ -158,8 +164,7 @@ int main(int argc, char* argv[]) {
     // the menu: there is no earlier mode to fall back to.
     shell::RenderTargets targets;
     if (!shell::apply_mode(window, canvas, mode, view_scale, targets)) {
-        SDL_DestroyRenderer(renderer);
-        SDL_DestroyWindow(window);
+        shell::close_display(display);
         SDL_Quit();
         return 1;
     }
@@ -435,6 +440,7 @@ int main(int argc, char* argv[]) {
     std::string record_notice;
     double record_notice_timer = 0.0;
     int saved_logs = 0;
+    int saved_frames = 0;  // F12's frame_NNN.bmp counter, GL only
 
     // Plant each prop on the terrain that is actually under it, rather than on a
     // hardcoded ground line. The scan is boot::plant_props; it runs here, after the
@@ -920,6 +926,24 @@ int main(int argc, char* argv[]) {
                 // F8 rather than I, which the angler's spawn key took: a function key
                 // beside F6, F7 and F9, the other toggles that only a developer wants.
                 if (e.key.keysym.sym == SDLK_F8 && !repeat) debug.inspector = !debug.inspector;
+                // GL only. F5 recompiles assets/shaders/ -- the staged copy beside the
+                // exe, so edit that one (a rebuild restages it) -- and keeps the
+                // running program when the new one does not compile. F12 saves the
+                // last presented frame as frame_NNN.bmp, for comparing looks.
+                if (e.key.keysym.sym == SDLK_F5 && !repeat && display.gl) {
+                    const bool took = display.gl->reload_shaders();
+                    if (!took)
+                        std::fprintf(stderr, "Shader reload failed:\n%s\n", display.gl->error());
+                    record_notice = took ? "SHADERS RELOADED" : "SHADER RELOAD FAILED - SEE STDERR";
+                    record_notice_timer = 2.0;
+                }
+                if (e.key.keysym.sym == SDLK_F12 && !repeat && display.gl) {
+                    char name[32];
+                    std::snprintf(name, sizeof(name), "frame_%03d.bmp", saved_frames++);
+                    const bool saved = shell::save_frame_bmp(*display.gl, name);
+                    record_notice = saved ? std::string("SAVED ") + name : "FRAME SAVE FAILED";
+                    record_notice_timer = 2.0;
+                }
                 if (e.key.keysym.sym == SDLK_f && !repeat) {
                     if (debug.free_camera) {
                         debug.attach_camera();
@@ -1389,8 +1413,7 @@ int main(int argc, char* argv[]) {
     shell::clear_backdrop(canvas, backdrop);
     canvas.destroy_texture(targets.light_texture);
     canvas.destroy_texture(targets.cells);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    shell::close_display(display);
     SDL_Quit();
 
     return 0;
