@@ -1,0 +1,57 @@
+# bg_tarn_wide's mood: the same golden hour as bg_tarn's, since this set is that
+# lake as one long walk and the two should read as one place. Keep them in
+# step: a change to one is a change to both, except the grade file.
+#
+# Units (src/render/mood.h is the authority; tune in game with F6 hot reload):
+#   colours      linear; `ambient`/`sun`/`fog` take r g b as three words,
+#                `color=`/`tint=` take r,g,b; light = albedo x (ambient + sun + lights)
+#   sun dir=     x,y the way the light TRAVELS (x right, y DOWN), each -1..1
+#   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
+#   bloom        threshold on linear luminance 0..16; strength 0..4
+#   weather      density 0..1, angle degrees from straight down (+ leans right),
+#                speed cells/s
+#   light x/y    whole world cells, y down; radius in cells; flicker 0..1
+#   material     Name as physics/material.h spells it; tint multiplies the
+#                albedo; texture=<stem> is assets/materials/<stem>.bmp (omit for
+#                no tile); strength is s in albedo*(1+s*(tile-0.5)); rim,
+#                reflect, spec and depth 0..1 (assets/materials/README.md)
+# authority; tune the numbers in game with F6 hot reload):
+#   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
+#   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
+#   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
+#   bloom        threshold on linear luminance; strength 0..1
+#   light x/y    world cells, y down (this world's surface is row 264); radius
+#                in cells; flicker 0..1
+#   material     tint multiplies the albedo; texture=<name> is
+#                assets/materials/materials_<name>.bmp, `none` for no tile;
+#                strength is s in albedo*(1+s*(tile-0.5)); rim, reflect, spec
+#                and depth 0..1 (assets/materials/README.md has each one)
+
+light_model multiply
+
+# Ambient + sun is about 1.1 in full sun, so a sunlit surface reads a touch
+# brighter than its albedo and a shaded one about half: the contrast the flat
+# legacy look never had. The ambient is the sky's teal, so shade goes cool.
+ambient 0.44 0.50 0.56
+sun 0.74 0.60 0.40 dir=-0.30,0.45 shadow=on
+
+# Haze only on the far half of the backdrop; the art already has aerial
+# perspective painted in, so this is a nudge, not a wall.
+fog 0.86 0.66 0.48 near=0.60 far=1.00 amount=0.18
+
+bloom threshold=0.85 strength=0.25
+grade bg_tarn_wide_grade.bmp
+vignette 0.15
+grain 0.02
+weather none
+
+# One row per material, all eight, so tuning one is editing a number rather
+# than remembering a default. Daylight: no tints; the albedo is the colour.
+material Sand tint=1.00,1.00,1.00 strength=0.00 rim=0.35 reflect=0.00 spec=0.10 depth=0.00
+material Water tint=1.00,1.00,1.00 texture=materials_caustics strength=0.50 rim=0.00 reflect=0.55 spec=0.60 depth=0.70
+material Wall tint=1.00,1.00,1.00 texture=materials_rock strength=0.60 rim=0.50 reflect=0.00 spec=0.08 depth=0.00
+material Wood tint=1.00,1.00,1.00 texture=materials_wood strength=0.55 rim=0.40 reflect=0.00 spec=0.05 depth=0.00
+material Oil tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.30 spec=0.80 depth=0.40
+material Steam tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Fire tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material Charred tint=1.00,1.00,1.00 texture=materials_charred strength=0.70 rim=0.20 reflect=0.00 spec=0.05 depth=0.00

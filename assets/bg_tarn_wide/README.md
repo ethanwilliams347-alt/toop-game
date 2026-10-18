@@ -56,3 +56,11 @@ Same rig as bg_tarn (horizon 200, contact 264, vertical strength 0.75).
 Why the far layers are narrower: `src/render/backdrop_set.h`, "why a layer may be
 narrower than its set". `backdrop_set_test` checks each width against the widest
 window.
+
+## Mood
+
+`bg_tarn_wide_mood.txt` is the scene's light: bg_tarn's golden hour, kept in step with it. It names `bg_tarn_wide_grade.bmp`, the
+colour-grade LUT strip written by `python tools/make_lut.py` (golden_hour grade),
+and the material tiles in `assets/materials/`. Both are read by the lit
+renderer; until `scenes.txt` gives the scene `mood=`, the scene keeps the
+legacy look.

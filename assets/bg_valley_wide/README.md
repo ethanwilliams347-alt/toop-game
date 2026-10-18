@@ -29,3 +29,11 @@ growth. `backdrop_set_test` checks the two sets against each other.
 | bg_valley_wide_03_hills_midnear.bmp | 0.55 |
 | bg_valley_wide_02_hills_near.bmp | 0.70 |
 | bg_valley_wide_01_fg_rocks.bmp | 1.00, foreground |
+
+## Mood
+
+`bg_valley_wide_mood.txt` is the scene's light: bg_valley's, kept in step with it. It names `bg_valley_wide_grade.bmp`, the
+colour-grade LUT strip written by `python tools/make_lut.py` (daylight grade),
+and the material tiles in `assets/materials/`. Both are read by the lit
+renderer; until `scenes.txt` gives the scene `mood=`, the scene keeps the
+legacy look.
