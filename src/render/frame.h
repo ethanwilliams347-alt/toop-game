@@ -1,8 +1,8 @@
 #pragma once
-#include <SDL.h>
 #include <vector>
 #include "game/camera.h"
 #include "render/backdrop_wrap.h"
+#include "render/canvas.h"
 #include "render/depth_rig.h"
 #include "render/light.h"
 
@@ -20,7 +20,7 @@ namespace frame {
 // is never dug, ignited or displaced. Drawn before the cell texture rather than
 // after, which is what gives a planted trunk its occlusion for free.
 struct Prop {
-    SDL_Texture* texture;
+    gfx::Texture texture;
     int w, h;  // native size, in world cells (1 BMP pixel = 1 cell)
     float anchor_x;  // world cell, bottom-centre of the sprite
     float anchor_y;
@@ -39,7 +39,7 @@ struct Prop {
 // is the rectangle's, which the caller works out from the species' own offset
 // and the pose's bounds. The size is `src`'s.
 struct EnemySprite {
-    SDL_Rect src;
+    gfx::Rect src;
     float x, y;
     int offset_x, offset_y;
     bool facing_left;
@@ -53,7 +53,7 @@ struct EnemySprite {
 // that point, clockwise. Its cells are left out of the cell texture while it
 // moves, so the grid does not draw it a second time, a cell at a time.
 struct BodySprite {
-    SDL_Rect src;
+    gfx::Rect src;
     float x, y;
     float pivot_x, pivot_y;
     float angle_deg;
@@ -99,7 +99,7 @@ struct ArrowSprite {
 using Band = backdrop_wrap::Band;
 
 struct ParallaxLayer {
-    SDL_Texture* texture = nullptr;
+    gfx::Texture texture;
     int w = 0, h = 0;
     int tex_h = 0;
     float parallax_x = 1.0f;
@@ -163,7 +163,7 @@ struct Params {
     const std::vector<Prop>* props = nullptr;
 
     // The world's ARGB streaming texture, already uploaded for this frame.
-    SDL_Texture* cells = nullptr;
+    gfx::Texture cells;
 
     // The objective marker, in world cells.
     bool has_objective = false;
@@ -173,7 +173,7 @@ struct Params {
     // The body, at its interpolated draw position -- the caller owns the
     // interpolation and the teleport clamp, because both read simulation state this
     // file has no business seeing.
-    SDL_Texture* player_tex = nullptr;
+    gfx::Texture player_tex;
     float player_x = 0.0f;
     float player_y = 0.0f;
     bool facing_left = false;
@@ -185,12 +185,12 @@ struct Params {
 
     // The enemies and the arrows. Null, or empty, draws nothing -- which is every
     // frame the golden test composes, so its checksum does not move.
-    SDL_Texture* enemy_atlas = nullptr;
+    gfx::Texture enemy_atlas;
     const std::vector<EnemySprite>* enemies = nullptr;
     const std::vector<ArrowSprite>* arrows = nullptr;
 
     // The loose bodies, the same way: null or empty draws nothing.
-    SDL_Texture* body_atlas = nullptr;
+    gfx::Texture body_atlas;
     const std::vector<BodySprite>* bodies = nullptr;
 
     // Spray in the air, the same way: null or empty draws nothing.
@@ -199,7 +199,7 @@ struct Params {
     // The field is read for any_light() and its block extent; the texture is what
     // gets drawn, and the caller has already uploaded it.
     const LightField* light = nullptr;
-    SDL_Texture* light_texture = nullptr;
+    gfx::Texture light_texture;
 
     // Seconds of wall clock, for the backdrop's own motion -- drifting clouds and
     // rippling water. Render-only by construction: it is read nowhere but the rig's
@@ -230,7 +230,7 @@ enum class Lighting : unsigned char {
 struct Layer {
     const char* name;
     Lighting lighting;
-    void (*draw)(SDL_Renderer*, const Params&);
+    void (*draw)(gfx::Canvas&, const Params&);
 };
 
 // Clears and draws the world layers, in order. Presents nothing and leaves the
@@ -240,7 +240,7 @@ struct Layer {
 // A loop over an ordered table rather than a run of draw calls, so adding a band
 // is an entry in that table instead of surgery between two comments. The table
 // is in frame.cpp, where the draw functions it names have internal linkage.
-void compose(SDL_Renderer* renderer, const Params& p);
+void compose(gfx::Canvas& canvas, const Params& p);
 
 // The table, exposed for tests and for anything that wants to enumerate the
 // composition without drawing it. LAYER_COUNT is its length.

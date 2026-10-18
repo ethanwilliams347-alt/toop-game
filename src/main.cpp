@@ -34,6 +34,7 @@
 #include "render/light.h"
 #include "render/overlay.h"
 #include "render/player_anim.h"
+#include "render/sdl_canvas.h"
 #include "present/present.h"
 #include "scene/level_files.h"
 #include "scene/props.h"
@@ -52,10 +53,10 @@
 constexpr int GRID_WIDTH = boot::GRID_WIDTH;
 constexpr int GRID_HEIGHT = boot::GRID_HEIGHT;
 
-// SDL_RenderCopy below stretches the whole viewport-sized texture across the
-// whole window (two null rects). The texture is the padded viewport and the
-// window is exactly the scale times that, so the blit is 1:1 whatever size the
-// world and the window are.
+// The cell blit (render/frame.cpp) stretches the whole viewport-sized texture
+// across the whole window. The texture is the padded viewport and the window is
+// exactly the scale times that, so the blit is 1:1 whatever size the world and
+// the window are.
 //
 // Camera owns every screen-to-world and world-to-screen conversion and the
 // viewport's position in the world, so mouse and render coordinates are correct
@@ -146,13 +147,16 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+    // Everything below draws, and makes and fills textures, through this
+    // (render/canvas.h); the renderer itself is touched again only to destroy it.
+    gfx::SdlCanvas canvas(renderer);
 
     // The world's ARGB8888 streaming texture and the light texture, both sized
     // to the viewport rather than to the whole grid, and both rebuilt by this
     // same call whenever the mode changes. Here a failure is fatal, unlike in
     // the menu: there is no earlier mode to fall back to.
     shell::RenderTargets targets;
-    if (!shell::apply_mode(window, renderer, mode, view_scale, targets)) {
+    if (!shell::apply_mode(window, canvas, mode, view_scale, targets)) {
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -192,8 +196,8 @@ int main(int argc, char* argv[]) {
     // One texture per distinct sprite name, not one per record: nine trees are
     // three images, and the cache is what keeps that true as a scene grows. Keyed
     // by name so prop_textures is also the destroy list at shutdown.
-    std::vector<std::pair<std::string, SDL_Texture*>> prop_textures;
-    auto prop_texture = [&](const std::string& sprite) -> SDL_Texture* {
+    std::vector<std::pair<std::string, gfx::Texture>> prop_textures;
+    auto prop_texture = [&](const std::string& sprite) -> gfx::Texture {
         for (auto& entry : prop_textures)
             if (entry.first == sprite) return entry.second;
         // A prop's name is already its own key, so the manifest can rebind one
@@ -201,7 +205,7 @@ int main(int argc, char* argv[]) {
         // which drawing that is becomes a swap you can make from the command
         // line.
         const std::string path = sprites.path_for(sprite, sprite + ".bmp");
-        SDL_Texture* tex = shell::load_art_texture(renderer, path.c_str(), true);
+        const gfx::Texture tex = shell::load_art_texture(canvas, path.c_str(), true);
         if (!tex) {
             std::fprintf(stderr, "WARNING: prop sprite '%s' did not load; "
                                  "every prop naming '%s' is skipped.\n",
@@ -235,10 +239,9 @@ int main(int argc, char* argv[]) {
     // against -- a sheet with the wrong frame size loads fine and draws fine, it
     // just draws the wrong rectangles.
     const std::string player_sheet_path = sprites.path_for(PLAYER_SHEET_KEY, PLAYER_SHEET_FILE);
-    SDL_Texture* player_tex = shell::load_art_texture(renderer, player_sheet_path.c_str(), true);
+    gfx::Texture player_tex = shell::load_art_texture(canvas, player_sheet_path.c_str(), true);
     if (player_tex) {
-        int sheet_w = 0, sheet_h = 0;
-        SDL_QueryTexture(player_tex, nullptr, nullptr, &sheet_w, &sheet_h);
+        const int sheet_w = player_tex.w, sheet_h = player_tex.h;
         const int need_w = player_sprite::SHEET_COLS * player_sprite::FRAME_W;
         const int need_h = player_sprite::SHEET_ROWS * player_sprite::FRAME_H;
         if (sheet_w != need_w || sheet_h != need_h) {
@@ -259,17 +262,16 @@ int main(int argc, char* argv[]) {
     // The enemies' bodies, painted every frame by present::paint_enemies into a
     // buffer this texture mirrors; present/present.h has the layout and why it is
     // built rather than loaded.
-    SDL_Texture* enemy_atlas =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                          present::ENEMY_ATLAS_W, present::ENEMY_ATLAS_H);
-    if (enemy_atlas) {
-        SDL_SetTextureBlendMode(enemy_atlas, SDL_BLENDMODE_BLEND);
-    } else {
+    gfx::Texture enemy_atlas = canvas.create_texture(present::ENEMY_ATLAS_W, present::ENEMY_ATLAS_H,
+                                                     gfx::Access::Streaming, gfx::Blend::Alpha);
+    if (!enemy_atlas) {
         // Loud, not fatal: the enemies are still simulated and can still be shot,
         // they are just invisible -- which is worse than a missing sprite and is
         // why this says so rather than falling back to nothing quietly.
-        std::fprintf(stderr, "WARNING: could not create the enemy texture (%s); "
-                             "enemies will not be drawn.\n", SDL_GetError());
+        std::fprintf(stderr,
+                     "WARNING: could not create the enemy texture (%s); "
+                     "enemies will not be drawn.\n",
+                     canvas.error());
     }
     std::vector<uint32_t> enemy_atlas_pixels(
         static_cast<size_t>(present::ENEMY_ATLAS_W) * present::ENEMY_ATLAS_H, 0u);
@@ -278,16 +280,13 @@ int main(int argc, char* argv[]) {
 
     // The loose bodies' pictures, the same way; present/present.h has the layout.
     // Without the texture the bodies are still drawn, as cells, the old way.
-    SDL_Texture* body_atlas =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                          present::BODY_ATLAS_W, present::BODY_ATLAS_H);
-    if (body_atlas) {
-        SDL_SetTextureBlendMode(body_atlas, SDL_BLENDMODE_BLEND);
-    } else {
+    gfx::Texture body_atlas = canvas.create_texture(present::BODY_ATLAS_W, present::BODY_ATLAS_H,
+                                                    gfx::Access::Streaming, gfx::Blend::Alpha);
+    if (!body_atlas) {
         std::fprintf(stderr,
                      "WARNING: could not create the body texture (%s); "
                      "moving structure will be drawn as cells.\n",
-                     SDL_GetError());
+                     canvas.error());
     }
     std::vector<uint32_t> body_atlas_pixels(
         static_cast<size_t>(present::BODY_ATLAS_W) * present::BODY_ATLAS_H, 0u);
@@ -333,7 +332,7 @@ int main(int argc, char* argv[]) {
     // alternative -- skip the row that would not parse -- is a scene that renders,
     // renders wrong, and says nothing. props.h has the argument in full.
     std::vector<PropDef> prop_defs;
-    std::vector<SDL_Texture*> prop_tex;
+    std::vector<gfx::Texture> prop_tex;
     std::vector<int> prop_w;
     std::vector<int> prop_h;
     auto load_props_for = [&](const scene_list::SceneDef& def) {
@@ -351,14 +350,15 @@ int main(int argc, char* argv[]) {
         // record whose sprite did not load keeps its slot with a null texture and
         // a width of 0, which is how boot::plant_props -- which knows no SDL -- is
         // told about it without being handed one.
-        prop_tex.assign(prop_defs.size(), nullptr);
+        prop_tex.assign(prop_defs.size(), gfx::Texture{});
         prop_w.assign(prop_defs.size(), 0);
         prop_h.assign(prop_defs.size(), 0);
         for (size_t i = 0; i < prop_defs.size(); ++i) {
-            SDL_Texture* tex = prop_texture(prop_defs[i].sprite);
+            const gfx::Texture tex = prop_texture(prop_defs[i].sprite);
             if (!tex) continue;  // already warned by prop_texture, once per name
             prop_tex[i] = tex;
-            SDL_QueryTexture(tex, nullptr, nullptr, &prop_w[i], &prop_h[i]);
+            prop_w[i] = tex.w;
+            prop_h[i] = tex.h;
         }
     };
     // The count is NOT printed here. A prop that has a texture is not yet a prop
@@ -516,7 +516,7 @@ int main(int argc, char* argv[]) {
         if (resolved.scale_changed) {
             const int previous = view_scale;
             view_scale = resolved.scale;
-            if (!shell::apply_mode(window, renderer, mode, view_scale, targets)) {
+            if (!shell::apply_mode(window, canvas, mode, view_scale, targets)) {
                 std::fprintf(stderr, "WARNING: could not rebuild render targets at %dx "
                                      "for scene '%s'; staying at %dx.\n",
                              view_scale, def.name.c_str(), previous);
@@ -529,12 +529,12 @@ int main(int argc, char* argv[]) {
 
         // A scene that kept the previous one's scale also kept its cell texture,
         // and the upload only ever rewrites the part the new grid covers.
-        shell::blank_cells(targets.cells);
+        shell::blank_cells(canvas, targets.cells);
 
         // After the size and the scale, and before anything is stamped: the stack
         // is drawn in screen pixels, which the line above has just settled, and
         // nothing below this reads the backdrop.
-        backdrop_anchor = shell::load_backdrop(renderer, def, camera.scale(), backdrop);
+        backdrop_anchor = shell::load_backdrop(canvas, def, camera.scale(), backdrop);
 
         // The world itself: one call, shared with the replay bench and the tests,
         // so there is no second path that puts a world together. See game/level.h
@@ -796,7 +796,7 @@ int main(int argc, char* argv[]) {
                     // switch, on a window, and report which way it went.
                     if (out.act == menu::Act::ApplyMode) {
                         const DisplayMode& wanted = DISPLAY_MODES[out.mode];
-                        if (shell::apply_mode(window, renderer, wanted, view_scale, targets)) {
+                        if (shell::apply_mode(window, canvas, wanted, view_scale, targets)) {
                             mode = wanted;
                             mode_index = out.mode;
                             // Persisted at the point it takes effect, not on the way out
@@ -1174,14 +1174,14 @@ int main(int argc, char* argv[]) {
         if (body_atlas) {
             present::paint_bodies(run, alpha, body_atlas_pixels, body_sprites, body_hidden);
             for (const frame::BodySprite& bs : body_sprites)
-                SDL_UpdateTexture(body_atlas, &bs.src,
-                                  body_atlas_pixels.data() +
-                                      static_cast<size_t>(bs.src.y) * present::BODY_ATLAS_W +
-                                      bs.src.x,
-                                  present::BODY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
+                canvas.update_texture(body_atlas, &bs.src,
+                                      body_atlas_pixels.data() +
+                                          static_cast<size_t>(bs.src.y) * present::BODY_ATLAS_W +
+                                          bs.src.x,
+                                      present::BODY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
         }
-        shell::upload_cells(targets.cells, run.grid, camera, visible_w, visible_h, cell_window,
-                            &body_hidden);
+        shell::upload_cells(canvas, targets.cells, run.grid, camera, visible_w, visible_h,
+                            cell_window, &body_hidden);
         present::paint_spray(run, alpha, spray_drops);
 
         // Computed against the same view origin the cell upload just used, and after
@@ -1197,8 +1197,8 @@ int main(int argc, char* argv[]) {
         // iteration count is the lever, not a cache.
         targets.light.update(run.grid, camera.view_x(), camera.view_y());
         if (targets.light.any_light()) {
-            SDL_UpdateTexture(targets.light_texture, nullptr, targets.light.pixels().data(),
-                              targets.light.cols() * sizeof(uint32_t));
+            canvas.update_texture(targets.light_texture, nullptr, targets.light.pixels().data(),
+                                  targets.light.cols() * static_cast<int>(sizeof(uint32_t)));
         }
 
         // --- the world layers ---
@@ -1213,11 +1213,11 @@ int main(int argc, char* argv[]) {
         present::paint_enemies(run, alpha, enemy_atlas_pixels, enemy_sprites);
         if (enemy_atlas) {
             for (const frame::EnemySprite& es : enemy_sprites)
-                SDL_UpdateTexture(enemy_atlas, &es.src,
-                                  enemy_atlas_pixels.data() +
-                                      static_cast<size_t>(es.src.y) * present::ENEMY_ATLAS_W +
-                                      es.src.x,
-                                  present::ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
+                canvas.update_texture(enemy_atlas, &es.src,
+                                      enemy_atlas_pixels.data() +
+                                          static_cast<size_t>(es.src.y) * present::ENEMY_ATLAS_W +
+                                          es.src.x,
+                                      present::ENEMY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
         }
         present::arrows(run, alpha, arrow_sprites);
 
@@ -1259,7 +1259,7 @@ int main(int argc, char* argv[]) {
         // cloud tiles makes the clouds jump at the wrap, and a float second count
         // still resolves a millisecond after a day of play.
         fp.time_s = static_cast<float>(static_cast<double>(SDL_GetTicks64()) / 1000.0);
-        frame::compose(renderer, fp);
+        frame::compose(canvas, fp);
 
         // --- the screen-space layer ---
         //
@@ -1347,9 +1347,9 @@ int main(int argc, char* argv[]) {
         // copy of "is it still showing" on the far side of the seam.
         if (menu_notice_timer > 0.0) op.notice = menu_notice;
 
-        overlay::draw(renderer, op);
+        overlay::draw(canvas, op);
 
-        SDL_RenderPresent(renderer);
+        canvas.present();
 
         // Surface the frame rate so performance regressions are visible while working.
         frames_this_second++;
@@ -1366,17 +1366,16 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (player_tex) SDL_DestroyTexture(player_tex);
-    if (enemy_atlas) SDL_DestroyTexture(enemy_atlas);
-    if (body_atlas) SDL_DestroyTexture(body_atlas);
+    canvas.destroy_texture(player_tex);
+    canvas.destroy_texture(enemy_atlas);
+    canvas.destroy_texture(body_atlas);
     // The cache is the destroy list -- one entry per distinct sprite name, so a
     // scene with fifty trees of three kinds still frees exactly three textures and
     // `props` holding several borrowed copies of each is not a double free.
-    for (auto& entry : prop_textures)
-        if (entry.second) SDL_DestroyTexture(entry.second);
-    shell::clear_backdrop(backdrop);
-    SDL_DestroyTexture(targets.light_texture);
-    SDL_DestroyTexture(targets.cells);
+    for (auto& entry : prop_textures) canvas.destroy_texture(entry.second);
+    shell::clear_backdrop(canvas, backdrop);
+    canvas.destroy_texture(targets.light_texture);
+    canvas.destroy_texture(targets.cells);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

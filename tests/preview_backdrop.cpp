@@ -40,6 +40,7 @@
 #include "game/camera.h"
 #include "render/frame.h"
 #include "render/backdrop_set.h"
+#include "render/sdl_canvas.h"
 #include "scene/bmp.h"
 #include "scene/scene_list.h"
 
@@ -54,16 +55,20 @@ int PADDED_W = 0;
 int PADDED_H = 0;
 constexpr int BODY_H = 26;  // Player::HEIGHT, stated here so this links no physics
 
-SDL_Texture* load(SDL_Renderer* r, const std::string& path, bool key) {
+gfx::Texture load(gfx::Canvas& canvas, const std::string& path, bool key) {
     SDL_Surface* s = SDL_LoadBMP(path.c_str());
     if (!s) {
         std::fprintf(stderr, "cannot load %s: %s\n", path.c_str(), SDL_GetError());
-        return nullptr;
+        return gfx::Texture{};
     }
     if (key) SDL_SetColorKey(s, SDL_TRUE, SDL_MapRGB(s->format, 0xFF, 0x00, 0xFF));
-    SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
+    SDL_Surface* argb = SDL_ConvertSurfaceFormat(s, SDL_PIXELFORMAT_ARGB8888, 0);
     SDL_FreeSurface(s);
-    if (t) SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    if (!argb) return gfx::Texture{};
+    const gfx::Texture t =
+        canvas.create_texture(argb->w, argb->h, gfx::Access::Static, gfx::Blend::Alpha);
+    if (t) canvas.update_texture(t, nullptr, argb->pixels, argb->pitch);
+    SDL_FreeSurface(argb);
     return t;
 }
 
@@ -146,11 +151,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "no software renderer: %s\n", SDL_GetError());
         return 1;
     }
+    gfx::SdlCanvas canvas(renderer);
 
     frame::Backdrop backdrop;
     for (const backdrop_set::Layer& sp : set.layers) {
         frame::ParallaxLayer l;
-        l.texture = load(renderer, set.dir + sp.file, !sp.opaque);
+        l.texture = load(canvas, set.dir + sp.file, !sp.opaque);
         if (!l.texture) return 1;
         l.w = backdrop_set::width_of(set, sp) * SCALE;
         l.h = set.native_h * SCALE;
@@ -180,9 +186,8 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> world(mat.pixels.size());
     for (size_t i = 0; i < world.size(); ++i)
         world[i] = (mat.pixels[i] & 0xFFFFFFu) == 0 ? 0u : (0xFF000000u | (alb.pixels[i] & 0xFFFFFFu));
-    SDL_Texture* cells = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                                           SDL_TEXTUREACCESS_STREAMING, PADDED_W, PADDED_H);
-    SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
+    const gfx::Texture cells =
+        canvas.create_texture(PADDED_W, PADDED_H, gfx::Access::Streaming, gfx::Blend::Alpha);
 
     // Where the shots stand: the rig's standing camera, or for a set with no rig
     // the floor of the world, which is where a standing player's camera is.
@@ -203,8 +208,8 @@ int main(int argc, char** argv) {
         camera.follow(view_x + PADDED_W / 2.0f, view_y + PADDED_H * Camera::VERTICAL_ANCHOR,
                       PADDED_W, PADDED_H, world_w, world_h);
         const uint32_t* src = world.data() + camera.view_y() * world_w + camera.view_x();
-        const SDL_Rect visible{0, 0, PADDED_W, PADDED_H};
-        SDL_UpdateTexture(cells, &visible, src, world_w * static_cast<int>(sizeof(uint32_t)));
+        const gfx::Rect visible{0, 0, PADDED_W, PADDED_H};
+        canvas.update_texture(cells, &visible, src, world_w * static_cast<int>(sizeof(uint32_t)));
 
         frame::Params fp;
         fp.camera = &camera;
@@ -213,7 +218,7 @@ int main(int argc, char** argv) {
         fp.backdrop = &backdrop;
         fp.cells = cells;
         fp.time_s = t;
-        frame::compose(renderer, fp);
+        frame::compose(canvas, fp);
         if (!write_raw(surface, out + "/" + name + ".raw")) {
             std::fprintf(stderr, "cannot write %s/%s.raw\n", out.c_str(), name.c_str());
             return false;

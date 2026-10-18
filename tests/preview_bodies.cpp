@@ -24,6 +24,7 @@
 #include "game/run.h"
 #include "present/present.h"
 #include "render/frame.h"
+#include "render/sdl_canvas.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -81,13 +82,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "no software renderer: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Texture* cells =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, W, H);
-    SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
-    SDL_Texture* atlas =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                          present::BODY_ATLAS_W, present::BODY_ATLAS_H);
-    SDL_SetTextureBlendMode(atlas, SDL_BLENDMODE_BLEND);
+    gfx::SdlCanvas canvas(renderer);
+    const gfx::Texture cells =
+        canvas.create_texture(W, H, gfx::Access::Streaming, gfx::Blend::Alpha);
+    const gfx::Texture atlas = canvas.create_texture(present::BODY_ATLAS_W, present::BODY_ATLAS_H,
+                                                     gfx::Access::Streaming, gfx::Blend::Alpha);
 
     Camera camera;
     camera.set_scale(SCALE);
@@ -121,13 +120,14 @@ int main(int argc, char** argv) {
                             static_cast<long long>(liquid));
         }
         for (const frame::BodySprite& s : sprites)
-            SDL_UpdateTexture(atlas, &s.src,
-                              atlas_pixels.data() +
-                                  static_cast<size_t>(s.src.y) * present::BODY_ATLAS_W + s.src.x,
-                              present::BODY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
+            canvas.update_texture(atlas, &s.src,
+                                  atlas_pixels.data() +
+                                      static_cast<size_t>(s.src.y) * present::BODY_ATLAS_W +
+                                      s.src.x,
+                                  present::BODY_ATLAS_W * static_cast<int>(sizeof(uint32_t)));
         view = g.get_pixels();
         for (const frame::HiddenCell& h : hidden) view[static_cast<size_t>(h.index)] = h.fill;
-        SDL_UpdateTexture(cells, nullptr, view.data(), W * static_cast<int>(sizeof(uint32_t)));
+        canvas.update_texture(cells, nullptr, view.data(), W * static_cast<int>(sizeof(uint32_t)));
 
         frame::Params p;
         p.camera = &camera;
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
         p.body_atlas = atlas;
         p.bodies = &sprites;
         p.spray = &spray;
-        frame::compose(renderer, p);
+        frame::compose(canvas, p);
 
         const auto* px = static_cast<const uint32_t*>(surface->pixels);
         const int pitch = surface->pitch / 4;

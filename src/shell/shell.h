@@ -6,6 +6,7 @@
 #include "game/display.h"
 #include "physics/grid.h"
 #include "render/backdrop_set.h"
+#include "render/canvas.h"
 #include "render/frame.h"
 #include "render/light.h"
 #include "scene/scene_list.h"
@@ -25,11 +26,11 @@ namespace shell {
 // art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see
 // tools/pixel_art.py) as transparent before the surface becomes a texture, which
 // is how a sprite with an irregular silhouette gets transparency out of a 24-bit
-// BMP with no alpha channel at all: SDL_CreateTextureFromSurface bakes a
-// colour-keyed surface's key into the resulting texture's alpha, so nothing
-// downstream has to know the trick happened. Opaque layers pass colorkey=false
-// and get a plain opaque texture.
-SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool colorkey);
+// BMP with no alpha channel at all: converting a colour-keyed surface to ARGB8888
+// bakes its key into the alpha, so nothing downstream has to know the trick
+// happened. Opaque layers pass colorkey=false and get a plain opaque texture.
+// Returns a null texture, with the reason on stderr, on failure.
+gfx::Texture load_art_texture(gfx::Canvas& canvas, const char* path, bool colorkey);
 
 // Everything whose size is a function of the display mode and the scene's
 // scale, and nothing else.
@@ -40,8 +41,8 @@ SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool col
 // switching when they were written; both are why switching is a matter of
 // rebuilding two textures instead of rebuilding the renderer.
 struct RenderTargets {
-    SDL_Texture* cells = nullptr;  // the world's ARGB streaming texture
-    SDL_Texture* light_texture = nullptr;
+    gfx::Texture cells;  // the world's ARGB streaming texture
+    gfx::Texture light_texture;
     LightField light{1, 1};  // replaced wholesale on every mode change
 };
 
@@ -50,7 +51,7 @@ struct RenderTargets {
 // old: on failure nothing has been destroyed, so the caller keeps playing at the
 // mode it already had. The argument for each texture setting is at the
 // definition.
-bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& mode, int scale,
+bool apply_mode(SDL_Window* window, gfx::Canvas& canvas, const DisplayMode& mode, int scale,
                 RenderTargets& targets);
 
 // Whether a mode's window actually fits on the display. No answer counts as yes:
@@ -62,27 +63,28 @@ bool mode_fits(const DisplayMode& mode, int display_index);
 // backdrop, or one whose file is refused, ends with no layers and the reason on
 // stderr -- the whole set is refused rather than drawn missing the layer it
 // could not read. Returns the set's anchor.
-backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::SceneDef& def,
-                                   int scale, frame::Backdrop& backdrop);
+backdrop_set::Anchor load_backdrop(gfx::Canvas& canvas, const scene_list::SceneDef& def, int scale,
+                                   frame::Backdrop& backdrop);
 
 // Destroys the layers' textures and empties the backdrop. The destroy is the
 // point: dropping the vector alone leaks a set's textures every scene change.
-void clear_backdrop(frame::Backdrop& backdrop);
+void clear_backdrop(gfx::Canvas& canvas, frame::Backdrop& backdrop);
 
 // Sets every texel of the cell texture to transparent. upload_cells only ever
 // writes the rect the grid covers, so whatever is outside it stays until this
 // clears it -- once when the texture is made, and again on every scene load,
 // because a scene that loads into the same texture at the same scale inherits
 // the previous scene's pixels in any part of the view the new grid does not cover.
-void blank_cells(SDL_Texture* cells);
+void blank_cells(gfx::Canvas& canvas, const gfx::Texture& cells);
 
 // Uploads the camera's view of the grid into `cells`, `visible_w` x `visible_h`
 // cells. `scratch` is only used when the view reaches past the grid's edge, or
 // when `hidden` names cells to draw something else in -- the cells of the loose
 // bodies drawn as sprites (present::paint_bodies), which would otherwise be
 // drawn twice, once of them a cell at a time. Each gets its `fill` instead.
-void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, int visible_w,
-                  int visible_h, std::vector<uint32_t>& scratch,
+void upload_cells(gfx::Canvas& canvas, const gfx::Texture& cells, const Grid& grid,
+                  const Camera& camera, int visible_w, int visible_h,
+                  std::vector<uint32_t>& scratch,
                   const std::vector<frame::HiddenCell>* hidden = nullptr);
 
 } // namespace shell

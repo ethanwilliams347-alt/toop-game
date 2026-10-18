@@ -182,13 +182,11 @@ uint32_t icon_base(ElementType type) {
     return shade(c, static_cast<float>(FLOOR) / static_cast<float>(brightest));
 }
 
-void fill(SDL_Renderer* r, const SDL_Rect& rect, uint32_t argb) {
-    SDL_SetRenderDrawColor(r,
-                           static_cast<uint8_t>((argb >> 16) & 0xFF),
-                           static_cast<uint8_t>((argb >> 8) & 0xFF),
-                           static_cast<uint8_t>(argb & 0xFF),
-                           static_cast<uint8_t>((argb >> 24) & 0xFF));
-    SDL_RenderFillRect(r, &rect);
+void fill(gfx::Canvas& canvas, const gfx::Rect& rect, uint32_t argb) {
+    canvas.set_draw_color(
+        static_cast<uint8_t>((argb >> 16) & 0xFF), static_cast<uint8_t>((argb >> 8) & 0xFF),
+        static_cast<uint8_t>(argb & 0xFF), static_cast<uint8_t>((argb >> 24) & 0xFF));
+    canvas.fill_rect(rect);
 }
 
 // Geometry, in one place so the row and the height agree by construction. A slot
@@ -201,7 +199,7 @@ int label_gap(int ui_scale) { return icon_scale(ui_scale); }
 
 } // namespace
 
-void draw_icon(SDL_Renderer* renderer, int x, int y, int scale, ElementType type) {
+void draw_icon(gfx::Canvas& canvas, int x, int y, int scale, ElementType type) {
     const Icon& art = icon_art(type);
     const uint32_t base = icon_base(type);
     const uint32_t light = shade(base, 1.45f);
@@ -216,13 +214,13 @@ void draw_icon(SDL_Renderer* renderer, int x, int y, int scale, ElementType type
                 case '-': colour = dark;  break;
                 default: continue;
             }
-            const SDL_Rect px{x + col * scale, y + row * scale, scale, scale};
-            fill(renderer, px, colour);
+            const gfx::Rect px{x + col * scale, y + row * scale, scale, scale};
+            fill(canvas, px, colour);
         }
     }
 }
 
-void draw_hotbar(SDL_Renderer* renderer, int window_w, int ui_scale, int selected) {
+void draw_hotbar(gfx::Canvas& canvas, int window_w, int ui_scale, int selected) {
     const int px = icon_scale(ui_scale);
     const int slot = slot_size(ui_scale);
     const int gap = slot_gap(ui_scale);
@@ -236,7 +234,7 @@ void draw_hotbar(SDL_Renderer* renderer, int window_w, int ui_scale, int selecte
     const int x0 = window_w - margin - row_w;
     const int y0 = margin;
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    canvas.set_blend(gfx::Blend::Alpha);
 
     for (int i = 0; i < HOTBAR_COUNT; ++i) {
         const int x = x0 + i * (slot + gap);
@@ -245,27 +243,27 @@ void draw_hotbar(SDL_Renderer* renderer, int window_w, int ui_scale, int selecte
         // A backing per slot rather than one panel behind the row: the selected
         // slot has to be findable in peripheral vision, and a brightness step
         // between neighbouring boxes reads faster than a border does.
-        fill(renderer, SDL_Rect{x, y0, slot, slot}, active ? 0xE0303030u : 0xB4101010u);
+        fill(canvas, gfx::Rect{x, y0, slot, slot}, active ? 0xE0303030u : 0xB4101010u);
 
         if (active) {
             // A frame in the material's own colour, so what is selected is stated
             // twice -- by the box and by the icon inside it.
             const uint32_t frame = shade(icon_base(HOTBAR[i].type), 1.45f);
-            fill(renderer, SDL_Rect{x, y0, slot, px}, frame);
-            fill(renderer, SDL_Rect{x, y0 + slot - px, slot, px}, frame);
-            fill(renderer, SDL_Rect{x, y0, px, slot}, frame);
-            fill(renderer, SDL_Rect{x + slot - px, y0, px, slot}, frame);
+            fill(canvas, gfx::Rect{x, y0, slot, px}, frame);
+            fill(canvas, gfx::Rect{x, y0 + slot - px, slot, px}, frame);
+            fill(canvas, gfx::Rect{x, y0, px, slot}, frame);
+            fill(canvas, gfx::Rect{x + slot - px, y0, px, slot}, frame);
         }
 
-        draw_icon(renderer, x + px, y0 + px, px, HOTBAR[i].type);
+        draw_icon(canvas, x + px, y0 + px, px, HOTBAR[i].type);
 
         const std::string label(1, HOTBAR[i].label);
         const int label_x = x + (slot - text_width(label, ui_scale)) / 2;
-        draw_text(renderer, label_x, y0 + slot + label_gap(ui_scale), ui_scale, label,
+        draw_text(canvas, label_x, y0 + slot + label_gap(ui_scale), ui_scale, label,
                   active ? 0xFFFFFFFFu : 0xFF909090u);
     }
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    canvas.set_blend(gfx::Blend::None);
 }
 
 } // namespace ui

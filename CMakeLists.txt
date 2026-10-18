@@ -178,9 +178,11 @@ target_include_directories(slop_scene_props PUBLIC src)
 # inside golden_frame_test. They pass this variable's own test -- SDL draw calls
 # and nothing else -- even though the name reads narrower than the contents.
 #
-# SDL2-static is PUBLIC: these files call SDL, and frame.h, overlay.h and the
-# ui headers include SDL.h, so whoever includes them needs SDL's headers too.
+# They draw through gfx::Canvas (render/canvas.h); render/sdl_canvas.cpp is the
+# one file here that calls SDL's renderer, and the backend golden_frame_test
+# checksums. SDL2-static stays PUBLIC for sdl_canvas.h's include path.
 set(FRAME_SOURCES
+    src/render/sdl_canvas.cpp
     src/render/frame.cpp
     src/render/overlay.cpp
     src/ui/text.cpp
