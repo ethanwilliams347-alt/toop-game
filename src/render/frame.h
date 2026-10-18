@@ -4,6 +4,7 @@
 #include "render/backdrop_wrap.h"
 #include "render/canvas.h"
 #include "render/depth_rig.h"
+#include "render/hidden_cell.h"
 #include "render/light.h"
 
 // The world layers of one frame, in the order they are drawn.
@@ -59,17 +60,8 @@ struct BodySprite {
     float angle_deg;
 };
 
-// A cell of a loose body, left out of the cell texture, and what to draw there
-// instead. The sprite is drawn where the body continuously is and its cells sit
-// at the nearest whole-cell pose, so the two can be up to a cell apart, and
-// wherever the sprite does not cover a cell the cell shows. Transparent, in a
-// pool, that sliver is a gap of backdrop around a stone sinking through water;
-// `fill` is the liquid or grain beside the body instead, so it reads as what the
-// body is pushing through. 0 (transparent) in air.
-struct HiddenCell {
-    int index;
-    uint32_t fill;
-};
+// HiddenCell (a loose body's cell and what shows there instead) is in
+// render/hidden_cell.h, so SDL-free code can read it.
 
 // One drop of spray (Grid::Spray): where it is in world cells, already
 // interpolated, and its colour, alpha included. Drawn as a cell-sized square.

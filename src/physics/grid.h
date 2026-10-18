@@ -95,6 +95,16 @@ public:
     // Raw pixel colours for rendering to an SDL texture.
     const std::vector<uint32_t>& get_pixels() const { return pixels; }
 
+    // Every cell, row-major, get_width() wide -- the same layout as get_pixels(),
+    // so index i is the same cell in both. For render code that reads a whole
+    // window of cells per frame (render/cell_pack.h), where get_element's bounds
+    // check and 12-byte copy per cell would be most of the cost. Read-only: the
+    // simulation's own write paths are the only ones, and a pointer that could
+    // write would let a renderer feed the simulation. Valid until the grid is
+    // destroyed or assigned to; the vector is sized once in the constructor, and
+    // reset() refills it in place.
+    const Element* cell_data() const { return cells.data(); }
+
     int get_width() const { return width; }
     int get_height() const { return height; }
 

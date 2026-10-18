@@ -16,6 +16,7 @@
 // is a nuisance, and timings are for reading, not for gating.
 
 #include "physics/grid.h"
+#include "render/cell_pack.h"
 #include "render/light.h"
 #include "game/boot.h"
 #include "game/display.h"
@@ -408,6 +409,50 @@ double run_light(const char* name, const WorldSize& size, void (*build)(Grid&, B
     std::printf("  %-10s %9.4f ms/frame  %6.1f%% of a 60 Hz frame   %3d/%d frames lit\n",
                 name, per_frame, 100.0 * per_frame / FRAME_BUDGET_MS,
                 lit_frames, LIGHT_FRAMES);
+    return per_frame;
+}
+
+// The per-frame material pack (render/cell_pack.h): the visible window turned
+// into one texel per cell for the cell shader. Same viewport and same shape of
+// measurement as run_light, for the same reasons -- render work, timed call by
+// call with the simulation stepped outside the clock. Not a --focus row: it is a
+// straight walk over the window with no early-out, so it has nothing for an A/B
+// to find that the light rows would not.
+//
+// The window hangs a few cells off the world's left edge on purpose, so the
+// padding path is in the number as well as the cell path; in play the camera
+// clamps and it rarely is. The first pack is outside the clock: it allocates
+// the buffer, which the game does once per display mode, not per frame.
+double run_pack(const char* name, const WorldSize& size, void (*build)(Grid&, Bench&),
+                void (*on_step)(Grid&, Bench&)) {
+    Bench b{size.w, size.h};
+    Grid g(b.w, b.h);
+    build(g, b);
+    for (int i = 0; i < 60; ++i) {
+        if (on_step) on_step(g, b);
+        g.update();
+    }
+    const int origin_x = -8;
+    const int origin_y = b.h / 2 - LIGHT_VIEW_H / 2;
+
+    cell_pack::CellPack pack;
+    pack.pack(g, origin_x, origin_y, LIGHT_VIEW_W, LIGHT_VIEW_H);
+    double pack_ms = 0.0;
+    uint32_t sink = 0;  // read the buffer so the pack cannot be optimised out
+    for (int i = 0; i < LIGHT_FRAMES; ++i) {
+        if (on_step) on_step(g, b);
+        g.update();
+
+        const auto start = std::chrono::steady_clock::now();
+        pack.pack(g, origin_x, origin_y, LIGHT_VIEW_W, LIGHT_VIEW_H);
+        const auto end = std::chrono::steady_clock::now();
+        pack_ms += std::chrono::duration<double, std::milli>(end - start).count();
+        sink ^= pack.texels()[static_cast<size_t>(i) % pack.texels().size()];
+    }
+
+    const double per_frame = pack_ms / LIGHT_FRAMES;
+    std::printf("  %-10s %9.4f ms/frame  %6.1f%% of a 60 Hz frame   (%08X)\n", name, per_frame,
+                100.0 * per_frame / FRAME_BUDGET_MS, sink);
     return per_frame;
 }
 
@@ -920,6 +965,7 @@ int main(int argc, char** argv) {
                 LIGHT_VIEW_W, LIGHT_VIEW_H, LightField::BLOCK, played.w, played.h);
     run_light("light/fire", played, build_burning, feed_fire);
     run_light("light/dark", played, build_settled, nullptr);
+    run_pack("pack", played, build_churning, nullptr);
 
     // The replayed row, printed last and under its own heading for the same reason
     // the light rows are: a different unit (a whole Run::step, not Grid::update) and
