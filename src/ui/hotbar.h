@@ -1,6 +1,7 @@
 #pragma once
 #include "physics/material.h"
 #include <SDL.h>
+#include "render/canvas.h"
 
 // The eight materials behind the eight number keys, and their icons.
 //
@@ -48,7 +49,7 @@ inline constexpr int HOTBAR_COUNT = static_cast<int>(sizeof(HOTBAR) / sizeof(HOT
 // Draws one material's icon with its top-left at (x, y), each authored pixel
 // `scale` screen pixels square. Colours come from MATERIALS, so an icon cannot
 // drift from the palette it depicts -- the art here is the shape only.
-void draw_icon(SDL_Renderer* renderer, int x, int y, int scale, ElementType type);
+void draw_icon(gfx::Canvas& canvas, int x, int y, int scale, ElementType type);
 
 // Draws the whole row anchored to the top-right corner of a `window_w`-wide
 // window, inset from both edges by a margin derived from `ui_scale`. Only the
@@ -59,6 +60,6 @@ void draw_icon(SDL_Renderer* renderer, int x, int y, int scale, ElementType type
 // `ui_scale` is DisplayMode::ui_scale(), not a constant: on a large display a
 // hotbar authored in fixed pixels is a postage stamp, and this one has to be
 // legible at a glance mid-dig or it is not an affordance at all.
-void draw_hotbar(SDL_Renderer* renderer, int window_w, int ui_scale, int selected);
+void draw_hotbar(gfx::Canvas& canvas, int window_w, int ui_scale, int selected);
 
 } // namespace ui

@@ -72,7 +72,7 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
         // written for a rectangle; the two must agree or what is drawn is a cell
         // off what is hit.
         const int left_in_frame = en.facing_left() ? art.w - b.x1 : b.x0;
-        out.push_back(frame::EnemySprite{SDL_Rect{slot_x, slot_y, bw, bh}, at.x, at.y,
+        out.push_back(frame::EnemySprite{gfx::Rect{slot_x, slot_y, bw, bh}, at.x, at.y,
                                          kind.offset_x() - left_in_frame, kind.offset_y() - b.y0,
                                          en.facing_left()});
     }
@@ -135,7 +135,7 @@ void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
         }
         if (shelf_y + h > BODY_ATLAS_H) continue;  // full this frame: drawn as cells
 
-        const SDL_Rect src{shelf_x, shelf_y, w, h};
+        const gfx::Rect src{shelf_x, shelf_y, w, h};
         for (int y = 0; y < h; ++y)
             std::fill_n(atlas.begin() +
                             (static_cast<std::ptrdiff_t>(shelf_y + y) * BODY_ATLAS_W + shelf_x),

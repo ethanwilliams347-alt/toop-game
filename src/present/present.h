@@ -9,10 +9,10 @@
 //
 // Everything here reads a `const Run&` and writes plain buffers and records --
 // the enemy atlas's pixels, the sprite lists, the HUD's text. It makes no SDL
-// call; frame.h's record types carry an SDL_Rect, which is the only SDL in
-// sight, and that is a type rather than a call. So present_test can paint a
-// body into the atlas and read the pixels back without a window, which the
-// same code inside main()'s frame loop could never be.
+// call and sees no SDL type: frame.h's record types carry gfx::Rect
+// (render/canvas.h), which is SDL_Rect's layout without SDL. So present_test can
+// paint a body into the atlas and read the pixels back without a window, which
+// the same code inside main()'s frame loop could never be.
 //
 // It sits between the two halves the rest of the tree keeps apart: it may read
 // the simulation (src/render/ may not) and it knows the frame's record types

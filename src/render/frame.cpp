@@ -16,10 +16,10 @@ namespace {
 // Clearing to the darkest sky tone makes the failure mode "the backdrop
 // is flat" instead of "the window is full of noise". It is also the whole
 // background of a scene that names no backdrop -- the `empty` sandbox.
-void draw_clear(SDL_Renderer* renderer, const Params&) {
+void draw_clear(gfx::Canvas& canvas, const Params&) {
     // Palette colour for darkest sky tone, matching tools/pixel_art.py.
-    SDL_SetRenderDrawColor(renderer, 0x38, 0x2C, 0x57, 255);
-    SDL_RenderClear(renderer);
+    canvas.set_draw_color(0x38, 0x2C, 0x57, 255);
+    canvas.clear();
 }
 
 // A backdrop layer. render/backdrop_set.h has the model and depth_rig.h the
@@ -57,10 +57,9 @@ void draw_clear(SDL_Renderer* renderer, const Params&) {
 // copies each at most, so the per-row path is a couple of hundred single-row
 // copies a frame. SDL batches them into one draw per texture; it is small next
 // to the light field, which is where the frame's measured cost is.
-void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l) {
+void draw_layer(gfx::Canvas& canvas, const Params& p, const ParallaxLayer& l) {
     if (!l.texture || l.tex_h <= 0) return;
-    int tex_w = 0;
-    SDL_QueryTexture(l.texture, nullptr, nullptr, &tex_w, nullptr);
+    const int tex_w = l.texture.w;
     if (tex_w <= 0) return;
 
     const Camera& camera = *p.camera;
@@ -80,12 +79,12 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
         drift_px = std::fmod(l.drift * p.time_s * static_cast<float>(scale),
                              static_cast<float>(l.w));
 
-    const auto draw_span = [&](float x, const SDL_Rect* src, float y, float h) {
+    const auto draw_span = [&](float x, const gfx::Rect* src, float y, float h) {
         const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(x, l.w, window_w);
         for (int c = 0; c < t.count; ++c) {
-            const SDL_FRect dst{t.first + static_cast<float>(c * l.w), y,
-                                static_cast<float>(l.w), h};
-            SDL_RenderCopyF(renderer, l.texture, src, &dst);
+            const gfx::FRect dst{t.first + static_cast<float>(c * l.w), y, static_cast<float>(l.w),
+                                 h};
+            canvas.blit(l.texture, src, dst);
         }
     };
 
@@ -99,7 +98,7 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
         for (const Band& band : l.bands) {
             if (band.row1 <= band.row0) continue;
             const float top = flat_edge(band.row0);
-            const SDL_Rect src{0, band.row0, tex_w, band.row1 - band.row0};
+            const gfx::Rect src{0, band.row0, tex_w, band.row1 - band.row0};
             draw_span(depth_rig::origin(cam_x, b.anchor_x, band.parallax_x, scale) + drift_px, &src,
                       top, flat_edge(band.row1) - top);
         }
@@ -140,7 +139,7 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
             if (row >= l.ripple_row0 && row < l.ripple_row1)
                 x += depth_rig::ripple_cells(row, p.time_s, b.ripple_amplitude) *
                      static_cast<float>(scale);
-            const SDL_Rect src{0, row, tex_w, 1};
+            const gfx::Rect src{0, row, tex_w, 1};
             draw_span(x, &src, top, bottom - top);
         }
         top = bottom;
@@ -148,16 +147,16 @@ void draw_layer(SDL_Renderer* renderer, const Params& p, const ParallaxLayer& l)
 }
 
 // The backdrop, in two passes either side of the world.
-void draw_backdrop(SDL_Renderer* renderer, const Params& p) {
+void draw_backdrop(gfx::Canvas& canvas, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
-        if (!l.is_foreground) draw_layer(renderer, p, l);
+        if (!l.is_foreground) draw_layer(canvas, p, l);
 }
 
-void draw_foreground(SDL_Renderer* renderer, const Params& p) {
+void draw_foreground(gfx::Canvas& canvas, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
-        if (l.is_foreground) draw_layer(renderer, p, l);
+        if (l.is_foreground) draw_layer(canvas, p, l);
 }
 
 // Props. Drawn before the cell texture on purpose -- see the Prop
@@ -165,18 +164,16 @@ void draw_foreground(SDL_Renderer* renderer, const Params& p) {
 // buried by it with no depth test and no new code path, exactly the way
 // the cell texture already occludes the backdrop wherever a cell is not
 // Empty.
-void draw_props(SDL_Renderer* renderer, const Params& p) {
+void draw_props(gfx::Canvas& canvas, const Params& p) {
     if (!p.props) return;
     const Camera& camera = *p.camera;
     for (const Prop& prop : *p.props) {
         if (!prop.texture) continue;
-        const SDL_FRect dst{
-            camera.world_to_screen_x(prop.anchor_x - prop.w / 2.0f),
-            camera.world_to_screen_y(prop.anchor_y - static_cast<float>(prop.h)),
-            static_cast<float>(camera.scale_length(prop.w)),
-            static_cast<float>(camera.scale_length(prop.h))
-        };
-        SDL_RenderCopyF(renderer, prop.texture, nullptr, &dst);
+        const gfx::FRect dst{camera.world_to_screen_x(prop.anchor_x - prop.w / 2.0f),
+                             camera.world_to_screen_y(prop.anchor_y - static_cast<float>(prop.h)),
+                             static_cast<float>(camera.scale_length(prop.w)),
+                             static_cast<float>(camera.scale_length(prop.h))};
+        canvas.blit(prop.texture, nullptr, dst);
     }
 }
 
@@ -184,15 +181,12 @@ void draw_props(SDL_Renderer* renderer, const Params& p) {
 // wherever the player usually is, so the player sits near screen centre
 // and it is the world that scrolls -- in whole cells that is a jerk of
 // everything on screen at once.
-void draw_cells(SDL_Renderer* renderer, const Params& p) {
+void draw_cells(gfx::Canvas& canvas, const Params& p) {
     const Camera& camera = *p.camera;
-    const SDL_FRect world_dst{
-        -camera.frac_x() * camera.scale(),
-        -camera.frac_y() * camera.scale(),
-        static_cast<float>(p.padded_w * camera.scale()),
-        static_cast<float>(p.padded_h * camera.scale())
-    };
-    SDL_RenderCopyF(renderer, p.cells, nullptr, &world_dst);
+    const gfx::FRect world_dst{-camera.frac_x() * camera.scale(), -camera.frac_y() * camera.scale(),
+                               static_cast<float>(p.padded_w * camera.scale()),
+                               static_cast<float>(p.padded_h * camera.scale())};
+    canvas.blit(p.cells, nullptr, world_dst);
 }
 
 // --- loose bodies ---
@@ -203,17 +197,17 @@ void draw_cells(SDL_Renderer* renderer, const Params& p) {
 // where it really is, between steps -- not where the grid rounded its cells to --
 // so a toppling post sweeps round as one object instead of being repainted a
 // cell at a time.
-void draw_bodies(SDL_Renderer* renderer, const Params& p) {
+void draw_bodies(gfx::Canvas& canvas, const Params& p) {
     if (!p.bodies || p.bodies->empty() || !p.body_atlas) return;
     const Camera& camera = *p.camera;
     const float scale = static_cast<float>(camera.scale_length(1));
     for (const BodySprite& b : *p.bodies) {
-        const SDL_FRect dst{
+        const gfx::FRect dst{
             camera.world_to_screen_x(b.x - b.pivot_x), camera.world_to_screen_y(b.y - b.pivot_y),
             static_cast<float>(b.src.w) * scale, static_cast<float>(b.src.h) * scale};
-        const SDL_FPoint centre{b.pivot_x * scale, b.pivot_y * scale};
-        SDL_RenderCopyExF(renderer, p.body_atlas, &b.src, &dst, static_cast<double>(b.angle_deg),
-                          &centre, SDL_FLIP_NONE);
+        const gfx::FPoint centre{b.pivot_x * scale, b.pivot_y * scale};
+        canvas.blit_ex(p.body_atlas, &b.src, dst, static_cast<double>(b.angle_deg), &centre,
+                       gfx::Flip::None);
     }
 }
 
@@ -223,18 +217,18 @@ void draw_bodies(SDL_Renderer* renderer, const Params& p) {
 // in the world, so it is lit with the water it came from. A cell-sized square
 // each, at the drop's own colour: a drop is liquid that has left the grid for a
 // few steps, and drawn as anything but a cell of it the landing would show.
-void draw_spray(SDL_Renderer* renderer, const Params& p) {
+void draw_spray(gfx::Canvas& canvas, const Params& p) {
     if (!p.spray || p.spray->empty()) return;
     const Camera& camera = *p.camera;
     const float scale = static_cast<float>(camera.scale_length(1));
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    canvas.set_blend(gfx::Blend::Alpha);
     for (const SprayDrop& d : *p.spray) {
-        const SDL_FRect dst{camera.world_to_screen_x(d.x - 0.5f),
-                            camera.world_to_screen_y(d.y - 0.5f), scale, scale};
-        SDL_SetRenderDrawColor(renderer, static_cast<uint8_t>(d.color >> 16),
-                               static_cast<uint8_t>(d.color >> 8), static_cast<uint8_t>(d.color),
-                               static_cast<uint8_t>(d.color >> 24));
-        SDL_RenderFillRectF(renderer, &dst);
+        const gfx::FRect dst{camera.world_to_screen_x(d.x - 0.5f),
+                             camera.world_to_screen_y(d.y - 0.5f), scale, scale};
+        canvas.set_draw_color(static_cast<uint8_t>(d.color >> 16),
+                              static_cast<uint8_t>(d.color >> 8), static_cast<uint8_t>(d.color),
+                              static_cast<uint8_t>(d.color >> 24));
+        canvas.fill_rect(dst);
     }
 }
 
@@ -253,7 +247,7 @@ void draw_spray(SDL_Renderer* renderer, const Params& p) {
 // Three concentric squares rather than a sprite: no new asset, no
 // manifest entry, and the dark ring is what stops it disappearing
 // against sand, the same reason the reticle has an outline.
-void draw_objective(SDL_Renderer* renderer, const Params& p) {
+void draw_objective(gfx::Canvas& canvas, const Params& p) {
     if (!p.has_objective) return;
     const Camera& camera = *p.camera;
     const float gx = static_cast<float>(p.objective_x);
@@ -268,14 +262,12 @@ void draw_objective(SDL_Renderer* renderer, const Params& p) {
         {  4, 0xFF, 0xFF, 0xFF },
     };
     for (const Ring& ring : rings) {
-        SDL_SetRenderDrawColor(renderer, ring.r, ring.g, ring.b, 255);
-        const SDL_FRect box{
-            camera.world_to_screen_x(gx - ring.cells / 2.0f),
-            camera.world_to_screen_y(gy - ring.cells / 2.0f),
-            static_cast<float>(camera.scale_length(ring.cells)),
-            static_cast<float>(camera.scale_length(ring.cells))
-        };
-        SDL_RenderFillRectF(renderer, &box);
+        canvas.set_draw_color(ring.r, ring.g, ring.b, 255);
+        const gfx::FRect box{camera.world_to_screen_x(gx - ring.cells / 2.0f),
+                             camera.world_to_screen_y(gy - ring.cells / 2.0f),
+                             static_cast<float>(camera.scale_length(ring.cells)),
+                             static_cast<float>(camera.scale_length(ring.cells))};
+        canvas.fill_rect(box);
     }
 }
 
@@ -287,41 +279,34 @@ void draw_objective(SDL_Renderer* renderer, const Params& p) {
 // what anchoring to the box's bottom-centre works out to -- the sprite's
 // baseline lands on the box's baseline and its extra width is split
 // evenly either side.
-void draw_player(SDL_Renderer* renderer, const Params& p) {
+void draw_player(gfx::Canvas& canvas, const Params& p) {
     const Camera& camera = *p.camera;
-    const SDL_FRect body{
-        camera.world_to_screen_x(p.player_x - player_sprite::OFFSET_X),
-        camera.world_to_screen_y(p.player_y - player_sprite::OFFSET_Y),
-        static_cast<float>(camera.scale_length(player_sprite::FRAME_W)),
-        static_cast<float>(camera.scale_length(player_sprite::FRAME_H))
-    };
+    const gfx::FRect body{camera.world_to_screen_x(p.player_x - player_sprite::OFFSET_X),
+                          camera.world_to_screen_y(p.player_y - player_sprite::OFFSET_Y),
+                          static_cast<float>(camera.scale_length(player_sprite::FRAME_W)),
+                          static_cast<float>(camera.scale_length(player_sprite::FRAME_H))};
     if (p.player_tex) {
-        const SDL_RendererFlip flip =
-            p.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
+        const gfx::Flip flip = p.facing_left ? gfx::Flip::Horizontal : gfx::Flip::None;
 
         // The source rect is the whole of "this is a sheet rather than a
         // sprite" on this side of the boundary. Which cell it names is decided
         // in render/player_anim.cpp, which is SDL-free and tested.
-        const SDL_Rect src{
-            p.sheet_col * player_sprite::FRAME_W,
-            p.sheet_row * player_sprite::FRAME_H,
-            player_sprite::FRAME_W, player_sprite::FRAME_H
-        };
-        SDL_RenderCopyExF(renderer, p.player_tex, &src, &body, 0.0, nullptr, flip);
+        const gfx::Rect src{p.sheet_col * player_sprite::FRAME_W,
+                            p.sheet_row * player_sprite::FRAME_H, player_sprite::FRAME_W,
+                            player_sprite::FRAME_H};
+        canvas.blit_ex(p.player_tex, &src, body, 0.0, nullptr, flip);
     } else {
         // A plain rectangle, kept as the fallback rather than deleted. A missing
         // asset should degrade to a visible player, not an invisible one --
         // load_art_texture already printed why it failed, and a game you can
         // still move around in is a better diagnostic than a world with nothing
         // in it.
-        SDL_SetRenderDrawColor(renderer, 235, 235, 245, 255);
-        const SDL_FRect box{
-            camera.world_to_screen_x(p.player_x),
-            camera.world_to_screen_y(p.player_y),
-            static_cast<float>(camera.scale_length(p.player_box_w)),
-            static_cast<float>(camera.scale_length(p.player_box_h))
-        };
-        SDL_RenderFillRectF(renderer, &box);
+        canvas.set_draw_color(235, 235, 245, 255);
+        const gfx::FRect box{camera.world_to_screen_x(p.player_x),
+                             camera.world_to_screen_y(p.player_y),
+                             static_cast<float>(camera.scale_length(p.player_box_w)),
+                             static_cast<float>(camera.scale_length(p.player_box_h))};
+        canvas.fill_rect(box);
     }
 }
 
@@ -330,19 +315,19 @@ void draw_player(SDL_Renderer* renderer, const Params& p) {
 // Drawn exactly like the player -- a frame anchored bottom-centre on the box,
 // flipped for facing -- except that the frame comes out of an atlas the caller
 // rebuilds from each body's surviving pixels rather than out of a fixed sheet.
-// The flip is SDL_FLIP_HORIZONTAL over the pose's rectangle, which the caller
+// The flip is a horizontal flip over the pose's rectangle, which the caller
 // anchors to match Enemy::pixel_at's flip, so a pixel drawn over a cell and the
 // pixel an arrow finds in that cell stay the same pixel.
-void draw_enemies(SDL_Renderer* renderer, const Params& p) {
+void draw_enemies(gfx::Canvas& canvas, const Params& p) {
     if (!p.enemies || p.enemies->empty() || !p.enemy_atlas) return;
     const Camera& camera = *p.camera;
     for (const EnemySprite& e : *p.enemies) {
-        const SDL_FRect body{camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
-                             camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
-                             static_cast<float>(camera.scale_length(e.src.w)),
-                             static_cast<float>(camera.scale_length(e.src.h))};
-        SDL_RenderCopyExF(renderer, p.enemy_atlas, &e.src, &body, 0.0, nullptr,
-                          e.facing_left ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
+        const gfx::FRect body{camera.world_to_screen_x(e.x - static_cast<float>(e.offset_x)),
+                              camera.world_to_screen_y(e.y - static_cast<float>(e.offset_y)),
+                              static_cast<float>(camera.scale_length(e.src.w)),
+                              static_cast<float>(camera.scale_length(e.src.h))};
+        canvas.blit_ex(p.enemy_atlas, &e.src, body, 0.0, nullptr,
+                       e.facing_left ? gfx::Flip::Horizontal : gfx::Flip::None);
     }
 }
 
@@ -354,7 +339,7 @@ void draw_enemies(SDL_Renderer* renderer, const Params& p) {
 // reads as a scratch on the glass; cell-sized squares are drawn in the world's
 // own unit, so an arrow is pixel art at the same resolution as everything it
 // flies past.
-void draw_arrows(SDL_Renderer* renderer, const Params& p) {
+void draw_arrows(gfx::Canvas& canvas, const Params& p) {
     if (!p.arrows || p.arrows->empty()) return;
     const Camera& camera = *p.camera;
     struct Part { int from, to; uint8_t r, gg, b; };
@@ -371,19 +356,19 @@ void draw_arrows(SDL_Renderer* renderer, const Params& p) {
         float dx = a.dir_x, dy = a.dir_y;
         if (dx == 0.0f && dy == 0.0f) dy = 1.0f;
         for (const Part& part : parts) {
-            SDL_SetRenderDrawColor(renderer, part.r, part.gg, part.b, 255);
+            canvas.set_draw_color(part.r, part.gg, part.b, 255);
             for (int i = part.from; i <= part.to; ++i) {
                 const float wx = std::floor(a.tip_x - dx * static_cast<float>(i));
                 const float wy = std::floor(a.tip_y - dy * static_cast<float>(i));
-                const SDL_FRect r{camera.world_to_screen_x(wx), camera.world_to_screen_y(wy),
-                                  cell, cell};
-                SDL_RenderFillRectF(renderer, &r);
+                const gfx::FRect r{camera.world_to_screen_x(wx), camera.world_to_screen_y(wy), cell,
+                                   cell};
+                canvas.fill_rect(r);
             }
         }
     }
 }
 
-// One extra RenderCopy -- the whole cost of the lighting feature on the GPU
+// One extra blit -- the whole cost of the lighting feature on the GPU
 // side.
 //
 // Drawn after the world and after the player, and before the reticle and HUD.
@@ -399,16 +384,14 @@ void draw_arrows(SDL_Renderer* renderer, const Params& p) {
 // whole block, so each texel's centre lands on the centre of the cells it was
 // computed from. Sized to the padded extent instead, every texel would sit up to
 // half a block off and the glow would trail behind the flame that cast it.
-void draw_light(SDL_Renderer* renderer, const Params& p) {
+void draw_light(gfx::Canvas& canvas, const Params& p) {
     if (!p.light || !p.light->any_light()) return;
     const Camera& camera = *p.camera;
-    const SDL_FRect light_dst{
-        -camera.frac_x() * camera.scale(),
-        -camera.frac_y() * camera.scale(),
+    const gfx::FRect light_dst{
+        -camera.frac_x() * camera.scale(), -camera.frac_y() * camera.scale(),
         static_cast<float>(p.light->cols() * LightField::BLOCK * camera.scale()),
-        static_cast<float>(p.light->rows() * LightField::BLOCK * camera.scale())
-    };
-    SDL_RenderCopyF(renderer, p.light_texture, nullptr, &light_dst);
+        static_cast<float>(p.light->rows() * LightField::BLOCK * camera.scale())};
+    canvas.blit(p.light_texture, nullptr, light_dst);
 }
 
 // --- the ordered list -----------------------------------------------------
@@ -469,8 +452,8 @@ static_assert(lighting_matches_order(),
 const Layer* const LAYERS = TABLE;
 const int LAYER_COUNT = TABLE_COUNT;
 
-void compose(SDL_Renderer* renderer, const Params& p) {
-    for (int i = 0; i < TABLE_COUNT; ++i) TABLE[i].draw(renderer, p);
+void compose(gfx::Canvas& canvas, const Params& p) {
+    for (int i = 0; i < TABLE_COUNT; ++i) TABLE[i].draw(canvas, p);
 }
 
 } // namespace frame

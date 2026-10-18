@@ -10,27 +10,38 @@ namespace shell {
 // art. `colorkey` marks pixel_art.COLOR_KEY (magenta, 0xFF00FF -- see
 // tools/pixel_art.py) as transparent before the surface becomes a texture, which
 // is how a sprite with an irregular silhouette gets transparency out of a 24-bit
-// BMP with no alpha channel at all: SDL_CreateTextureFromSurface bakes a
-// colour-keyed surface's key into the resulting texture's alpha, so nothing
-// downstream has to know the trick happened. Backdrop layers (opaque,
-// full-rect) pass colorkey=false and get a plain opaque texture.
-SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool colorkey) {
+// BMP with no alpha channel at all: converting a colour-keyed surface to
+// ARGB8888 bakes its key into the alpha, so nothing downstream has to know the
+// trick happened. Backdrop layers (opaque, full-rect) pass colorkey=false and
+// get a plain opaque texture.
+//
+// The conversion is done here rather than left to SDL_CreateTextureFromSurface,
+// which makes the same one internally, so that the texture comes from the
+// canvas and any backend can draw it. SDL_LoadBMP stays: it is SDL's file
+// reader, not its renderer, and decoding a BMP is not a renderer's job.
+gfx::Texture load_art_texture(gfx::Canvas& canvas, const char* path, bool colorkey) {
     SDL_Surface* surf = SDL_LoadBMP(path);
     if (!surf) {
         std::fprintf(stderr, "Failed to load %s: %s\n", path, SDL_GetError());
-        return nullptr;
+        return gfx::Texture{};
     }
     if (colorkey) {
         const Uint32 key = SDL_MapRGB(surf->format, 0xFF, 0x00, 0xFF);
         SDL_SetColorKey(surf, SDL_TRUE, key);
     }
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+    SDL_Surface* argb = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_ARGB8888, 0);
     SDL_FreeSurface(surf);
-    if (!tex) {
-        std::fprintf(stderr, "Failed to create texture from %s: %s\n", path, SDL_GetError());
-        return nullptr;
+    if (!argb) {
+        std::fprintf(stderr, "Failed to convert %s: %s\n", path, SDL_GetError());
+        return gfx::Texture{};
     }
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    const gfx::Texture tex =
+        canvas.create_texture(argb->w, argb->h, gfx::Access::Static, gfx::Blend::Alpha);
+    if (tex)
+        canvas.update_texture(tex, nullptr, argb->pixels, argb->pitch);
+    else
+        std::fprintf(stderr, "Failed to create texture from %s: %s\n", path, canvas.error());
+    SDL_FreeSurface(argb);
     return tex;
 }
 
@@ -48,32 +59,12 @@ SDL_Texture* load_art_texture(SDL_Renderer* renderer, const char* path, bool col
 // many cells a window holds is a question about both. It is therefore called on
 // a scene change as well as a mode change; the window resize at the bottom is
 // idempotent when only the scale moved.
-bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& mode, int scale,
+bool apply_mode(SDL_Window* window, gfx::Canvas& canvas, const DisplayMode& mode, int scale,
                 RenderTargets& targets) {
-    SDL_Texture* cells =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                          mode.padded_w(scale), mode.padded_h(scale));
-    if (!cells) {
-        std::fprintf(stderr, "Could not create a %dx%d cell texture: %s\n", mode.padded_w(scale),
-                     mode.padded_h(scale), SDL_GetError());
-        return false;
-    }
-
-    LightField light(mode.padded_w(scale), mode.padded_h(scale));
-    SDL_Texture* light_texture =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                          light.cols(), light.rows());
-    if (!light_texture) {
-        std::fprintf(stderr, "Could not create a %dx%d light texture: %s\n", light.cols(),
-                     light.rows(), SDL_GetError());
-        SDL_DestroyTexture(cells);
-        return false;
-    }
-
-    // Both blend modes and the light's filtering are re-applied here, not set
-    // once at startup, because they are properties of a texture and these are
-    // new textures. Each of the three is load-bearing and none is obvious from
-    // the create call:
+    // Both blend modes and the light's filtering are given here, not set once at
+    // startup, because they are properties of a texture and these are new
+    // textures. Each of the three is load-bearing and none is obvious from the
+    // create call's other arguments:
     //
     // BLEND on the cells. Empty is 0x00000000 in MATERIALS, so an empty cell
     // is transparent rather than black -- but only if the texture is
@@ -94,9 +85,23 @@ bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& m
     // SDL_HINT_RENDER_SCALE_QUALITY, which is read at creation time and is
     // global -- routing this through a global would make the cell texture's
     // sharpness depend on the order the two are created in.
-    SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureBlendMode(light_texture, SDL_BLENDMODE_ADD);
-    SDL_SetTextureScaleMode(light_texture, SDL_ScaleModeLinear);
+    gfx::Texture cells = canvas.create_texture(mode.padded_w(scale), mode.padded_h(scale),
+                                               gfx::Access::Streaming, gfx::Blend::Alpha);
+    if (!cells) {
+        std::fprintf(stderr, "Could not create a %dx%d cell texture: %s\n", mode.padded_w(scale),
+                     mode.padded_h(scale), canvas.error());
+        return false;
+    }
+
+    LightField light(mode.padded_w(scale), mode.padded_h(scale));
+    const gfx::Texture light_texture = canvas.create_texture(
+        light.cols(), light.rows(), gfx::Access::Streaming, gfx::Blend::Add, gfx::Filter::Linear);
+    if (!light_texture) {
+        std::fprintf(stderr, "Could not create a %dx%d light texture: %s\n", light.cols(),
+                     light.rows(), canvas.error());
+        canvas.destroy_texture(cells);
+        return false;
+    }
 
     // A streaming texture is created with undefined contents, and the upload each
     // frame only ever writes the rect the grid actually covers. A world smaller than
@@ -104,10 +109,10 @@ bool apply_mode(SDL_Window* window, SDL_Renderer* renderer, const DisplayMode& m
     // allocation contained, which shows as garbage along the edge rather than as the
     // backdrop. Cleared here for a new texture, and by main.cpp again on every scene
     // load -- see blank_cells for why once is not enough.
-    blank_cells(cells);
+    blank_cells(canvas, cells);
 
-    if (targets.cells) SDL_DestroyTexture(targets.cells);
-    if (targets.light_texture) SDL_DestroyTexture(targets.light_texture);
+    canvas.destroy_texture(targets.cells);
+    canvas.destroy_texture(targets.light_texture);
     targets.cells = cells;
     targets.light_texture = light_texture;
     targets.light = std::move(light);
@@ -135,9 +140,8 @@ bool mode_fits(const DisplayMode& mode, int display_index) {
 
 // --- the backdrop -----------------------------------------------------------
 
-void clear_backdrop(frame::Backdrop& backdrop) {
-    for (frame::ParallaxLayer& l : backdrop.layers)
-        if (l.texture) SDL_DestroyTexture(l.texture);
+void clear_backdrop(gfx::Canvas& canvas, frame::Backdrop& backdrop) {
+    for (frame::ParallaxLayer& l : backdrop.layers) canvas.destroy_texture(l.texture);
     backdrop = frame::Backdrop{};
 }
 
@@ -149,9 +153,9 @@ void clear_backdrop(frame::Backdrop& backdrop) {
 // native size times the scale and nothing else -- no fitting to the window. The
 // caller passes the scale actually in use rather than the one the scene asked
 // for, so a scene whose requested scale could not be applied still lines up.
-backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::SceneDef& def,
-                                   int scale, frame::Backdrop& backdrop) {
-    clear_backdrop(backdrop);
+backdrop_set::Anchor load_backdrop(gfx::Canvas& canvas, const scene_list::SceneDef& def, int scale,
+                                   frame::Backdrop& backdrop) {
+    clear_backdrop(canvas, backdrop);
     if (def.backdrop.empty()) {
         std::printf("Backdrop: none\n");
         return backdrop_set::Anchor::Corner;
@@ -170,7 +174,7 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
     int missing = 0;
     for (const backdrop_set::Layer& sp : set.layers) {
         const std::string path = set.dir + sp.file;
-        SDL_Texture* tex = load_art_texture(renderer, path.c_str(), !sp.opaque);
+        const gfx::Texture tex = load_art_texture(canvas, path.c_str(), !sp.opaque);
         if (!tex) {
             ++missing;
             continue;
@@ -213,12 +217,12 @@ backdrop_set::Anchor load_backdrop(SDL_Renderer* renderer, const scene_list::Sce
 
 // --- the cells -----------------------------------------------------------------
 
-void blank_cells(SDL_Texture* cells) {
-    if (!cells) return;
-    int w = 0, h = 0;
-    if (SDL_QueryTexture(cells, nullptr, nullptr, &w, &h) != 0 || w <= 0 || h <= 0) return;
-    const std::vector<uint32_t> blank(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
-    SDL_UpdateTexture(cells, nullptr, blank.data(), w * static_cast<int>(sizeof(uint32_t)));
+void blank_cells(gfx::Canvas& canvas, const gfx::Texture& cells) {
+    if (!cells || cells.w <= 0 || cells.h <= 0) return;
+    const std::vector<uint32_t> blank(static_cast<size_t>(cells.w) * static_cast<size_t>(cells.h),
+                                      0u);
+    canvas.update_texture(cells, nullptr, blank.data(),
+                          cells.w * static_cast<int>(sizeof(uint32_t)));
 }
 
 // Upload only the visible rect, not the whole grid, starting from the camera's
@@ -234,11 +238,11 @@ void blank_cells(SDL_Texture* cells) {
 // (A near-terrain tint pass used to sit here, compiled in and switched off,
 // blending terrain toward the generated ground plane. It went with that
 // backdrop; render/backdrop_set.h has the account.)
-void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, int visible_w,
-                  int visible_h, std::vector<uint32_t>& scratch,
-                  const std::vector<frame::HiddenCell>* hidden) {
+void upload_cells(gfx::Canvas& canvas, const gfx::Texture& cells, const Grid& grid,
+                  const Camera& camera, int visible_w, int visible_h,
+                  std::vector<uint32_t>& scratch, const std::vector<frame::HiddenCell>* hidden) {
     const std::vector<uint32_t>& pixels = grid.get_pixels();
-    const SDL_Rect visible_rect{0, 0, visible_w, visible_h};
+    const gfx::Rect visible_rect{0, 0, visible_w, visible_h};
     const int grid_w = grid.get_width();
     const int grid_h = grid.get_height();
     const int view_x = camera.view_x(), view_y = camera.view_y();
@@ -246,9 +250,9 @@ void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, in
         view_x >= 0 && view_y >= 0 && view_x + visible_w <= grid_w && view_y + visible_h <= grid_h;
     const bool hiding = hidden && !hidden->empty();
     if (inside && !hiding) {
-        SDL_UpdateTexture(cells, &visible_rect,
-                          pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
-                          grid_w * static_cast<int>(sizeof(uint32_t)));
+        canvas.update_texture(cells, &visible_rect,
+                              pixels.data() + static_cast<size_t>(view_y) * grid_w + view_x,
+                              grid_w * static_cast<int>(sizeof(uint32_t)));
         return;
     }
     scratch.assign(static_cast<size_t>(visible_w) * static_cast<size_t>(visible_h), 0u);
@@ -269,8 +273,8 @@ void upload_cells(SDL_Texture* cells, const Grid& grid, const Camera& camera, in
             scratch[static_cast<size_t>(wy) * visible_w + wx] = h.fill;
         }
     }
-    SDL_UpdateTexture(cells, &visible_rect, scratch.data(),
-                      visible_w * static_cast<int>(sizeof(uint32_t)));
+    canvas.update_texture(cells, &visible_rect, scratch.data(),
+                          visible_w * static_cast<int>(sizeof(uint32_t)));
 }
 
 } // namespace shell

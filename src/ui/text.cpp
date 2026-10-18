@@ -77,12 +77,13 @@ int advance(int scale) { return (GLYPH_WIDTH + 1) * scale; }
 
 } // namespace
 
-void draw_text(SDL_Renderer* renderer, int x, int y, int scale, const std::string& text, uint32_t color) {
+void draw_text(gfx::Canvas& canvas, int x, int y, int scale, const std::string& text,
+               uint32_t color) {
     const uint8_t a = static_cast<uint8_t>((color >> 24) & 0xFF);
     const uint8_t r = static_cast<uint8_t>((color >> 16) & 0xFF);
     const uint8_t g = static_cast<uint8_t>((color >> 8) & 0xFF);
     const uint8_t b = static_cast<uint8_t>(color & 0xFF);
-    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    canvas.set_draw_color(r, g, b, a);
 
     int cursor_x = x;
     for (char c : text) {
@@ -92,8 +93,9 @@ void draw_text(SDL_Renderer* renderer, int x, int y, int scale, const std::strin
                 for (int row = 0; row < GLYPH_HEIGHT; ++row) {
                     for (int col = 0; col < GLYPH_WIDTH; ++col) {
                         if (glyph->rows[row][col] == '#') {
-                            const SDL_Rect cell{cursor_x + col * scale, y + row * scale, scale, scale};
-                            SDL_RenderFillRect(renderer, &cell);
+                            const gfx::Rect cell{cursor_x + col * scale, y + row * scale, scale,
+                                                 scale};
+                            canvas.fill_rect(cell);
                         }
                     }
                 }

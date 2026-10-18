@@ -41,6 +41,7 @@
 #include "game/display.h"
 #include "render/light.h"
 #include "render/overlay.h"
+#include "render/sdl_canvas.h"
 #include "test_util.h"
 
 namespace {
@@ -113,16 +114,13 @@ double max_luminance(SDL_Surface* surf) {
 // A static texture filled from a generated pattern. `f` returns ARGB8888 for a
 // pixel. Blend mode matches load_art_texture's, which is what the game gives
 // every one of these.
-SDL_Texture* pattern_texture(SDL_Renderer* r, int w, int h,
-                             uint32_t (*f)(int x, int y)) {
-    SDL_Texture* tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
-                                         SDL_TEXTUREACCESS_STATIC, w, h);
-    if (!tex) return nullptr;
+gfx::Texture pattern_texture(gfx::Canvas& canvas, int w, int h, uint32_t (*f)(int x, int y)) {
+    const gfx::Texture tex = canvas.create_texture(w, h, gfx::Access::Static, gfx::Blend::Alpha);
+    if (!tex) return tex;
     std::vector<uint32_t> buf(static_cast<size_t>(w) * h);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) buf[static_cast<size_t>(y) * w + x] = f(x, y);
-    SDL_UpdateTexture(tex, nullptr, buf.data(), w * static_cast<int>(sizeof(uint32_t)));
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    canvas.update_texture(tex, nullptr, buf.data(), w * static_cast<int>(sizeof(uint32_t)));
     return tex;
 }
 
@@ -213,6 +211,9 @@ int main() {
     SDL_Renderer* renderer = SDL_CreateSoftwareRenderer(surface);
     check("software renderer created", renderer != nullptr, SDL_GetError());
     if (!renderer) return report();
+    // The game's own backend over the software renderer: what is checksummed is
+    // the SdlCanvas path main.cpp draws through, not a second one.
+    gfx::SdlCanvas canvas(renderer);
 
     Grid grid(WORLD_W, WORLD_H, 1234567u);
     stamp_world(grid);
@@ -226,28 +227,24 @@ int main() {
 
     // The cell texture, uploaded exactly the way main.cpp uploads it -- the visible
     // rect out of the grid's own pixel buffer, at the grid's pitch.
-    SDL_Texture* cells = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                                           SDL_TEXTUREACCESS_STREAMING, PADDED_W, PADDED_H);
-    check("cell texture created", cells != nullptr, SDL_GetError());
-    SDL_SetTextureBlendMode(cells, SDL_BLENDMODE_BLEND);
+    gfx::Texture cells =
+        canvas.create_texture(PADDED_W, PADDED_H, gfx::Access::Streaming, gfx::Blend::Alpha);
+    check("cell texture created", static_cast<bool>(cells), canvas.error());
     {
         const std::vector<uint32_t>& pixels = grid.get_pixels();
-        const SDL_Rect visible{0, 0, PADDED_W, PADDED_H};
+        const gfx::Rect visible{0, 0, PADDED_W, PADDED_H};
         const uint32_t* src = pixels.data() + camera.view_y() * WORLD_W + camera.view_x();
-        SDL_UpdateTexture(cells, &visible, src, WORLD_W * static_cast<int>(sizeof(uint32_t)));
+        canvas.update_texture(cells, &visible, src, WORLD_W * static_cast<int>(sizeof(uint32_t)));
     }
 
     LightField light(PADDED_W, PADDED_H);
     light.update(grid, camera.view_x(), camera.view_y());
     check("the fixture scene is lit", light.any_light(),
           "no light means the light pass is not in the checksum at all");
-    SDL_Texture* light_tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                                               SDL_TEXTUREACCESS_STREAMING,
-                                               light.cols(), light.rows());
-    SDL_SetTextureBlendMode(light_tex, SDL_BLENDMODE_ADD);
-    SDL_SetTextureScaleMode(light_tex, SDL_ScaleModeLinear);
-    SDL_UpdateTexture(light_tex, nullptr, light.pixels().data(),
-                      light.cols() * static_cast<int>(sizeof(uint32_t)));
+    gfx::Texture light_tex = canvas.create_texture(
+        light.cols(), light.rows(), gfx::Access::Streaming, gfx::Blend::Add, gfx::Filter::Linear);
+    canvas.update_texture(light_tex, nullptr, light.pixels().data(),
+                          light.cols() * static_cast<int>(sizeof(uint32_t)));
 
     frame::Params p;
     p.camera = &camera;
@@ -262,7 +259,7 @@ int main() {
     const int bd_w = WORLD_W * camera.scale(), bd_h = WORLD_H * camera.scale();
     auto layer = [&](uint32_t (*f)(int, int), float fx) {
         frame::ParallaxLayer l;
-        l.texture = pattern_texture(renderer, WORLD_W, WORLD_H, f);
+        l.texture = pattern_texture(canvas, WORLD_W, WORLD_H, f);
         l.w = bd_w;
         l.h = bd_h;
         l.tex_h = WORLD_H;
@@ -293,13 +290,13 @@ int main() {
     }
     p.cells = cells;
 
-    SDL_Texture* prop_tex = pattern_texture(renderer, 24, 40, prop_pattern);
+    gfx::Texture prop_tex = pattern_texture(canvas, 24, 40, prop_pattern);
     const std::vector<frame::Prop> props = {
         frame::Prop{prop_tex, 24, 40, 160.0f, 121.0f},
         frame::Prop{prop_tex, 24, 40, 215.0f, 118.0f},
         // A null texture, because main.cpp's list can hold one and the skip is a
         // branch in the code under test.
-        frame::Prop{nullptr, 24, 40, 240.0f, 118.0f},
+        frame::Prop{gfx::Texture{}, 24, 40, 240.0f, 118.0f},
     };
     p.props = &props;
 
@@ -307,7 +304,7 @@ int main() {
     p.objective_x = 230;
     p.objective_y = 108;
 
-    p.player_tex = pattern_texture(renderer, 56, 52, player_pattern);  // 4 cols x 2 rows
+    p.player_tex = pattern_texture(canvas, 56, 52, player_pattern);  // 4 cols x 2 rows
     p.player_x = 181.4f;
     p.player_y = 100.8f;
     p.facing_left = true;
@@ -322,7 +319,7 @@ int main() {
     check("every fixture texture created",
           backdrop.layers[0].texture && backdrop.layers[1].texture && backdrop.layers[2].texture &&
               backdrop.layers[3].texture && prop_tex && p.player_tex && light_tex,
-          SDL_GetError());
+          canvas.error());
 
     // The layer table's shape, asserted here rather than only in the compiler.
     // frame.cpp holds the Lit/Light invariant with static_asserts, which is
@@ -342,7 +339,7 @@ int main() {
           "UI belongs in render/overlay.cpp, after the light pass - a layer arriving "
           "here unlit means the world/UI boundary has moved");
 
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     const uint64_t first = hash_surface(surface);
 
     // The composed frame's checksum.
@@ -379,9 +376,9 @@ int main() {
     {
         const char* names[] = {"the sky", "the standing silhouette", "the plane", "the foreground"};
         for (size_t i = 0; i < backdrop.layers.size(); ++i) {
-            SDL_Texture* real = backdrop.layers[i].texture;
-            backdrop.layers[i].texture = nullptr;
-            frame::compose(renderer, p);
+            gfx::Texture real = backdrop.layers[i].texture;
+            backdrop.layers[i].texture = gfx::Texture{};
+            frame::compose(canvas, p);
             const uint64_t without = hash_surface(surface);
             backdrop.layers[i].texture = real;
             check((std::string(names[i]) + " actually reaches the fixture's window").c_str(),
@@ -389,7 +386,7 @@ int main() {
                   "removing the layer's texture changed no pixel, so the golden "
                   "checksum is not covering it");
         }
-        frame::compose(renderer, p);
+        frame::compose(canvas, p);
         check("restoring the backdrop restores the golden frame", hash_surface(surface) == first);
     }
 
@@ -405,7 +402,7 @@ int main() {
         ground.bands = {{0, 130, 0.30f}, {130, 160, 0.70f}, {160, WORLD_H, 1.00f}};
         corner.layers.push_back(ground);
         p.backdrop = &corner;
-        frame::compose(renderer, p);
+        frame::compose(canvas, p);
         const uint64_t banded = hash_surface(surface);
 
         constexpr uint64_t CORNER_GOLDEN = 0x4de151aa6a5cb6c8ull;
@@ -416,14 +413,14 @@ int main() {
         check("the corner-anchored banded frame matches its golden checksum",
               banded == CORNER_GOLDEN, cd);
 
-        SDL_Texture* real = corner.layers[1].texture;
-        corner.layers[1].texture = nullptr;
-        frame::compose(renderer, p);
+        gfx::Texture real = corner.layers[1].texture;
+        corner.layers[1].texture = gfx::Texture{};
+        frame::compose(canvas, p);
         check("the banded surface actually reaches the fixture's window",
               hash_surface(surface) != banded);
-        SDL_DestroyTexture(real);
+        canvas.destroy_texture(real);
         p.backdrop = &backdrop;
-        frame::compose(renderer, p);
+        frame::compose(canvas, p);
         check("restoring the rig backdrop restores the golden frame",
               hash_surface(surface) == first);
     }
@@ -432,7 +429,7 @@ int main() {
     // the check above: it separates "the renderer changed" from "this suite is
     // reading uninitialised memory", and only one of those is worth anybody's
     // afternoon.
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     check("composition is repeatable", hash_surface(surface) == first,
           "the same inputs produced two different frames");
 
@@ -441,7 +438,7 @@ int main() {
     // can be asked to notice, and it moves every layer at once -- each by a
     // different amount, which is what the parallax factors are.
     camera.follow(CAM_X + 1.0f, CAM_Y, PADDED_W, PADDED_H, WORLD_W, WORLD_H);
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     check("the checksum moves when the frame does", hash_surface(surface) != first,
           "a one-cell camera move left the frame identical - the checksum is not "
           "watching what it claims to");
@@ -453,11 +450,11 @@ int main() {
     // Measured as mean luminance rather than as a hash, because the claim is that
     // the frame got brighter, which a hash cannot tell from any other change.
     camera.follow(CAM_X, CAM_Y, PADDED_W, PADDED_H, WORLD_W, WORLD_H);
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     const double lit_mean = mean_luminance(surface);
     const LightField* saved_light = p.light;
     p.light = nullptr;  // draw_light returns before drawing
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     const double unlit_mean = mean_luminance(surface);
     p.light = saved_light;
     char light_detail[128];
@@ -479,7 +476,7 @@ int main() {
     // is a hash of the sensitivity checks above rather than of the shipped frame;
     // the check immediately below is what says it is.
     camera.follow(CAM_X, CAM_Y, PADDED_W, PADDED_H, WORLD_W, WORLD_H);
-    frame::compose(renderer, p);
+    frame::compose(canvas, p);
     check("the world is back at the golden frame before the overlay is drawn",
           hash_surface(surface) == first,
           "the checks above left state behind, so the overlay checksum would be "
@@ -528,7 +525,7 @@ int main() {
     op.available = available;
     op.notice = "MODE CHANGED, BUT SETTINGS.TXT COULD NOT BE WRITTEN.";
 
-    overlay::draw(renderer, op);
+    overlay::draw(canvas, op);
     const uint64_t with_overlay = hash_surface(surface);
 
     // The overlay checksum. Same rule as GOLDEN above: update it in the same commit
@@ -561,8 +558,8 @@ int main() {
     auto without = [&](const char* name, auto&& mutate) {
         overlay::Params q = op;
         mutate(q);
-        frame::compose(renderer, p);
-        overlay::draw(renderer, q);
+        frame::compose(canvas, p);
+        overlay::draw(canvas, q);
         const uint64_t h = hash_surface(surface);
         check(name, h != with_overlay,
               "switching this block off changed no pixel, so the overlay checksum "
@@ -591,16 +588,16 @@ int main() {
     // Drawing the same overlay twice over the same frame must give the same pixels,
     // for the reason the composition's repeatability check exists: it separates "the
     // UI changed" from "this suite is reading uninitialised memory".
-    frame::compose(renderer, p);
-    overlay::draw(renderer, op);
+    frame::compose(canvas, p);
+    overlay::draw(canvas, op);
     check("the overlay is repeatable", hash_surface(surface) == with_overlay,
           "the same inputs produced two different overlays");
 
-    SDL_DestroyTexture(p.player_tex);
-    SDL_DestroyTexture(prop_tex);
-    for (frame::ParallaxLayer& l : backdrop.layers) SDL_DestroyTexture(l.texture);
-    SDL_DestroyTexture(light_tex);
-    SDL_DestroyTexture(cells);
+    canvas.destroy_texture(p.player_tex);
+    canvas.destroy_texture(prop_tex);
+    for (frame::ParallaxLayer& l : backdrop.layers) canvas.destroy_texture(l.texture);
+    canvas.destroy_texture(light_tex);
+    canvas.destroy_texture(cells);
     SDL_DestroyRenderer(renderer);
     SDL_FreeSurface(surface);
     return report();

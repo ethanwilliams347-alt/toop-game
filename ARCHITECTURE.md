@@ -219,15 +219,19 @@ Arrows point from includer to included.
 - SDL-free: `light.*` (emissive light field), `player_anim.*` (which sheet
   frame), `backdrop_set.*` (parses `backdrop.txt`), `backdrop_wrap.h`,
   `depth_rig.h` (parallax arithmetic).
-- SDL: `frame.*` -- `frame::compose`, walks `frame::LAYERS` in draw order;
-  `overlay.*` -- screen-space layer (reticle, HUD, hotbar, run-over wash,
-  settings screen) drawn after the world.
+- `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
+  fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
+  `sdl_canvas.*` -- `gfx::SdlCanvas`, the one backend, and the only render file
+  that calls SDL's renderer; golden_frame_test checksums it over a software renderer.
+- Draw through `gfx::Canvas`: `frame.*` -- `frame::compose`, walks `frame::LAYERS`
+  in draw order; `overlay.*` -- screen-space layer (reticle, HUD, hotbar, run-over
+  wash, settings screen) drawn after the world.
 - `player_sprite.h` -- generated; don't edit.
 
 ### `src/ui/`, `src/shell/`, `src/main.cpp`
 
 - `ui/text.*` (3x5 bitmap font), `ui/hotbar.*` (the eight number-key materials
-  and icons): ASCII art drawn to `SDL_Renderer`.
+  and icons): ASCII art drawn to a `gfx::Canvas`.
 - `shell/shell.*` -- render targets, display-mode switching, BMP textures,
   backdrop textures, visible-grid upload. Game executable only.
 - `main.cpp` -- creates the window, owns the state the event switch dispatches
@@ -254,7 +258,7 @@ Arrows point from includer to included.
    `present::run_readout` read the `Run` const.
 6. **Draw** -- `shell::upload_cells`; `frame::compose` walks `frame::LAYERS`
    (backdrop, props, cells, bodies, spray, objective, enemies, player, arrows, foreground,
-   grade, light pass); `overlay::draw`; `SDL_RenderPresent`.
+   grade, light pass); `overlay::draw`; `canvas.present()`.
 
 Only step 3 changes the world; 4-6 read the `Run` const.
 

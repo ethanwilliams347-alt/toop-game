@@ -4,7 +4,7 @@
 
 namespace overlay {
 
-void draw(SDL_Renderer* renderer, const Params& p) {
+void draw(gfx::Canvas& canvas, const Params& p) {
     // The reticle. Three things it has to do, and a one-cell filled square
     // does none of them well enough to survive a playtest.
     //
@@ -33,28 +33,28 @@ void draw(SDL_Renderer* renderer, const Params& p) {
     constexpr int TICK_LEN = 7;
     constexpr int TICK_THICK = 2;
 
-    const SDL_Rect arms[4] = {
-        { p.mouse_x - TICK_THICK / 2, p.mouse_y - TICK_GAP - TICK_LEN, TICK_THICK, TICK_LEN }, // N
-        { p.mouse_x - TICK_THICK / 2, p.mouse_y + TICK_GAP,            TICK_THICK, TICK_LEN }, // S
-        { p.mouse_x - TICK_GAP - TICK_LEN, p.mouse_y - TICK_THICK / 2, TICK_LEN, TICK_THICK }, // W
-        { p.mouse_x + TICK_GAP,            p.mouse_y - TICK_THICK / 2, TICK_LEN, TICK_THICK }, // E
+    const gfx::Rect arms[4] = {
+        {p.mouse_x - TICK_THICK / 2, p.mouse_y - TICK_GAP - TICK_LEN, TICK_THICK, TICK_LEN}, // N
+        {p.mouse_x - TICK_THICK / 2, p.mouse_y + TICK_GAP, TICK_THICK, TICK_LEN}, // S
+        {p.mouse_x - TICK_GAP - TICK_LEN, p.mouse_y - TICK_THICK / 2, TICK_LEN, TICK_THICK}, // W
+        {p.mouse_x + TICK_GAP, p.mouse_y - TICK_THICK / 2, TICK_LEN, TICK_THICK}, // E
     };
 
     // Only while the pointer is actually over this window -- see show_reticle
     // in overlay.h for why that question cannot be asked from in here.
     if (p.show_reticle) {
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        canvas.set_blend(gfx::Blend::Alpha);
 
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, p.in_range ? 170 : 120);
-        for (const SDL_Rect& arm : arms) {
-            const SDL_Rect outline{arm.x - 1, arm.y - 1, arm.w + 2, arm.h + 2};
-            SDL_RenderFillRect(renderer, &outline);
+        canvas.set_draw_color(0, 0, 0, p.in_range ? 170 : 120);
+        for (const gfx::Rect& arm : arms) {
+            const gfx::Rect outline{arm.x - 1, arm.y - 1, arm.w + 2, arm.h + 2};
+            canvas.fill_rect(outline);
         }
 
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, p.in_range ? 255 : 115);
-        for (const SDL_Rect& arm : arms) SDL_RenderFillRect(renderer, &arm);
+        canvas.set_draw_color(255, 255, 255, p.in_range ? 255 : 115);
+        for (const gfx::Rect& arm : arms) canvas.fill_rect(arm);
 
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        canvas.set_blend(gfx::Blend::None);
     }
 
     // Drawn here, in the game window, rather than left to the OS title bar --
@@ -66,15 +66,13 @@ void draw(SDL_Renderer* renderer, const Params& p) {
     // time a wider mode is added, and this one is an instrument.
     const int hud_scale = p.ui_scale;
     const int hud_x = 8, hud_y = 8;
-    const SDL_Rect hud_backing{
-        hud_x - 4, hud_y - 4,
-        ui::text_width(p.hud_text, hud_scale) + 8, ui::GLYPH_HEIGHT * hud_scale + 8
-    };
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_RenderFillRect(renderer, &hud_backing);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    ui::draw_text(renderer, hud_x, hud_y, hud_scale, p.hud_text, 0xFFE0E0E0);
+    const gfx::Rect hud_backing{hud_x - 4, hud_y - 4, ui::text_width(p.hud_text, hud_scale) + 8,
+                                ui::GLYPH_HEIGHT * hud_scale + 8};
+    canvas.set_draw_color(0, 0, 0, 180);
+    canvas.set_blend(gfx::Blend::Alpha);
+    canvas.fill_rect(hud_backing);
+    canvas.set_blend(gfx::Blend::None);
+    ui::draw_text(canvas, hud_x, hud_y, hud_scale, p.hud_text, 0xFFE0E0E0);
 
     // The lines under the HUD, stacked in the order they are drawn. A cursor
     // rather than a y computed per line, because several of them are
@@ -86,15 +84,14 @@ void draw(SDL_Renderer* renderer, const Params& p) {
     // modes and the inspector, and none of those may be read from here.
     int next_line_y = hud_y + ui::GLYPH_HEIGHT * hud_scale + 8;
     for (const Line& line : p.hud_lines) {
-        const SDL_Rect backing{
-            hud_x - 4, next_line_y - 4,
-            ui::text_width(line.text, hud_scale) + 8, ui::GLYPH_HEIGHT * hud_scale + 8
-        };
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_RenderFillRect(renderer, &backing);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        ui::draw_text(renderer, hud_x, next_line_y, hud_scale, line.text, line.colour);
+        const gfx::Rect backing{hud_x - 4, next_line_y - 4,
+                                ui::text_width(line.text, hud_scale) + 8,
+                                ui::GLYPH_HEIGHT * hud_scale + 8};
+        canvas.set_draw_color(0, 0, 0, 180);
+        canvas.set_blend(gfx::Blend::Alpha);
+        canvas.fill_rect(backing);
+        canvas.set_blend(gfx::Blend::None);
+        ui::draw_text(canvas, hud_x, next_line_y, hud_scale, line.text, line.colour);
         next_line_y += ui::GLYPH_HEIGHT * hud_scale + 8;
     }
 
@@ -103,7 +100,7 @@ void draw(SDL_Renderer* renderer, const Params& p) {
     // The selected slot is looked up by the caller rather than stored here, so
     // current_brush stays the single fact about what is selected; -1 draws no
     // highlight.
-    ui::draw_hotbar(renderer, p.window_w, p.ui_scale, p.hotbar_selected);
+    ui::draw_hotbar(canvas, p.window_w, p.ui_scale, p.hotbar_selected);
 
     // --- how a finished run says so ---
     //
@@ -123,25 +120,22 @@ void draw(SDL_Renderer* renderer, const Params& p) {
         const std::string headline = p.won ? "OBJECTIVE REACHED" : "YOU DIED";
         const std::string prompt = "PRESS R FOR A NEW RUN";
 
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
-        const SDL_Rect wash{0, 0, p.window_w, p.window_h};
-        SDL_RenderFillRect(renderer, &wash);
+        canvas.set_blend(gfx::Blend::Alpha);
+        canvas.set_draw_color(0, 0, 0, 140);
+        const gfx::Rect wash{0, 0, p.window_w, p.window_h};
+        canvas.fill_rect(wash);
 
         // The headline is drawn at twice the HUD's scale, which is the only
         // place in the game anything is -- it is the one string that has to
         // read from across a room rather than be looked at.
         const int head_scale = scale * 2;
         const int head_y = p.window_h / 2 - (ui::GLYPH_HEIGHT * head_scale) / 2;
-        ui::draw_text(renderer,
-                      p.window_w / 2 - ui::text_width(headline, head_scale) / 2,
-                      head_y, head_scale, headline,
-                      p.won ? 0xFFF0C040 : 0xFFD05050);
-        ui::draw_text(renderer,
-                      p.window_w / 2 - ui::text_width(prompt, scale) / 2,
+        ui::draw_text(canvas, p.window_w / 2 - ui::text_width(headline, head_scale) / 2, head_y,
+                      head_scale, headline, p.won ? 0xFFF0C040 : 0xFFD05050);
+        ui::draw_text(canvas, p.window_w / 2 - ui::text_width(prompt, scale) / 2,
                       head_y + ui::GLYPH_HEIGHT * head_scale + 6 * scale, scale, prompt,
                       0xFFC0C0C0);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        canvas.set_blend(gfx::Blend::None);
     }
 
     // --- the settings menu ---
@@ -159,15 +153,15 @@ void draw(SDL_Renderer* renderer, const Params& p) {
         // it and a second one here is how a highlight lands on the wrong row.
         const int quit_row = p.mode_count;
 
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
-        const SDL_Rect wash{0, 0, p.window_w, p.window_h};
-        SDL_RenderFillRect(renderer, &wash);
+        canvas.set_blend(gfx::Blend::Alpha);
+        canvas.set_draw_color(0, 0, 0, 170);
+        const gfx::Rect wash{0, 0, p.window_w, p.window_h};
+        canvas.fill_rect(wash);
 
         const int menu_x = p.window_w / 2 - 30 * ui::GLYPH_WIDTH * scale / 2;
         int y = p.window_h / 2 - (quit_row + 4) * line_h / 2;
 
-        ui::draw_text(renderer, menu_x, y, scale, "SETTINGS", 0xFFFFFFFF);
+        ui::draw_text(canvas, menu_x, y, scale, "SETTINGS", 0xFFFFFFFF);
         y += line_h * 2;
 
         for (int i = 0; i <= quit_row; ++i) {
@@ -196,23 +190,21 @@ void draw(SDL_Renderer* renderer, const Params& p) {
             }
 
             if (selected) {
-                ui::draw_text(renderer, menu_x - 2 * ui::GLYPH_WIDTH * scale, y, scale, ">",
-                              colour);
+                ui::draw_text(canvas, menu_x - 2 * ui::GLYPH_WIDTH * scale, y, scale, ">", colour);
             }
-            ui::draw_text(renderer, menu_x, y, scale, label, colour);
+            ui::draw_text(canvas, menu_x, y, scale, label, colour);
             y += line_h;
         }
 
         y += line_h;
-        ui::draw_text(renderer, menu_x, y, scale,
-                      "ARROWS  ENTER  ESC RESUMES", 0xFF808080);
+        ui::draw_text(canvas, menu_x, y, scale, "ARROWS  ENTER  ESC RESUMES", 0xFF808080);
         // The notice is drawn when there is one; its timer is the caller's, and an
         // expired notice arrives here as an empty string.
         if (!p.notice.empty()) {
             y += line_h;
-            ui::draw_text(renderer, menu_x, y, scale, p.notice, 0xFFFFC080);
+            ui::draw_text(canvas, menu_x, y, scale, p.notice, 0xFFFFC080);
         }
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        canvas.set_blend(gfx::Blend::None);
     }
 }
 

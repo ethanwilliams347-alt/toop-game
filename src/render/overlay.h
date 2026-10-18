@@ -1,9 +1,9 @@
 #pragma once
-#include <SDL.h>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include "game/display.h"
+#include "render/canvas.h"
 
 // The screen-space layer of one frame: the reticle, the HUD stack, the hotbar,
 // the run-over wash and the settings screen, in the order they are drawn.
@@ -86,6 +86,6 @@ struct Params {
 
 // Draws the screen-space layer over whatever is already in the framebuffer.
 // Presents nothing, and leaves the draw colour and blend mode as it found them.
-void draw(SDL_Renderer* renderer, const Params& p);
+void draw(gfx::Canvas& canvas, const Params& p);
 
 } // namespace overlay
