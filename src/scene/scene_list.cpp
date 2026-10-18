@@ -181,6 +181,22 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                                 "' is not a usable backdrop directory "
                                 "(a bare name under assets/)");
                 def.backdrop = value;
+            } else if (key == "mood") {
+                // The look, not the world: render/mood.h reads it and nothing in
+                // the simulation does. The `_mood.txt` ending is part of the field
+                // rather than a habit, so mood_test can find every mood under
+                // assets/ by name and parse it, whether a scene uses it yet or not.
+                if (!def.mood.empty()) return fail("scene '" + def.name + "' names `mood=` twice");
+                constexpr std::string_view suffix = "_mood.txt";
+                const std::string_view v = value;
+                const size_t stem = v.find('/') == std::string_view::npos ? 0 : v.find('/') + 1;
+                if (v.size() <= stem + suffix.size() ||
+                    v.substr(v.size() - suffix.size()) != suffix || !file_field(value, def.mood)) {
+                    def.mood.clear();
+                    return fail("'" + value +
+                                "' is not a usable mood file name (<name>_mood.txt, in the "
+                                "scene's own backdrop= folder if it is in one)");
+                }
             } else if (key == "mode") {
                 if (!first_time(seen_mode))
                     return fail("scene '" + def.name + "' names `mode=` twice");
@@ -227,7 +243,7 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
                 def.scale = scale;
             } else {
                 return fail("'" + key +
-                            "=' is not a scene field (mode, size, scale, level, backdrop)");
+                            "=' is not a scene field (mode, size, scale, level, backdrop, mood)");
             }
         }
 
@@ -235,7 +251,8 @@ std::vector<SceneDef> load_scene_list(const std::string& path, std::string* erro
         // Not any folder: assets/wip/ holds drafts and is deliberately not staged
         // next to the exe (CMakeLists.txt), so a row reaching into it would load
         // from the source tree and fail in the build.
-        for (const std::string* file : {&def.material, &def.albedo, &def.props, &def.level}) {
+        for (const std::string* file :
+             {&def.material, &def.albedo, &def.props, &def.level, &def.mood}) {
             const size_t slash = file->find('/');
             if (slash == std::string::npos) continue;
             if (def.backdrop.empty() || std::string_view(*file).substr(0, slash) != def.backdrop)

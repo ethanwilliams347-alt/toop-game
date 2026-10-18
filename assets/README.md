@@ -33,6 +33,8 @@ root, so they load `tests/fixtures/...` directly; tools write there via
   <set>_material.bmp     terrain material map   (if the scene has terrain)
   <set>_albedo.bmp       terrain colour map     (if the scene has terrain)
   <set>_level.txt        level file             (optional)
+  <set>[_<variant>]_mood.txt   a mood: light, air, material looks (optional; see below)
+  <set>[_<variant>]_grade.bmp  a mood's LUT strip  (optional; named by its mood's `grade`)
 ```
 
 - **Name:** `bg_<place>`; a bigger cut of an existing place is
@@ -40,8 +42,75 @@ root, so they load `tests/fixtures/...` directly; tools write there via
   so a stray BMP still says where it belongs.
 - **Layer numbers run front to back:** `01` is the foreground, the highest
   number is the sky. Two digits, contiguous, no gaps.
-- **Every file in the folder is referenced** by `backdrop.txt` or `scenes.txt`
-  (READMEs aside). A layer that was cut goes to `wip/` or is deleted.
+- **Every file in the folder is referenced** by `backdrop.txt`, `scenes.txt`
+  or a mood file (READMEs aside). A layer that was cut goes to `wip/` or is
+  deleted. A mood no scene names yet is the one exception: `mood_test` still
+  parses it, so it is held to the format while it waits for its scene row.
+
+## Mood files: `assets/<set>/<set>[_<variant>]_mood.txt`
+
+How a scene looks rather than what it is: the light model, ambient and sun,
+fog, bloom, the colour grade, vignette, grain, weather, point lights and
+per-material looks. A scene names one with `mood=<set>/<file>_mood.txt` in
+`scenes.txt`; without one it draws in the built-in `legacy` mood, which is the
+look the game had before moods. Render data only -- nothing in a mood changes
+the simulation. The parser and the authoritative spec are
+`src/render/mood.h`; this is the summary.
+
+- **Naming:** the file ends `_mood.txt` (the scene list refuses anything else)
+  and, like every file in a set's folder, starts with the set's name.
+  `mood_test` finds every `*_mood.txt` under `assets/` (outside `wip/`) by
+  that ending and parses it, so a mood is checked before a scene uses it.
+- **Where:** in the scene's own `backdrop=` folder, by the scene list's folder
+  rule. A `grade` LUT is a plain `.bmp` name in that same folder; a material
+  `texture=` is a bare stem resolved to `assets/materials/<stem>.bmp`.
+  `mood_test` checks both exist.
+- **All or nothing:** the first bad line rejects the whole file with
+  `path:line: why`, and the game logs it and draws `legacy`.
+
+One record per line, `#` comments, records in any order. Fields are separated
+by whitespace, so a colour that is a record's own fields is three words
+(`ambient 0.2 0.25 0.4`) and a colour inside a `key=` field uses commas
+(`color=1,0.6,0.25`). Numbers are plain decimals (`0.5`, `.5`, `-1`; never
+`1e3`, `+1`, `0.5f`); `x=`/`y=` are whole cells. Every record except `light`
+and `material` at most once, every `key=` at most once per line; every field
+is required unless marked optional.
+
+| Record | Fields | Range / meaning | Default |
+|---|---|---|---|
+| `light_model` | `legacy` \| `multiply` | **required.** `legacy` only adds light; `multiply` is albedo x (ambient + sun + lights) + emissive | -- |
+| `ambient` | `r g b` | 0..8 each, linear (above 1 is over-bright). `multiply` only | `1 1 1` |
+| `sun` | `r g b dir=x,y [shadow=on\|off]` | colour 0..8; `dir` is the way light travels, +y **down**, each -1..1, not both 0 (normalised); `shadow` optional. `multiply` only | none (`shadow` on) |
+| `fog` | `r g b near=d far=d amount=a` | colour 0..1; depth `d` = 1 - layer parallax factor (0 world plane, 1 sky), 0 <= near < far <= 1; amount 0..1 | none |
+| `bloom` | `threshold=t strength=s` | t 0..16 (linear luminance), s 0..4 | none |
+| `grade` | `<file>.bmp` | LUT strip in this folder (`tools/make_lut.py`) | none |
+| `vignette` | `v` | 0..1 | 0 |
+| `grain` | `g` | 0..1 | 0 |
+| `weather` | `none` \| `rain`\|`fog`\|`dust` `density=d angle=deg speed=s` | `none` takes no fields; d 0..1, angle -90..90 from straight down (+ leans to +x), s 0..2000 cells/s | `none` |
+| `light` (repeatable, up to 64) | `x=c y=c color=r,g,b radius=c [flicker=f]` | world cells 0..999999; colour 0..8; 0 < radius <= 1024 cells; flicker 0..1 optional | -- |
+| `material` (repeatable, once per material) | `<Name> [tint=r,g,b] [texture=stem] [strength=] [rim=] [reflect=] [spec=] [depth=]` | Name spelled as in `MATERIALS` (`Sand Water Wall Wood Oil Steam Fire Charred`, not `Empty`); at least one field; tint 0..2 each; the rest 0..1 | tint 1, no texture, rest 0 |
+
+A full example, `assets/bg_tarn/bg_tarn_noir_mood.txt`:
+
+```
+light_model multiply
+ambient 0.18 0.22 0.34
+sun 0.10 0.12 0.20 dir=0.3,1 shadow=off       # moonlight
+fog 0.10 0.12 0.18 near=0.1 far=0.9 amount=0.7
+bloom threshold=0.9 strength=0.6
+grade bg_tarn_noir_grade.bmp
+vignette 0.35
+grain 0.04
+weather rain density=0.7 angle=12 speed=60
+light x=210 y=150 color=1,0.62,0.25 radius=48 flicker=0.1   # sodium lamp
+light x=420 y=140 color=0.2,0.9,1.4 radius=30 flicker=0.3   # neon
+material Water tint=0.7,0.85,0.9 reflect=0.6 spec=0.4 depth=0.5
+material Wall texture=wall_rock strength=0.35 rim=0.5
+```
+
+The smallest mood is the single line `light_model legacy`, which loads equal
+to the built-in `legacy` mood. A daylight mood that only grades the colours is
+`light_model legacy` plus `grade`.
 - **Generated sets name their generator** (`tools/generate_<set>.py`) in the
   README, and the generator is named after the set.
 

@@ -39,6 +39,11 @@
 //     level=<file>     the level file (scene/level_list.h), resolved under assets/
 //     backdrop=<dir>   the backdrop drawn behind it: assets/<dir>/backdrop.txt
 //                      (render/backdrop_set.h). Without one, the clear colour.
+//     mood=<file>      the scene's light, air and material look (render/mood.h),
+//                      resolved under assets/. The name ends `_mood.txt`, so every
+//                      mood under assets/ can be found by name (mood_test parses
+//                      them all). Without one, the built-in legacy mood: the look
+//                      the game had before moods existed.
 //
 // Mode, size and scale were positional until they were named, and a row still
 // written that way (`... floor unclamped 1920 1080`) is refused with the named
@@ -101,6 +106,10 @@ struct SceneDef {
     // no backdrop. Named here rather than matched against the scene's own name
     // in code, so two scenes can share a set and a new set is an asset drop.
     std::string backdrop;
+    // `mood=<file>`: the mood file under assets/ (render/mood.h). Empty is the
+    // legacy mood. A path rather than a loaded mood because src/scene/ does not
+    // include src/render/; the render side loads it (mood::load_for_scene).
+    std::string mood;
     Spawn spawn = Spawn::Terrain;
     SceneMode mode = SceneMode::Fixed;
     // 0 means "not stated" and not "zero cells", which is why these are not

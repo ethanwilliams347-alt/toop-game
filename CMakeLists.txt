@@ -135,8 +135,13 @@ target_include_directories(slop_render PUBLIC src)
 # and util/text_record.h. Its own library so that backdrop_set_test can link it
 # without linking light.cpp, and with it the grid, into a suite with no use for
 # the simulation. It used to compile backdrop_set.cpp a second time for that.
+#
+# The mood parser (render/mood.h) is here for the same reason: SDL-free render
+# data read from a scene's folder. It includes physics/material.h for the
+# material names, which is constexpr data and links nothing.
 set(BACKDROP_SOURCES
     src/render/backdrop_set.cpp
+    src/render/mood.cpp
 )
 add_library(slop_backdrop OBJECT ${BACKDROP_SOURCES})
 target_include_directories(slop_backdrop PUBLIC src)
@@ -405,6 +410,14 @@ if(BUILD_TESTING)
     target_include_directories(backdrop_set_test PRIVATE src tests)
     target_link_libraries(backdrop_set_test PRIVATE slop_backdrop slop_scene_props)
     add_test(NAME backdrop_set_test COMMAND backdrop_set_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    # Mood files: the parser, and every *_mood.txt under assets/ (and every
+    # scene's mood=) parsed and its grade and textures found. From the source
+    # tree so assets/ resolves; slop_scene_props for the scene list.
+    add_executable(mood_test tests/test_mood.cpp)
+    target_include_directories(mood_test PRIVATE src tests)
+    target_link_libraries(mood_test PRIVATE slop_backdrop slop_scene_props)
+    add_test(NAME mood_test COMMAND mood_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # The camera's view arithmetic: the framing, the world-edge clamps, and the
     # anchor the clamps have to survive. Links no sources -- camera.h is an
