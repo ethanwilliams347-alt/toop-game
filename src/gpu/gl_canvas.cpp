@@ -122,10 +122,11 @@ bool GlCanvas::init(std::string& why) {
     }
 
     std::string log;
-    if (!build_program(program_, log)) {
+    if (!build_programs(program_, cells_program_, log)) {
         why = log;
         return false;
     }
+    bind_cell_uniforms();
 
     gl::GenVertexArrays(1, &vao_);
     gl::BindVertexArray(vao_);
@@ -150,6 +151,12 @@ bool GlCanvas::init(std::string& why) {
     gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
+    // The material pack's texture, a single pad texel until the first upload.
+    // Integer textures cannot be filtered: anything but NEAREST leaves one
+    // incomplete, and an incomplete texture samples as zero.
+    gl::GenTextures(1, &cell_tex_);
+    upload_cell_pack(nullptr, 0, 0);
+
     gl::ActiveTexture(GL_TEXTURE0);
     verts_.reserve(6 * 4096);
 
@@ -173,6 +180,8 @@ GlCanvas::~GlCanvas() {
         // only made after it did.
         if (gl::DeleteProgram) {
             if (program_) gl::DeleteProgram(program_);
+            if (cells_program_) gl::DeleteProgram(cells_program_);
+            if (cell_tex_) gl::DeleteTextures(1, &cell_tex_);
             if (vbo_) gl::DeleteBuffers(1, &vbo_);
             if (vao_) gl::DeleteVertexArrays(1, &vao_);
             if (white_) gl::DeleteTextures(1, &white_);
@@ -183,9 +192,10 @@ GlCanvas::~GlCanvas() {
     }
 }
 
-bool GlCanvas::build_program(unsigned& out, std::string& log) const {
-    const std::string vpath = shader_dir_ + "/sprite.vert";
-    const std::string fpath = shader_dir_ + "/sprite.frag";
+bool GlCanvas::build_program(const char* vert, const char* frag, unsigned& out,
+                             std::string& log) const {
+    const std::string vpath = shader_dir_ + "/" + vert;
+    const std::string fpath = shader_dir_ + "/" + frag;
     std::string vsrc, fsrc;
     if (!read_file(vpath, vsrc)) {
         log = "cannot read " + vpath;
@@ -213,7 +223,7 @@ bool GlCanvas::build_program(unsigned& out, std::string& log) const {
     if (!ok) {
         char buf[2048] = {};
         gl::GetProgramInfoLog(p, sizeof(buf), nullptr, buf);
-        log = std::string("sprite program: ") + buf;
+        log = fpath + " program: " + buf;
         gl::DeleteProgram(p);
         return false;
     }
@@ -221,13 +231,48 @@ bool GlCanvas::build_program(unsigned& out, std::string& log) const {
     return true;
 }
 
+// Both or neither: the sprite program and the cells program share sprite.vert,
+// so a half-taken reload could leave the two drawing from different versions of
+// it.
+bool GlCanvas::build_programs(unsigned& sprite, unsigned& cells, std::string& log) const {
+    if (!build_program("sprite.vert", "sprite.frag", sprite, log)) return false;
+    if (!build_program("sprite.vert", "cells.frag", cells, log)) {
+        gl::DeleteProgram(sprite);
+        sprite = 0;
+        return false;
+    }
+    return true;
+}
+
+// The cells program's sampler units are fixed (colour on 0, pack on 1), so they
+// are set once per program rather than per draw.
+void GlCanvas::bind_cell_uniforms() {
+    gl::UseProgram(cells_program_);
+    gl::Uniform1i(gl::GetUniformLocation(cells_program_, "u_tex"), 0);
+    gl::Uniform1i(gl::GetUniformLocation(cells_program_, "u_cells"), 1);
+    cu_scale_ = gl::GetUniformLocation(cells_program_, "u_scale");
+    cu_mode_ = gl::GetUniformLocation(cells_program_, "u_mode");
+    gl::UseProgram(program_);
+}
+
 bool GlCanvas::reload_shaders() {
     flush();
-    unsigned fresh = 0;
-    if (!build_program(fresh, error_)) return false;
+    unsigned sprite = 0, cells = 0;
+    if (!build_programs(sprite, cells, error_)) return false;
     gl::DeleteProgram(program_);
-    program_ = fresh;
+    gl::DeleteProgram(cells_program_);
+    program_ = sprite;
+    cells_program_ = cells;
     u_scale_ = -1;  // looked up again against the new program
+    bind_cell_uniforms();
+    // A reload between frames is the usual case; one mid-frame (a test) needs the
+    // new program's scale now, which begin_frame only sets when it opens a frame.
+    if (frame_open_) {
+        u_scale_ = gl::GetUniformLocation(program_, "u_scale");
+        gl::Uniform1i(gl::GetUniformLocation(program_, "u_tex"), 0);
+        gl::Uniform2f(u_scale_, 2.0f / static_cast<float>(target_w_),
+                      2.0f / static_cast<float>(target_h_));
+    }
     return true;
 }
 
@@ -407,6 +452,60 @@ void GlCanvas::textured(const gfx::Texture& tex, const gfx::Rect* src, const gfx
     // Textures are not tinted by the draw colour (no colour mod in gfx::Canvas).
     static constexpr uint8_t OPAQUE_WHITE[4] = {255, 255, 255, 255};
     quad(t->id, t->blend, c, u0, v0, u1, v1, OPAQUE_WHITE);
+}
+
+void GlCanvas::blit_cells(const gfx::Texture& colour, const gfx::FRect& dst) {
+    const GlTexture* t = tex_of(colour);
+    if (!t) return;
+    const gfx::Rect d = snap(dst);
+    if (d.w <= 0 || d.h <= 0) return;
+    begin_frame();
+    flush();  // whatever is batched was drawn with the sprite program
+
+    gl::UseProgram(cells_program_);
+    gl::Uniform2f(cu_scale_, 2.0f / static_cast<float>(target_w_),
+                  2.0f / static_cast<float>(target_h_));
+    gl::Uniform1i(cu_mode_, static_cast<int>(cell_view_));
+    gl::ActiveTexture(GL_TEXTURE1);
+    gl::BindTexture(GL_TEXTURE_2D, cell_tex_);
+    gl::ActiveTexture(GL_TEXTURE0);
+
+    // One quad, drawn now through the ordinary batch so the blend and the colour
+    // texture are bound the way every blit binds them.
+    const float x0 = static_cast<float>(d.x), y0 = static_cast<float>(d.y);
+    const float x1 = static_cast<float>(d.x + d.w), y1 = static_cast<float>(d.y + d.h);
+    const float c[8] = {x0, y0, x1, y0, x1, y1, x0, y1};
+    static constexpr uint8_t OPAQUE_WHITE[4] = {255, 255, 255, 255};
+    const gfx::Blend blend = cell_view_ == CellView::Raw ? gfx::Blend::None : t->blend;
+    quad(t->id, blend, c, 0.0f, 0.0f, 1.0f, 1.0f, OPAQUE_WHITE);
+    flush();
+    gl::UseProgram(program_);
+}
+
+void GlCanvas::upload_cell_pack(const uint32_t* texels, int w, int h) {
+    static constexpr uint32_t PAD = 20u << 16;  // cell_pack::PAD_TEXEL: Empty, 20 degrees
+    if (!texels || w <= 0 || h <= 0) {
+        texels = &PAD;
+        w = h = 1;
+    }
+    flush();  // the batch may be about to draw with the old pack
+    gl::BindTexture(GL_TEXTURE_2D, cell_tex_);
+    gl::PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl::PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (w != cell_tex_w_ || h != cell_tex_h_) {
+        // Reallocated only on a size change -- a mode change or a scene whose grid
+        // is narrower than the view -- so a steady frame is one sub-image upload.
+        gl::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, w, h, 0, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE,
+                       texels);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        cell_tex_w_ = w;
+        cell_tex_h_ = h;
+    } else {
+        gl::TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, texels);
+    }
 }
 
 void GlCanvas::present() {

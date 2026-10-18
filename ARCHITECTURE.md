@@ -233,6 +233,8 @@ Arrows point from includer to included.
   consume it. Format: `src/render/mood.h`, summary in `assets/README.md`.
 - `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
   fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
+  `blit_cells` is the cell layer's one draw: a plain blit by default (all
+  `SdlCanvas` does), overridden by `GlCanvas` to draw through `cells.frag`.
   `sdl_canvas.*` -- `gfx::SdlCanvas`, the SDL_Renderer backend, and the only render
   file that calls SDL's renderer; golden_frame_test checksums it over a software
   renderer. The other backend is `gpu::GlCanvas` (below).
@@ -252,6 +254,17 @@ Arrows point from includer to included.
   window size at the first draw of each frame, so `shell::apply_mode` resizing
   the window is all a mode change needs. `reload_shaders()` (F5) keeps the old
   program on a failed compile; `read_pixels()` feeds `gl_frame_test` and F12.
+- The cells (R1): `blit_cells` draws the cell texture with
+  `assets/shaders/cells.frag` (on `sprite.vert`), sampling the colour texture
+  on unit 0 and the material pack on unit 1 -- an RGBA8UI texture filled by
+  `upload_cell_pack()` from `cell_pack::CellPack::texels()`, which `main.cpp`
+  packs each frame only when `display.gl` is set (same window as
+  `shell::upload_cells`, the colour still uploaded straight from
+  `Grid::get_pixels()` with `GL_UNPACK_ROW_LENGTH`). `CellView` picks the
+  shader's mode: `Legacy` (default) outputs the colour exactly as a blit would;
+  `Material` (F10) flat-colours cells by type and flags; `Raw` writes the pack's
+  bytes, which `gl_frame_test` reads back against `CellPack` byte for byte.
+  `cells.frag` mirrors the bit layout in `render/cell_pack.h`.
 - `gl.h` / `gl.cpp` / `gl_funcs.inl` -- the loader: an X-macro list of every
   entry point used, as `gpu::gl::Name` pointers filled by
   `SDL_GL_GetProcAddress`. No GLAD/GLEW, nothing links opengl32.lib. A function
@@ -381,8 +394,9 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
   raised stack.
 - Guards worth knowing: `golden_frame_test` (checksum of a composited frame --
   any visible change), `gl_frame_test` (the same kind of frame through
-  `GlCanvas` vs `SdlCanvas`; needs a GL 3.3 context, returns 77 = skipped
-  without one), `alloc_test` (allocations in a replayed step),
+  `GlCanvas` vs `SdlCanvas`, cells via `cells.frag`, plus a byte-exact
+  readback of the uploaded cell pack; needs a GL 3.3 context, returns 77 =
+  skipped without one), `alloc_test` (allocations in a replayed step),
   `tuning_test` (`TUNING.md` vs. the constants it names), `sdl_boundary_test`.
 - `tests/bench_grid.cpp` -> `grid_bench`: timings incl. a replayed session. Not
   a test.

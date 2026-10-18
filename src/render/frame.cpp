@@ -186,7 +186,7 @@ void draw_cells(gfx::Canvas& canvas, const Params& p) {
     const gfx::FRect world_dst{-camera.frac_x() * camera.scale(), -camera.frac_y() * camera.scale(),
                                static_cast<float>(p.padded_w * camera.scale()),
                                static_cast<float>(p.padded_h * camera.scale())};
-    canvas.blit(p.cells, nullptr, world_dst);
+    canvas.blit_cells(p.cells, world_dst);
 }
 
 // --- loose bodies ---

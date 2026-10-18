@@ -15,6 +15,13 @@
 // or with the wrong blend -- each of which puts hundreds of pixels far out of
 // tolerance. So: every channel within +-3 levels on at least 99.5% of pixels.
 //
+// The cells are drawn on the GL side through cells.frag (GlCanvas::blit_cells),
+// with the material pack (render/cell_pack.h) uploaded beside the colour, so the
+// parity checks above also hold the shader's legacy mode to a plain blit. Then
+// the pack itself is checked: drawn in the raw view, one pixel per cell, every
+// byte read back must be the byte CellPack wrote -- the upload, the texel order
+// and the shader's reading of the layout, all at once.
+//
 // It needs a GL 3.3 core context, so a video driver: the window is created
 // hidden and never shown. Without one it returns 77, which CMakeLists.txt tells
 // ctest is a skip -- an unchecked backend, reported as unchecked.
@@ -31,6 +38,7 @@
 #include "game/display.h"
 #include "gpu/gl_canvas.h"
 #include "physics/grid.h"
+#include "render/cell_pack.h"
 #include "render/depth_rig.h"
 #include "render/frame.h"
 #include "render/light.h"
@@ -301,7 +309,7 @@ int main() {
     if (!gl) {
         // A context that exists but whose shaders do not compile is a failure,
         // not a skip -- that is this code's fault, not the machine's.
-        const bool shader_fault = why.find("sprite") != std::string::npos;
+        const bool shader_fault = why.find("shaders/") != std::string::npos;
         std::printf("%s: %s\n", shader_fault ? "FAIL" : "SKIP", why.c_str());
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -330,6 +338,17 @@ int main() {
               sdl.error());
         check("every GL fixture texture created", on_gl.build(*gl, grid, camera, light),
               gl->error());
+
+        // The material pack for the same window, with two loose-body cells hidden
+        // in it -- one in water, one in sand -- so the raw check below sees the
+        // HIDDEN and OCCLUDER flags and a liquid's G as well as the fire's ticks.
+        // (The fixture's terrain sits below this window; only the fire is in it.)
+        cell_pack::CellPack pack;
+        const int hidden_index = (camera.view_y() + 40) * WORLD_W + camera.view_x() + 30;
+        const frame::HiddenCell hidden[] = {{hidden_index, 0u, ElementType::Water},
+                                            {hidden_index + 1, 0u, ElementType::Sand}};
+        pack.pack(grid, camera.view_x(), camera.view_y(), PADDED_W, PADDED_H, hidden);
+        gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
 
         std::vector<uint32_t> gl_px;
 
@@ -364,6 +383,51 @@ int main() {
         on_gl.draw(*gl, true);
         gl->read_pixels(gl_px);
         check_parity("the frame after a reload matches", surface, gl_px);
+
+        // The raw view: the pack's bytes as colour, one pixel per cell.
+        gl->set_cell_view(gpu::GlCanvas::CellView::Raw);
+        gl->set_draw_color(0, 0, 0, 255);
+        gl->clear();
+        gl->blit_cells(on_gl.p.cells, gfx::FRect{0.0f, 0.0f, static_cast<float>(PADDED_W),
+                                                 static_cast<float>(PADDED_H)});
+        gl->read_pixels(gl_px);
+        gl->set_cell_view(gpu::GlCanvas::CellView::Legacy);
+        int wrong = 0, first_wrong = -1;
+        bool saw_hidden = false, saw_occluder = false, saw_fire = false;
+        for (int y = 0; y < PADDED_H; ++y) {
+            for (int x = 0; x < PADDED_W; ++x) {
+                const uint32_t want = pack.texels()[static_cast<size_t>(y) * PADDED_W + x];
+                const uint32_t argb = gl_px[static_cast<size_t>(y) * W + x];
+                // ARGB8888 back to the pack's r | g << 8 | b << 16 | a << 24.
+                const uint32_t got = ((argb >> 16) & 0xFFu) | (argb & 0xFF00u) |
+                                     ((argb & 0xFFu) << 16) | (argb & 0xFF000000u);
+                if (got != want && wrong++ == 0) first_wrong = y * PADDED_W + x;
+                saw_hidden |= ((want >> 24) & cell_pack::FLAG_HIDDEN) != 0;
+                saw_occluder |= ((want >> 24) & cell_pack::FLAG_OCCLUDER) != 0;
+                saw_fire |= (want & 0xFFu) == static_cast<uint32_t>(ElementType::Fire);
+            }
+        }
+        char detail[96];
+        std::snprintf(detail, sizeof(detail), "%d of %d texels differ, first at cell %d", wrong,
+                      PADDED_W * PADDED_H, first_wrong);
+        std::printf("  raw cell pack: %s\n", detail);
+        check("the shader reads back every pack texel exactly", wrong == 0, detail);
+        check("the pack window holds a hidden cell, an occluder and fire",
+              saw_hidden && saw_occluder && saw_fire);
+
+        // And the material view draws something the legacy one does not, so the
+        // switch reaches the shader: at least the fire's 16 cells change colour.
+        std::vector<uint32_t> legacy_px;
+        on_gl.draw(*gl, false);
+        gl->read_pixels(legacy_px);
+        gl->set_cell_view(gpu::GlCanvas::CellView::Material);
+        on_gl.draw(*gl, false);
+        gl->read_pixels(gl_px);
+        gl->set_cell_view(gpu::GlCanvas::CellView::Legacy);
+        long changed = 0;
+        for (size_t i = 0; i < gl_px.size(); ++i) changed += gl_px[i] != legacy_px[i];
+        const long fire_px = 16L * Camera::DEFAULT_SCALE * Camera::DEFAULT_SCALE;
+        check("the material view repaints the cells", changed >= fire_px);
 
         on_sdl.release(sdl);
         on_gl.release(*gl);

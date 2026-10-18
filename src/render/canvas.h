@@ -93,6 +93,15 @@ public:
     // top-left; null is its centre), then flipped.
     virtual void blit_ex(const Texture& tex, const Rect* src, const FRect& dst, double angle_deg,
                          const FPoint* pivot, Flip flip) = 0;
+    // The world's cell texture over `dst` -- frame::draw_cells' one call. A plain
+    // blit by default, which is all SdlCanvas does, so the SDL path (and with it
+    // golden_frame_test) is unchanged by its existence. gpu::GlCanvas overrides it
+    // to draw the cells with assets/shaders/cells.frag, which reads the material
+    // pack (render/cell_pack.h) the shell uploaded beside the colour; in its legacy
+    // mode that shader draws exactly what this default does. A method of its own
+    // rather than a flag on blit because the cells are the one draw a shader looks
+    // through to what is there, and every later material pass hangs off it.
+    virtual void blit_cells(const Texture& colour, const FRect& dst) { blit(colour, nullptr, dst); }
     // Shows the finished frame.
     virtual void present() = 0;
 
