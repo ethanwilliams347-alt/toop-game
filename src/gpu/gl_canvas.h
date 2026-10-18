@@ -60,6 +60,27 @@ public:
                  double angle_deg, const gfx::FPoint* pivot, gfx::Flip flip) override;
     void present() override;
 
+    // --- the cells (R1) ---
+    //
+    // What cells.frag draws (its u_mode). Legacy is the default and the only one a
+    // player sees: the colour texture, exactly as a plain blit would draw it --
+    // gl_frame_test holds it to that. The others are debug views; see cells.frag.
+    enum class CellView : int { Legacy = 0, Material = 1, Raw = 2 };
+    void set_cell_view(CellView v) { cell_view_ = v; }
+    CellView cell_view() const { return cell_view_; }
+
+    // Draws the cell texture through cells.frag, with the last upload_cell_pack
+    // bound beside it. Same rect snapping and blend as blit (the Raw view draws
+    // unblended, so its bytes arrive as they are).
+    void blit_cells(const gfx::Texture& colour, const gfx::FRect& dst) override;
+
+    // Uploads the material pack (cell_pack::CellPack::texels(), w x h, row-major,
+    // the window the colour texture's top-left w x h covers) into the RGBA8UI
+    // texture cells.frag reads. Takes the bare buffer so slop_gpu does not depend
+    // on slop_render. Reallocates only when the size changes; w or h <= 0 leaves a
+    // 1x1 pad texel, which the shader reads as an Empty cell everywhere.
+    void upload_cell_pack(const uint32_t* texels, int w, int h);
+
     gfx::Texture create_texture(int w, int h, gfx::Access access, gfx::Blend blend,
                                 gfx::Filter filter = gfx::Filter::Nearest) override;
     void destroy_texture(gfx::Texture& tex) override;
@@ -93,7 +114,9 @@ private:
         : window_(window), context_(context), shader_dir_(std::move(shader_dir)) {}
 
     bool init(std::string& why);
-    bool build_program(unsigned& out, std::string& log) const;
+    bool build_program(const char* vert, const char* frag, unsigned& out, std::string& log) const;
+    bool build_programs(unsigned& sprite, unsigned& cells, std::string& log) const;
+    void bind_cell_uniforms();
     bool resize_target(int w, int h);
     void begin_frame();
     void flush();
@@ -113,6 +136,11 @@ private:
 
     unsigned program_ = 0;
     int u_scale_ = -1;
+    unsigned cells_program_ = 0;
+    int cu_scale_ = -1, cu_mode_ = -1;
+    unsigned cell_tex_ = 0;  // RGBA8UI, the material pack
+    int cell_tex_w_ = 0, cell_tex_h_ = 0;
+    CellView cell_view_ = CellView::Legacy;
     unsigned vao_ = 0, vbo_ = 0;
     unsigned white_ = 0;     // 1x1 opaque white, the "texture" of every fill
     unsigned fbo_ = 0, fbo_tex_ = 0;

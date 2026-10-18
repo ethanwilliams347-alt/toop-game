@@ -31,6 +31,7 @@
 #include "game/scene_activation.h"
 #include "game/settings_menu.h"
 #include "render/backdrop_set.h"
+#include "render/cell_pack.h"
 #include "render/frame.h"
 #include "render/light.h"
 #include "render/mood.h"
@@ -198,6 +199,9 @@ int main(int argc, char* argv[]) {
     // at the upload site rather than here, because the display mode can change
     // under a running scene.
     std::vector<uint32_t> cell_window;
+    // The same window as per-cell material data, for cells.frag. GL only: the SDL
+    // renderer has no shader to read it, so packing it there is wasted work.
+    cell_pack::CellPack cell_material;
 
     // Props: sprites from tools/generate_props.py, positioned by a prop list
     // rather than by a list in this file, so a second scene can have props at
@@ -937,6 +941,16 @@ int main(int argc, char* argv[]) {
                     record_notice = took ? "SHADERS RELOADED" : "SHADER RELOAD FAILED - SEE STDERR";
                     record_notice_timer = 2.0;
                 }
+                // GL only. F10 switches the cells between the shipped look and the
+                // material view -- each cell flat-coloured by what the pack says it
+                // is -- to see the material texture arrive and line up.
+                if (e.key.keysym.sym == SDLK_F10 && !repeat && display.gl) {
+                    using View = gpu::GlCanvas::CellView;
+                    const bool to_material = display.gl->cell_view() == View::Legacy;
+                    display.gl->set_cell_view(to_material ? View::Material : View::Legacy);
+                    record_notice = to_material ? "CELLS: MATERIAL VIEW" : "CELLS: LEGACY";
+                    record_notice_timer = 2.0;
+                }
                 if (e.key.keysym.sym == SDLK_F12 && !repeat && display.gl) {
                     char name[32];
                     std::snprintf(name, sizeof(name), "frame_%03d.bmp", saved_frames++);
@@ -1219,6 +1233,12 @@ int main(int argc, char* argv[]) {
         }
         shell::upload_cells(canvas, targets.cells, run.grid, camera, visible_w, visible_h,
                             cell_window, &body_hidden);
+        if (display.gl) {
+            cell_material.pack(run.grid, camera.view_x(), camera.view_y(), visible_w, visible_h,
+                               body_hidden);
+            display.gl->upload_cell_pack(cell_material.texels().data(), cell_material.width(),
+                                         cell_material.height());
+        }
         present::paint_spray(run, alpha, spray_drops);
 
         // Computed against the same view origin the cell upload just used, and after
