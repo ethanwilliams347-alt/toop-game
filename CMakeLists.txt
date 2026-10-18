@@ -126,6 +126,7 @@ target_include_directories(slop_engine PUBLIC src)
 set(RENDER_SOURCES
     src/render/light.cpp
     src/render/player_anim.cpp
+    src/render/cell_pack.cpp  # reads the grid const, like light.cpp
 )
 add_library(slop_render OBJECT ${RENDER_SOURCES})
 target_include_directories(slop_render PUBLIC src)
@@ -354,6 +355,13 @@ if(BUILD_TESTING)
     target_include_directories(anim_test PRIVATE src tests)
     target_link_libraries(anim_test PRIVATE slop_engine slop_render)
     add_test(NAME anim_test COMMAND anim_test)
+
+    # The packed material texture. Engine and render only -- no SDL, which is
+    # cell_pack.h agreeing with where it sits.
+    add_executable(cell_pack_test tests/test_cell_pack.cpp)
+    target_include_directories(cell_pack_test PRIVATE src tests)
+    target_link_libraries(cell_pack_test PRIVATE slop_engine slop_render)
+    add_test(NAME cell_pack_test COMMAND cell_pack_test)
 
     # The prop list. Links only the parser -- no engine, no SDL -- which is the
     # build file agreeing with what props.h claims about where this sits.

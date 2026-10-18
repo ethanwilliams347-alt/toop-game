@@ -115,7 +115,7 @@ Arrows point from includer to included.
 | `src/util/` | std | everything in `src/` | never (and not includable from `physics/`: it uses float) |
 | `src/game/` | `physics/`, `scene/` | `render/` record types, `present/`, `shell/` | no |
 | `src/present/` | `game/`, `physics/`, `render/frame.h` record types | `shell/` | headers only (via `frame.h`), no calls |
-| `src/render/` light, player_anim, backdrop_set, backdrop_wrap, depth_rig | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
+| `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
 | `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
 | `src/shell/`, `src/main.cpp` | anything | | yes |
 
@@ -216,7 +216,12 @@ Arrows point from includer to included.
 
 - SDL-free: `light.*` (emissive light field), `player_anim.*` (which sheet
   frame), `backdrop_set.*` (parses `backdrop.txt`), `backdrop_wrap.h`,
-  `depth_rig.h` (parallax arithmetic).
+  `depth_rig.h` (parallax arithmetic), `cell_pack.*` (the visible window as
+  one RGBA8UI texel per cell -- type, amount or ticks, temperature, flags --
+  for a cell shader; reads `Grid::cell_data()` const and never
+  `Element::color`; the bit layout a shader mirrors is in its header),
+  `hidden_cell.h` (`frame::HiddenCell`, split out of `frame.h` so this layer
+  can read it; `fill_type` is set by `present::paint_bodies`).
 - SDL: `frame.*` -- `frame::compose`, walks `frame::LAYERS` in draw order;
   `overlay.*` -- screen-space layer (reticle, HUD, hotbar, run-over wash,
   settings screen) drawn after the world.
@@ -319,7 +324,7 @@ target).
 | Set | Library | Contents | SDL |
 |---|---|---|---|
 | `ENGINE_SOURCES` | `slop_engine` | `physics/*.cpp`, `game/run`, `game/level`, `game/input_log`, `scene/scene` | no -- links nothing |
-| `RENDER_SOURCES` | `slop_render` | `render/light`, `render/player_anim` (need engine) | no |
+| `RENDER_SOURCES` | `slop_render` | `render/light`, `render/player_anim`, `render/cell_pack` (need engine) | no |
 | `BACKDROP_SOURCES` | `slop_backdrop` | `render/backdrop_set` (no engine) | no |
 | `SCENE_PROP_SOURCES` | `slop_scene_props` | rest of `scene/` | no |
 | `PRESENT_SOURCES` | `slop_present` | `present/present` (needs engine) | include path only |

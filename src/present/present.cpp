@@ -94,9 +94,13 @@ void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
     // because what a sinking body is pushing through is beside it; what lands on
     // top of it is what it displaced a step ago. Anything else stops the look,
     // so a stone beside a wall with a pool behind it does not borrow the pool.
-    const auto fill_of = [&](int x, int y, uint8_t tag) -> uint32_t {
+    // The record carries the material the colour came from as well, which the
+    // packed-cell path (render/cell_pack.h) draws from instead of the colour.
+    const auto fill_of = [&](int index, uint8_t tag) -> frame::HiddenCell {
         static constexpr int DX[4] = {-1, 1, 0, 0};
         static constexpr int DY[4] = {0, 0, 1, -1};
+        // Cell index to column and row; the division is meant to truncate.
+        const int x = index % grid_w, y = index / grid_w;
         for (int d = 0; d < 4; ++d) {
             for (int reach = 1; reach <= 2; ++reach) {
                 const int nx = x + DX[d] * reach, ny = y + DY[d] * reach;
@@ -104,11 +108,11 @@ void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                 const Element e = g.get_element(nx, ny);
                 if (is_structural(e.type) && e.piece_tag == tag) continue;  // the body itself
                 if (is_liquid(e.type) || material_of(e.type).move == MoveKind::Powder)
-                    return pixels[static_cast<size_t>(ny) * grid_w + nx];
+                    return {index, pixels[static_cast<size_t>(ny) * grid_w + nx], e.type};
                 break;
             }
         }
-        return 0u;
+        return {index, 0u, ElementType::Empty};
     };
 
     // Shelves: left to right along a row as tall as its tallest picture, then the
@@ -144,7 +148,7 @@ void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
         for (size_t k = 0; k < shape.size(); ++k) {
             const int ax = shelf_x + shape[k].x - min_x, ay = shelf_y + shape[k].y - min_y;
             atlas[static_cast<size_t>(ay) * BODY_ATLAS_W + ax] = pixels[static_cast<size_t>(at[k])];
-            hidden.push_back({at[k], fill_of(at[k] % grid_w, at[k] / grid_w, tag)});
+            hidden.push_back(fill_of(at[k], tag));
         }
         shelf_x += w;
         shelf_h = std::max(shelf_h, h);
