@@ -195,6 +195,14 @@ what each scene does in numbers and pictures; run it after turning any of these.
 | `ITERATIONS` | [light.h](src/render/light.h) | 24 | Number of propagation passes for the light field. |
 | `BLOCK` | [light.h](src/render/light.h) | 4 | Cell block size per light sample (4x4 cells). |
 
+The GL multiply light model (`light_model multiply` moods, `renderer=gl`) runs a
+port of this field with the same constants (`LightField::gpu_constants`), so the
+rows above tune both. Its own knob:
+
+| Knob | File | Now | What it does |
+|---|---|---|---|
+| `SUN_MARCH_CELLS` | [pipeline.h](src/gpu/pipeline.h) | 96 | How far the sun's shadow march looks toward the sun, in cells. A cell with no occluder within this many is in full sun; longer finds taller overhangs and costs that many texel reads per visible cell. |
+
 ---
 
 ## Perspective rig (bg_tarn)
@@ -559,3 +567,9 @@ Record adjustments to tuning parameters and their rationale here.
   heaping water on its own top. `SPLASH_MIN_SPEED` 1/4 came out of the body
   probe's float scene: without it every slow bob pushed a wave that came back
   and the raft never settled; with it the raft settles in 191 steps (was 255).
+- **GL light pipeline (R3), `SUN_MARCH_CELLS` 96.** The multiply light model's sun
+  shadow is a march through the visible cell pack. 96 cells is most of a screen's
+  height at the shipped scales (135 rows at scale 8 in 1080p), so an overhang
+  anywhere on screen shades what is under it, at about 12M texel reads a frame at
+  scale 4 in 1080p -- a fraction of a millisecond on any GL 3.3 GPU. The fire
+  light it adds is LightField's own field, ported, so no light constant moved.

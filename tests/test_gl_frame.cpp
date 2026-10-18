@@ -22,6 +22,18 @@
 // byte read back must be the byte CellPack wrote -- the upload, the texel order
 // and the shader's reading of the layout, all at once.
 //
+// Then the multiply light model (R3: gpu/pass_graph.h, gpu/pipeline.h), on the
+// same fixture:
+//   - a neutral lit frame (ambient 1, no sun, no lights, no fire light, nothing
+//     emissive) equals the unlit SDL frame within the same tolerance, so the
+//     albedo -> linear -> HDR -> display round trip moves no colour;
+//   - the GPU light field equals the CPU LightField it ports, block for block,
+//     within a few levels after the same tone map;
+//   - light raises luminance (a fire, a point light), a dim ambient lowers it,
+//     and the sun's march puts what is under a slab in shadow;
+//   - a legacy frame drawn after a lit one still matches SDL, so resolve_lit
+//     leaves the canvas as it found it.
+//
 // It needs a GL 3.3 core context, so a video driver: the window is created
 // hidden and never shown. Without one it returns 77, which CMakeLists.txt tells
 // ctest is a skip -- an unchecked backend, reported as unchecked.
@@ -42,6 +54,7 @@
 #include "render/depth_rig.h"
 #include "render/frame.h"
 #include "render/light.h"
+#include "render/lit_frame.h"
 #include "render/overlay.h"
 #include "render/sdl_canvas.h"
 #include "test_util.h"
@@ -275,6 +288,30 @@ Diff compare(const SDL_Surface* sdl, const std::vector<uint32_t>& gl) {
     return d;
 }
 
+// Mean luma of a rect of an ARGB frame, 0..255.
+double luma(const std::vector<uint32_t>& px, int stride, int x0, int y0, int w, int h) {
+    double sum = 0.0;
+    for (int y = y0; y < y0 + h; ++y)
+        for (int x = x0; x < x0 + w; ++x) {
+            const uint32_t c = px[static_cast<size_t>(y) * stride + x];
+            sum += 0.299 * ((c >> 16) & 0xFF) + 0.587 * ((c >> 8) & 0xFF) + 0.114 * (c & 0xFF);
+        }
+    return sum / (static_cast<double>(w) * h);
+}
+
+// A lit frame for the fixture's camera, as main.cpp builds one: neutral unless
+// the caller changes it.
+lit::LitFrame neutral_frame(const Camera& camera) {
+    lit::LitFrame f;
+    f.fire_gain = 0.0f;
+    f.origin_x = camera.view_x();
+    f.origin_y = camera.view_y();
+    f.screen_x = -camera.frac_x() * static_cast<float>(camera.scale());
+    f.screen_y = -camera.frac_y() * static_cast<float>(camera.scale());
+    f.scale = camera.scale();
+    return f;
+}
+
 void check_parity(const char* name, const SDL_Surface* sdl, const std::vector<uint32_t>& gl) {
     const Diff d = compare(sdl, gl);
     char detail[160];
@@ -428,6 +465,166 @@ int main() {
         for (size_t i = 0; i < gl_px.size(); ++i) changed += gl_px[i] != legacy_px[i];
         const long fire_px = 16L * Camera::DEFAULT_SCALE * Camera::DEFAULT_SCALE;
         check("the material view repaints the cells", changed >= fire_px);
+
+        // --- the multiply light model ---
+        //
+        // The pack without the hidden cells for these, so the GPU field sees the
+        // same grid the CPU one reads.
+        pack.pack(grid, camera.view_x(), camera.view_y(), PADDED_W, PADDED_H, {});
+        gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
+        const lit::LightConstants real = LightField::gpu_constants();
+        lit::LightConstants dark_cells = real;
+        for (float& e : dark_cells.emissive) e = 0.0f;
+
+        const auto lit_draw = [&](const lit::LitFrame& f, std::vector<uint32_t>& out) {
+            const frame::Params keep = on_gl.p;
+            on_gl.p.light = nullptr;  // as main.cpp: the CPU light is not drawn in a lit frame
+            gl->begin_lit_frame();
+            frame::compose(*gl, on_gl.p);
+            const bool ok = gl->resolve_lit(f);
+            on_gl.p = keep;
+            gl->read_pixels(out);
+            return ok;
+        };
+
+        // Neutral: the unlit SDL frame, within tolerance.
+        {
+            const frame::Params keep = on_sdl.p;
+            on_sdl.p.light = nullptr;
+            on_sdl.draw(sdl, false);
+            on_sdl.p = keep;
+        }
+        gl->set_light_constants(dark_cells);
+        check("a neutral lit frame resolves", lit_draw(neutral_frame(camera), gl_px), gl->error());
+        check_parity("a neutral lit frame matches the unlit SDL frame", surface, gl_px);
+        std::vector<uint32_t> neutral_px = gl_px;
+
+        // The GPU light field against the CPU LightField it ports.
+        gl->set_light_constants(real);
+        lit::LitFrame fire = neutral_frame(camera);
+        fire.fire_gain = 1.0f;
+        check("a lit frame with fire resolves", lit_draw(fire, gl_px), gl->error());
+        {
+            std::vector<float> rgb;
+            int cols = 0, rows = 0;
+            gl->read_light_blocks(rgb, cols, rows);
+            check("the GPU light field is LightField's size",
+                  cols == light.cols() && rows == light.rows());
+            int within = 0, lit_blocks = 0, worst = 0;
+            const int n = std::min(cols * rows, light.cols() * light.rows());
+            for (int i = 0; i < n; ++i) {
+                const uint32_t want = light.pixels()[static_cast<size_t>(i)];
+                int worst_here = 0;
+                for (int k = 0; k < 3; ++k) {
+                    const float v = rgb[3 * static_cast<size_t>(i) + k];
+                    const float t = v <= 0.0f ? 0.0f : v / (1.0f + v);
+                    // light.cpp's own packing, rounding and all, so the two compare like for like.
+                    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+                    const int got = static_cast<int>(std::clamp(t, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    const int exp = static_cast<int>((want >> (16 - 8 * k)) & 0xFFu);
+                    worst_here = std::max(worst_here, std::abs(got - exp));
+                }
+                within += worst_here <= TOLERANCE ? 1 : 0;
+                lit_blocks += (want & 0xFFFFFFu) != 0 ? 1 : 0;
+                worst = std::max(worst, worst_here);
+            }
+            char field[128];
+            std::snprintf(field, sizeof(field), "%d of %d blocks within +-%d, worst %d, %d lit",
+                          within, n, TOLERANCE, worst, lit_blocks);
+            std::printf("  GPU light field vs LightField: %s\n", field);
+            check("the GPU light field matches LightField", within >= n * 99 / 100, field);
+            check("the fixture's light field lights more than its fire's block", lit_blocks > 4,
+                  field);
+        }
+
+        // Light raises luminance: around the fire, with its light against without,
+        // under a dim ambient -- under a full one the paint is already as bright as
+        // it gets, and the fire adds little to a dark albedo by multiplying it.
+        {
+            lit::LitFrame dim = neutral_frame(camera);
+            dim.ambient[0] = dim.ambient[1] = dim.ambient[2] = 0.2f;
+            lit_draw(dim, neutral_px);
+            dim.fire_gain = 1.0f;
+            lit_draw(dim, gl_px);
+            const int fx = (205 - camera.view_x()) * Camera::DEFAULT_SCALE;
+            const int fy = (104 - camera.view_y()) * Camera::DEFAULT_SCALE;
+            const int x0 = std::clamp(fx - 40, 0, W - 96), y0 = std::clamp(fy - 40, 0, H - 96);
+            const double with = luma(gl_px, W, x0, y0, 96, 96);
+            const double without = luma(neutral_px, W, x0, y0, 96, 96);
+            std::printf("  around the fire: luma %.1f lit, %.1f unlit\n", with, without);
+            check("fire light raises luminance around the fire", with > without * 1.2);
+            gl->set_light_constants(dark_cells);
+            lit_draw(neutral_frame(camera), neutral_px);
+        }
+
+        // A dim ambient darkens the frame; a point light brightens around itself.
+        {
+            lit::LitFrame dim = neutral_frame(camera);
+            dim.ambient[0] = dim.ambient[1] = dim.ambient[2] = 0.2f;
+            gl->set_light_constants(dark_cells);
+            lit_draw(dim, gl_px);
+            const double dim_all = luma(gl_px, W, 0, 0, W, H);
+            const double neutral_all = luma(neutral_px, W, 0, 0, W, H);
+            check("a dim ambient darkens the frame", dim_all < neutral_all * 0.8);
+
+            const int lx = 40, ly = 20;  // cells into the view, in the sky
+            dim.light_count = 1;
+            dim.lights[0] = lit::PointLight{static_cast<float>(camera.view_x() + lx),
+                                            static_cast<float>(camera.view_y() + ly),
+                                            2.0f,
+                                            1.6f,
+                                            1.2f,
+                                            12.0f,
+                                            0.0f};
+            std::vector<uint32_t> lamp_px;
+            lit_draw(dim, lamp_px);
+            const int px = lx * Camera::DEFAULT_SCALE, py = ly * Camera::DEFAULT_SCALE;
+            const double at_lamp = luma(lamp_px, W, px - 8, py - 8, 16, 16);
+            const double dark_there = luma(gl_px, W, px - 8, py - 8, 16, 16);
+            const double far = luma(lamp_px, W, W - 24, 8, 16, 16);
+            const double far_dark = luma(gl_px, W, W - 24, 8, 16, 16);
+            std::printf("  point light: luma %.1f at it (%.1f without), %.1f far (%.1f)\n", at_lamp,
+                        dark_there, far, far_dark);
+            check("a point light brightens around itself", at_lamp > dark_there + 10.0);
+            check("a point light does not reach past its radius", std::abs(far - far_dark) < 1.0);
+        }
+
+        // The sun's march: a slab of wall in the open, the sun straight overhead.
+        {
+            Grid slab(WORLD_W, WORLD_H, 7u);
+            const int sx = camera.view_x() + 40, sy = camera.view_y() + 20;
+            for (int x = sx; x < sx + 30; ++x)
+                for (int y = sy; y < sy + 4; ++y) slab.set_element(x, y, ElementType::Wall);
+            cell_pack::CellPack slab_pack;
+            slab_pack.pack(slab, camera.view_x(), camera.view_y(), PADDED_W, PADDED_H, {});
+            gl->upload_cell_pack(slab_pack.texels().data(), slab_pack.width(), slab_pack.height());
+            lit::LitFrame sun = neutral_frame(camera);
+            sun.sun_on = true;
+            sun.sun[0] = sun.sun[1] = sun.sun[2] = 1.0f;
+            sun.sun_dir[0] = 0.0f;
+            sun.sun_dir[1] = 1.0f;
+            lit_draw(sun, gl_px);
+            std::vector<float> vis;
+            int vw = 0, vh = 0;
+            gl->read_sun(vis, vw, vh);
+            const auto at = [&](int x, int y) { return vis[static_cast<size_t>(y) * vw + x]; };
+            check("the sun texture is one texel per pack cell", vw == PADDED_W && vh == PADDED_H);
+            if (vw == PADDED_W && vh == PADDED_H) {
+                std::printf("  sun: %.3f above the slab, %.3f on it, %.3f under it, %.3f beside\n",
+                            at(55, 10), at(55, 20), at(55, 40), at(20, 40));
+                check("the sun lights the open air", at(55, 10) > 0.99f && at(20, 40) > 0.99f);
+                check("the sun lights the slab's top cell", at(55, 20) > 0.99f);
+                check("the slab shades what is under it", at(55, 40) < 0.05f);
+            }
+            gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
+        }
+
+        // And a legacy frame after all that is still the SDL frame.
+        gl->set_light_constants(real);
+        on_sdl.draw(sdl, true);
+        on_gl.draw(*gl, true);
+        gl->read_pixels(gl_px);
+        check_parity("a legacy frame after lit frames still matches", surface, gl_px);
 
         on_sdl.release(sdl);
         on_gl.release(*gl);

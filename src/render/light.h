@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <vector>
 #include "physics/grid.h"
+#include "render/lit_frame.h"
 
 // Per-cell emissive lighting: a downsampled light grid, propagated over a
 // handful of iterations, uploaded as a small texture and stretched over the
@@ -81,6 +82,12 @@ public:
     // entirely when this is false, so the cost of the feature in an unlit scene is
     // the scan and nothing else.
     bool any_light() const { return lit; }
+
+    // The numbers this propagation runs on, for the GPU port of it
+    // (src/gpu/pipeline.cpp, the multiply light model's light pass). Read from
+    // the same tables update() uses, so tuning one tunes both, and
+    // gl_frame_test holds the two fields within a few levels of each other.
+    static lit::LightConstants gpu_constants();
 
 private:
     int block_cols;

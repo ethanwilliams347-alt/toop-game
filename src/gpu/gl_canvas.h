@@ -4,7 +4,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "gpu/pipeline.h"
 #include "render/canvas.h"
+#include "render/lit_frame.h"
 
 // The OpenGL 3.3 core backend of gfx::Canvas.
 //
@@ -14,6 +16,9 @@
 // passes that come after it (cells, light, post) each move pixels on purpose,
 // and they need a GL frame already known to equal the SDL one to be measured
 // against. gl_frame_test holds the two within a few levels of each other.
+// The first such pass is the multiply light model (begin_lit_frame /
+// resolve_lit below, gpu/pass_graph.h); a frame that does not ask for it is
+// still the parity frame.
 //
 // How it draws: every fill and blit is a quad appended to one vertex batch,
 // flushed when the texture or blend mode changes, before an upload, and at
@@ -81,6 +86,31 @@ public:
     // 1x1 pad texel, which the shader reads as an Empty cell everywhere.
     void upload_cell_pack(const uint32_t* texels, int w, int h);
 
+    // --- the multiply light model (R3; gpu/pass_graph.h, gpu/pipeline.h) ---
+    //
+    // A lit frame: begin_lit_frame() before frame::compose, resolve_lit() after it
+    // and before the UI. In between, every draw goes to two attachments -- the
+    // albedo (the target read_pixels and present() see) and a linear emissive
+    // buffer cleared to black -- and resolve_lit then runs the light, resolve,
+    // weather and post passes over them, leaving the lit frame in the target for
+    // the UI to draw over. A frame that never calls begin_lit_frame is the legacy
+    // frame, drawn exactly as before: none of this runs and the second attachment
+    // is never written.
+    //
+    // The light constants are LightField::gpu_constants(), handed in because
+    // slop_gpu does not link the render layer that owns them. Set once.
+    void set_light_constants(const lit::LightConstants& c);
+    void begin_lit_frame();
+    // False (with error() set) if a pass could not get its target; the frame then
+    // shows the unlit albedo, and the UI still draws over it.
+    bool resolve_lit(const lit::LitFrame& f);
+    bool lit_frame_open() const { return lit_; }
+    // The last resolve_lit's light field and sun visibility, for gl_frame_test.
+    void read_light_blocks(std::vector<float>& rgb, int& cols, int& rows) {
+        pipeline_.read_blocks(rgb, cols, rows);
+    }
+    void read_sun(std::vector<float>& vis, int& w, int& h) { pipeline_.read_sun(vis, w, h); }
+
     gfx::Texture create_texture(int w, int h, gfx::Access access, gfx::Blend blend,
                                 gfx::Filter filter = gfx::Filter::Nearest) override;
     void destroy_texture(gfx::Texture& tex) override;
@@ -117,6 +147,7 @@ private:
     bool build_program(const char* vert, const char* frag, unsigned& out, std::string& log) const;
     bool build_programs(unsigned& sprite, unsigned& cells, std::string& log) const;
     void bind_cell_uniforms();
+    void apply_draw_buffers();
     bool resize_target(int w, int h);
     void begin_frame();
     void flush();
@@ -137,13 +168,17 @@ private:
     unsigned program_ = 0;
     int u_scale_ = -1;
     unsigned cells_program_ = 0;
-    int cu_scale_ = -1, cu_mode_ = -1;
+    int cu_scale_ = -1, cu_mode_ = -1, cu_emissive_ = -1;
     unsigned cell_tex_ = 0;  // RGBA8UI, the material pack
     int cell_tex_w_ = 0, cell_tex_h_ = 0;
     CellView cell_view_ = CellView::Legacy;
     unsigned vao_ = 0, vbo_ = 0;
     unsigned white_ = 0;     // 1x1 opaque white, the "texture" of every fill
     unsigned fbo_ = 0, fbo_tex_ = 0;
+    unsigned emissive_tex_ = 0;  // attachment 1 of fbo_, RGBA16F; drawn only in a lit frame
+    bool lit_ = false;
+    lit::LightConstants constants_;
+    Pipeline pipeline_;
     int target_w_ = 0, target_h_ = 0;
     bool frame_open_ = false;
 

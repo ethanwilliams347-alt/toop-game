@@ -228,6 +228,9 @@ target_link_libraries(slop_present PUBLIC SDL2-static)
 set(GPU_SOURCES
     src/gpu/gl.cpp
     src/gpu/gl_canvas.cpp
+    src/gpu/pipeline.cpp
+    src/gpu/program.cpp
+    src/gpu/targets.cpp
 )
 add_library(slop_gpu OBJECT ${GPU_SOURCES})
 target_include_directories(slop_gpu PUBLIC src)
@@ -636,6 +639,14 @@ if(BUILD_TESTING)
     target_include_directories(preview_backdrop PRIVATE src tests)
     target_link_libraries(preview_backdrop PRIVATE slop_engine slop_render slop_backdrop
                           slop_scene_props slop_frame SDL2-static)
+
+    # One frame of a scene through the GL renderer in its mood (or another, or
+    # legacy), saved as a BMP: the Wave 4 side-by-side screenshots. GL in a hidden
+    # window, so it needs a driver; asserts nothing.
+    add_executable(preview_frame tests/preview_frame.cpp)
+    target_include_directories(preview_frame PRIVATE src tests)
+    target_link_libraries(preview_frame PRIVATE slop_engine slop_render slop_backdrop
+                          slop_scene_props slop_frame slop_gpu SDL2-static)
 
     # Burn timing and burn shape, in numbers. Not an add_test() for the same
     # reason preview_light is not: what it reports is a matter of taste, and a

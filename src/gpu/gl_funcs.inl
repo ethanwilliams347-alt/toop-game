@@ -67,6 +67,12 @@ GL_FUNC(void, UseProgram, (GLuint program))
 GL_FUNC(GLint, GetUniformLocation, (GLuint program, const GLchar* name))
 GL_FUNC(void, Uniform1i, (GLint location, GLint v0))
 GL_FUNC(void, Uniform2f, (GLint location, GLfloat v0, GLfloat v1))
+GL_FUNC(void, Uniform1f, (GLint location, GLfloat v0))
+GL_FUNC(void, Uniform2i, (GLint location, GLint v0, GLint v1))
+GL_FUNC(void, Uniform3f, (GLint location, GLfloat v0, GLfloat v1, GLfloat v2))
+GL_FUNC(void, Uniform1fv, (GLint location, GLsizei count, const GLfloat* value))
+GL_FUNC(void, Uniform3fv, (GLint location, GLsizei count, const GLfloat* value))
+GL_FUNC(void, Uniform4fv, (GLint location, GLsizei count, const GLfloat* value))
 
 // --- framebuffers ---
 GL_FUNC(void, GenFramebuffers, (GLsizei n, GLuint* framebuffers))
@@ -75,5 +81,7 @@ GL_FUNC(void, BindFramebuffer, (GLenum target, GLuint framebuffer))
 GL_FUNC(void, FramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget,
                                      GLuint texture, GLint level))
 GL_FUNC(GLenum, CheckFramebufferStatus, (GLenum target))
+GL_FUNC(void, DrawBuffers, (GLsizei n, const GLenum* bufs))
+GL_FUNC(void, ClearBufferfv, (GLenum buffer, GLint drawbuffer, const GLfloat* value))
 GL_FUNC(void, BlitFramebuffer, (GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0,
                                 GLint dx1, GLint dy1, GLbitfield mask, GLenum filter))

@@ -78,13 +78,13 @@ textures, draw calls.
 | New scene | `assets/scenes.txt`, a level file, BMPs | `scene_test`, `scene_list_test` |
 | Bind a sprite | `python tools/load_sprite.py <key> <file.bmp>` | never hardcode asset paths |
 | What appears on screen from game state | `src/present/present.*` | `present_test` |
-| Draw order, layers, grade, light pass | `src/render/frame.cpp` (`frame::LAYERS`) | `golden_frame_test` |
-| Lighting | `src/render/light.*` | `light_test`, `preview_light.exe`, `grid_bench --focus` light rows |
+| Draw order, layers, light pass | `src/render/frame.cpp` (`frame::LAYERS`); on GL with a multiply mood, `src/gpu/pass_graph.h` | `golden_frame_test`, `gl_frame_test` |
+| Lighting | `src/render/light.*` (CPU, the reference); `src/gpu/pipeline.*` + `assets/shaders/light_*.frag`, `sun.frag`, `resolve.frag` (GL multiply model) | `light_test`, `gl_frame_test`, `preview_light.exe`, `preview_frame.exe`, `grid_bench --focus` light rows |
 | Player animation | `src/render/player_anim.*` | `src/render/player_sprite.h` is generated -- regenerate with `python tools/player_sheet.py --header` |
 | HUD, reticle, hotbar, menu drawing | `src/render/overlay.*`, `src/ui/*` | `golden_frame_test` |
 | Parallax backdrops | `src/render/backdrop_set.*`, `backdrop_wrap.h`, `depth_rig.h`; generators in `tools/generate_bg_*.py` | `backdrop_test`, `backdrop_set_test`, `rig_test` |
 | Textures, render targets, cell upload | `src/shell/shell.*` | `shell_test` |
-| OpenGL backend, shaders | `src/gpu/` (`gl_canvas.*`, loader list `gl_funcs.inl`), `assets/shaders/` | `gl_frame_test` (GL vs SDL within +-3 levels on 99.5% of pixels; skips without a GL context) |
+| OpenGL backend, shaders | `src/gpu/` (`gl_canvas.*`, `pipeline.*`, `pass_graph.h`, loader list `gl_funcs.inl`), `assets/shaders/` | `gl_frame_test` (GL vs SDL within +-3 levels on 99.5% of pixels; the lit passes; skips without a GL context), `preview_frame.exe` |
 | Frame loop, wiring | `src/main.cpp` (its header comment lists what moved out and where) | |
 | Build / which target links what | `CMakeLists.txt` (each set has a comment explaining its boundary) | `sdl_boundary_test` |
 
@@ -116,9 +116,9 @@ Arrows point from includer to included.
 | `src/util/` | std | everything in `src/` | never (and not includable from `physics/`: it uses float) |
 | `src/game/` | `physics/`, `scene/` | `render/` record types, `present/`, `shell/` | no |
 | `src/present/` | `game/`, `physics/`, `render/frame.h` record types | `shell/` | headers only (via `frame.h`), no calls |
-| `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig, mood | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
+| `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig, mood, lit_frame | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
 | `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
-| `src/gpu/` | `render/canvas.h`, std | everything else in `src/` | yes (SDL's GL context and `SDL_opengl.h`; only `gl.h` includes the latter) |
+| `src/gpu/` | `render/canvas.h`, `render/lit_frame.h` (both std-only), std | everything else in `src/` | yes (SDL's GL context and `SDL_opengl.h`; only `gl.h` includes the latter) |
 | `src/shell/`, `src/main.cpp` | anything | | yes |
 
 ## Code map
@@ -229,8 +229,18 @@ Arrows point from includer to included.
   `*_mood.txt`: light model, ambient/sun, fog, bloom, grade LUT, vignette,
   grain, weather, point lights, per-material looks; `mood::legacy()` is
   today's look and what a scene with no `mood=` gets). The mood is loaded on
-  scene switch in `main.cpp` and not yet drawn -- the planned GL passes
-  consume it. Format: `src/render/mood.h`, summary in `assets/README.md`.
+  scene switch in `main.cpp`; on GL a `light_model multiply` mood is drawn
+  by the light pipeline (`src/gpu/`, below) -- so far its ambient, sun and
+  point lights; fog, bloom, grade, vignette, grain, weather and material
+  looks are read by nothing yet (R4-R6). A legacy mood, and every mood on
+  the SDL renderer, draws today's look. `mood::fill_lit` turns one into the
+  pipeline's numbers. Format: `src/render/mood.h`, summary in `assets/README.md`.
+- `lit_frame.h` -- std-only records the GL light pipeline is told:
+  `lit::LightConstants` (filled by `LightField::gpu_constants()` from the CPU
+  field's own tables, so the GPU port propagates with the same numbers) and
+  `lit::LitFrame` (the mood's ambient/sun/point lights plus where the cell
+  pack sits this frame). Shared by `render/light`, `render/mood` and `src/gpu/`
+  without any of them including the others.
 - `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
   fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
   `blit_cells` is the cell layer's one draw: a plain blit by default (all
@@ -265,6 +275,25 @@ Arrows point from includer to included.
   `Material` (F10) flat-colours cells by type and flags; `Raw` writes the pack's
   bytes, which `gl_frame_test` reads back against `CellPack` byte for byte.
   `cells.frag` mirrors the bit layout in `render/cell_pack.h`.
+- The multiply light model (R3): `pass_graph.h` is the lit frame as a
+  constexpr table -- backdrop -> world (albedo + emissive MRT) -> light ->
+  resolve -> weather -> post -> UI -- with static_asserts that nothing is read
+  before it is written, there is exactly one Resolve, and UI comes after Post.
+  `main.cpp` calls `GlCanvas::begin_lit_frame()` before `frame::compose` (every
+  draw then also writes attachment 1, a linear emissive buffer: `cells.frag`
+  emits a flame's own colour, `sprite.frag` covers it with zero) and
+  `resolve_lit(lit::LitFrame)` after it, which runs `gpu::Pipeline`
+  (`pipeline.*`): the GPU port of `LightField` (gather, propagate, smooth, at
+  block resolution, from the cell pack), a sun-visibility march per cell, then
+  `albedo x (ambient + sun + fire light + point lights) + emissive` in linear
+  half-float, then back to display encoding into the target the UI draws over.
+  Weather is an empty pass (R6); post is only the encode (R5). `targets.*` is
+  a texture + FBO pair; `program.*` compiles a vert/frag pair. Any pipeline
+  shader or target failing at creation fails `GlCanvas::create`, so the game
+  falls back to SDL; failing mid-run draws the frame unlit. The CPU
+  `LightField` stays the legacy model's light and the reference
+  `gl_frame_test` holds the GPU field to. F11 (GL) toggles a scene's mood light
+  off and on.
 - `gl.h` / `gl.cpp` / `gl_funcs.inl` -- the loader: an X-macro list of every
   entry point used, as `gpu::gl::Name` pointers filled by
   `SDL_GL_GetProcAddress`. No GLAD/GLEW, nothing links opengl32.lib. A function
@@ -302,9 +331,12 @@ Arrows point from includer to included.
    last `SETTLE_STEPS` a body eases onto the pose its cells will take),
    `present::paint_spray`, `present::paint_enemies`, `present::arrows`,
    `present::run_readout` read the `Run` const.
-6. **Draw** -- `shell::upload_cells`; `frame::compose` walks `frame::LAYERS`
-   (backdrop, props, cells, bodies, spray, objective, enemies, player, arrows, foreground,
-   grade, light pass); `overlay::draw`; `canvas.present()`.
+6. **Draw** -- `shell::upload_cells` (and, on GL, the cell pack);
+   `frame::compose` walks `frame::LAYERS` (backdrop, props, cells, bodies, spray,
+   objective, enemies, player, arrows, foreground, light pass); `overlay::draw`;
+   `canvas.present()`. On GL with a multiply mood, `compose` runs inside a lit
+   frame with the CPU light pass skipped, and `GlCanvas::resolve_lit` lights the
+   frame before `overlay::draw` (`src/gpu/pass_graph.h`).
 
 Only step 3 changes the world; 4-6 read the `Run` const.
 
@@ -376,7 +408,7 @@ target).
 | `SCENE_PROP_SOURCES` | `slop_scene_props` | rest of `scene/` | no |
 | `PRESENT_SOURCES` | `slop_present` | `present/present` (needs engine) | include path only |
 | `FRAME_SOURCES` | `slop_frame` | `render/frame`, `render/overlay`, `ui/*` | yes |
-| `GPU_SOURCES` | `slop_gpu` | `gpu/gl`, `gpu/gl_canvas` | yes |
+| `GPU_SOURCES` | `slop_gpu` | `gpu/gl`, `gpu/gl_canvas`, `gpu/pipeline`, `gpu/program`, `gpu/targets` | yes |
 | `SHELL_SOURCES` | -- (game only) | `shell/shell` | yes |
 
 `SlopPhysics` links all of them plus SDL2. Each test links the fewest sets it
@@ -395,13 +427,18 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
 - Guards worth knowing: `golden_frame_test` (checksum of a composited frame --
   any visible change), `gl_frame_test` (the same kind of frame through
   `GlCanvas` vs `SdlCanvas`, cells via `cells.frag`, plus a byte-exact
-  readback of the uploaded cell pack; needs a GL 3.3 context, returns 77 =
-  skipped without one), `alloc_test` (allocations in a replayed step),
+  readback of the uploaded cell pack, and the lit passes: a neutral lit frame
+  equals the unlit SDL frame, the GPU light field equals `LightField`'s, light
+  raises luminance, the sun's march shades under a slab; needs a GL 3.3
+  context, returns 77 = skipped without one), `alloc_test` (allocations in a replayed step),
   `tuning_test` (`TUNING.md` vs. the constants it names), `sdl_boundary_test`.
 - `tests/bench_grid.cpp` -> `grid_bench`: timings incl. a replayed session. Not
   a test.
 - `tests/*_probe.cpp`, `tests/preview_*.cpp`: print numbers or dump frames for
   judging by eye; assert nothing. Don't make them `add_test()`.
+  `preview_frame <scene> <out.bmp> [WxH] [mood=<path>|mood=legacy] [view=X,Y]
+  [steps=N]` renders one GL frame of a scene in a mood (hidden window), for
+  side-by-side looks; F12 in the game saves the presented GL frame.
 - `tools/*.py`: asset pipeline -- backdrop generators (`generate_bg_*.py`),
   props (`generate_props.py`), fixture scene (`generate_test_scene.py`), palette
   (`snap_to_palette.py`, `validate_palette.py`), player sheet

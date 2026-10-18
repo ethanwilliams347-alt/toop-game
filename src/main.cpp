@@ -158,6 +158,8 @@ int main(int argc, char* argv[]) {
     }
     SDL_Window* window = display.window;
     gfx::Canvas& canvas = *display.canvas;
+    // The GL light pass propagates with the CPU LightField's own numbers.
+    if (display.gl) display.gl->set_light_constants(LightField::gpu_constants());
 
     // The world's ARGB8888 streaming texture and the light texture, both sized
     // to the viewport rather than to the whole grid, and both rebuilt by this
@@ -190,10 +192,15 @@ int main(int argc, char* argv[]) {
     frame::Backdrop backdrop;
     backdrop_set::Anchor backdrop_anchor = backdrop_set::Anchor::Corner;
 
-    // The loaded scene's mood (render/mood.h). Loaded on every scene switch and
-    // not yet drawn: the GL passes that read it come later, and until then the
-    // SDL path draws what legacy() describes whatever this holds.
+    // The loaded scene's mood (render/mood.h). Loaded on every scene switch. On
+    // GL a `light_model multiply` mood is drawn by the light pipeline
+    // (gpu/pipeline.h); a legacy mood, and every mood on the SDL renderer, is
+    // drawn with the CPU light field exactly as before. F11 (GL only) turns the
+    // mood's light off and on, to compare against the legacy look.
     mood::Mood scene_mood = mood::legacy();
+    bool mood_light = true;
+    // A failed lit frame is reported once, not sixty times a second.
+    bool lit_failure_reported = false;
 
     // Scratch for the cell upload when the window reaches past the grid. Resized
     // at the upload site rather than here, because the display mode can change
@@ -951,6 +958,11 @@ int main(int argc, char* argv[]) {
                     record_notice = to_material ? "CELLS: MATERIAL VIEW" : "CELLS: LEGACY";
                     record_notice_timer = 2.0;
                 }
+                if (e.key.keysym.sym == SDLK_F11 && !repeat && display.gl) {
+                    mood_light = !mood_light;
+                    record_notice = mood_light ? "LIGHT: SCENE MOOD" : "LIGHT: LEGACY";
+                    record_notice_timer = 2.0;
+                }
                 if (e.key.keysym.sym == SDLK_F12 && !repeat && display.gl) {
                     char name[32];
                     std::snprintf(name, sizeof(name), "frame_%03d.bmp", saved_frames++);
@@ -1252,8 +1264,13 @@ int main(int argc, char* argv[]) {
         // the alternative is a cache keyed on both the camera and every temperature in
         // view -- a correctness problem. If this needs to get cheaper, the sweep's
         // iteration count is the lever, not a cache.
-        targets.light.update(run.grid, camera.view_x(), camera.view_y());
-        if (targets.light.any_light()) {
+        //
+        // Not in a lit frame (the multiply light model on GL): there the GPU port
+        // of this field lights the frame, and the CPU one is not drawn.
+        const bool lit_frame =
+            display.gl && mood_light && scene_mood.light_model == mood::LightModel::Multiply;
+        if (!lit_frame) targets.light.update(run.grid, camera.view_x(), camera.view_y());
+        if (!lit_frame && targets.light.any_light()) {
             canvas.update_texture(targets.light_texture, nullptr, targets.light.pixels().data(),
                                   targets.light.cols() * static_cast<int>(sizeof(uint32_t)));
         }
@@ -1302,7 +1319,7 @@ int main(int argc, char* argv[]) {
         fp.body_atlas = body_atlas;
         fp.bodies = &body_sprites;
         fp.spray = &spray_drops;
-        fp.light = &targets.light;
+        fp.light = lit_frame ? nullptr : &targets.light;
         fp.light_texture = targets.light_texture;
 
         // Where the backdrop is exactly the painting. Per frame, because a standing
@@ -1316,7 +1333,25 @@ int main(int argc, char* argv[]) {
         // cloud tiles makes the clouds jump at the wrap, and a float second count
         // still resolves a millisecond after a day of play.
         fp.time_s = static_cast<float>(static_cast<double>(SDL_GetTicks64()) / 1000.0);
+        if (lit_frame) display.gl->begin_lit_frame();
         frame::compose(canvas, fp);
+        if (lit_frame) {
+            // The cell pack's window is the camera's view, placed on screen where
+            // frame::draw_cells puts the cells.
+            lit::LitFrame lf;
+            mood::fill_lit(scene_mood, lf);
+            lf.origin_x = camera.view_x();
+            lf.origin_y = camera.view_y();
+            lf.screen_x = -camera.frac_x() * static_cast<float>(camera.scale());
+            lf.screen_y = -camera.frac_y() * static_cast<float>(camera.scale());
+            lf.scale = camera.scale();
+            lf.time_s = fp.time_s;
+            if (!display.gl->resolve_lit(lf) && !lit_failure_reported) {
+                std::fprintf(stderr, "WARNING: the lit frame failed (%s); drawing it unlit.\n",
+                             display.gl->error());
+                lit_failure_reported = true;
+            }
+        }
 
         // --- the screen-space layer ---
         //
