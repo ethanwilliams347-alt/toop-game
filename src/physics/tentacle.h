@@ -20,9 +20,18 @@
 // tentacle curls. Drawing and hitting still go backwards, cell to rest pixel,
 // through one function, so what is drawn in a cell is what an arrow finds there.
 //
-// Where the chain is comes from two passes, after the tentacle-arm showcase this
-// was modelled on (github.com/Smitner-Studio/tentacle-arm-showcase):
+// Where the chain is comes from a soft chain and two passes, after the
+// tentacle-arm showcase this was modelled on
+// (github.com/Smitner-Studio/tentacle-arm-showcase):
 //
+//  0. Verlet (drift) and a rest curl (curl): every joint remembers where it was
+//     last step, carries on by what it moved -- less a little, so it settles --
+//     and sags under its own weight; then each joint is sprung part of the way
+//     toward the bend it has at rest, smoothed (rest_curl). The spring does
+//     what relaxing toward straight before every solve used to: it keeps the
+//     chain out of a zigzag, but without ironing out the natural arc of a leg,
+//     and it gives way rather than snapping. A body that moves leaves its
+//     tentacles a step behind and swinging after it.
 //  1. FABRIK (reach): the tip is put on its target and the chain is pulled after
 //     it link by link, then the root is put back on its joint and the chain
 //     pushed out from there. A few rounds of that and both ends are where they
@@ -30,11 +39,13 @@
 //     was last step, which is what makes a tentacle trail and settle rather
 //     than snap: the chain has a memory, and the solve only moves it as far as
 //     the target moved.
-//  2. A wave (wave): a sine travelling from root to tip, pushing each joint
-//     sideways to its own link, which is the part that reads as alive. Applied
-//     to a copy, not to the remembered chain, so it never accumulates, and
-//     followed by one more round of reach so the root and tip stay put and only
-//     the middle ripples.
+//  2. A wave (wave): two sines travelling from root to tip, one three times the
+//     other's speed at a third its size, pushing each joint sideways to its own
+//     link, which is the part that reads as alive -- one sine alone reads as a
+//     metronome. Its size scales with the tentacle's length, so the lure, twice
+//     a leg, ripples twice as far. Applied to a copy, not to the remembered
+//     chain, so it never accumulates, and followed by one more round of reach
+//     so the root and tip stay put and only the middle ripples.
 //
 // The showcase also runs a constraint pass to restore link lengths. FABRIK
 // already sets every link to its length exactly, so that pass would only undo
@@ -48,7 +59,8 @@
 // links turned apart leave a notch between them that neither covers. pixel_of in
 // enemy.cpp fills it from the neighbouring link (see link_of below), which puts
 // the filled cell within about two cells of where its pixel really is, as long
-// as no joint bends sharply (limit_bend) and the filler comes from near the
+// as no joint bends sharply (limit_bend, now a safety clamp that the curl
+// keeps a chain well inside) and the filler comes from near the
 // joint, where the notch is. That is a cell looser than rig.h's forward map
 // promises, and enemy_test holds a tentacled species to it.
 namespace tentacle {
@@ -160,12 +172,23 @@ struct Motion {
     fx::v wave_amplitude;
     fx::v wave_spread;
 
+    // The tentacle length, in cells, that wave_amplitude is for: a tentacle
+    // twice as long waves twice as far.
+    int wave_length;
+
     // Rounds of reach per step. Two or three gets the tip onto its target
     // within a sub-cell; more is the showcase's "diminishing returns".
     int iterations;
-    // The share of the way each middle joint relaxes toward straight before
-    // the solve (smooth), and the furthest any joint may bend (limit_bend).
-    fx::v smoothing;
+
+    // --- the soft chain ----------------------------------------------------
+    // The share of last step's movement each joint keeps (drift), how far it
+    // sags a step under its own weight, in cells, and the share of the way
+    // each joint is sprung toward its rest bend before the solve (curl). The
+    // furthest any joint may bend (limit_bend) is a safety clamp only, at the
+    // tolerance of the skin's notch filling (see the top of this file).
+    fx::v keep;
+    fx::v sag;
+    fx::v curl;
     fx::v max_bend;
 
     // --- the legs ----------------------------------------------------------
@@ -174,19 +197,28 @@ struct Motion {
     // under its rest spot, led ahead by how fast the body is going -- and a
     // planted foot stays put until home has moved step_trigger cells away from
     // it, or settle_trigger once the body has stopped, so a body that halts
-    // mid-stride tidies its feet under it. Only one foot is ever in the air, and
-    // of two that want to step, the one further from home goes first; the
-    // other waits, which is what makes the two fall into turns on their own.
+    // mid-stride tidies its feet under it. Of two that want to step, the one
+    // further from home goes first; the other waits until the first is
+    // overlap_steps into its swing, so the gait overlaps -- a second foot
+    // lifting as the first comes down -- rather than marching in strict turns.
+    // While a strike winds up the feet still shuffle to brace, but only once
+    // they are brace_trigger cells out.
     //
-    // A swing takes swing_steps whatever the speed, so a running body takes
-    // longer strides rather than quicker ones, and lands step_lead of a
-    // swing's travel ahead of home's rest spot, so the foot is put down where
-    // the body will be rather than where it was. Home's ground is searched
-    // foot_probe columns either side, nearest first, and a solid foothold is
-    // preferred to loose powder within that.
+    // A swing aims at a point eased along over swing_steps whatever the speed,
+    // so a running body takes longer strides rather than quicker ones, and the
+    // foot chases that point on swing_follow, a spring, so it lags and settles
+    // rather than gliding on rails; it lands once the aim is home and the foot
+    // within a cell of it, or swing_steps later regardless. It lands step_lead
+    // of a swing's travel ahead of home's rest spot, so the foot is put down
+    // where the body will be rather than where it was. Home's ground is
+    // searched foot_probe columns either side, nearest first, and a solid
+    // foothold is preferred to loose powder within that.
     int swing_steps;
+    Response swing_follow;
+    int overlap_steps;
     int step_trigger;
     int settle_trigger;
+    int brace_trigger;
     fx::v step_lead;
     int foot_probe;
     // A foot rises this many cells at the middle of its swing, and further when
@@ -208,10 +240,18 @@ struct Motion {
     // and dips into a hollow one foot is standing in. Both follow on
     // body_follow, and each foot put down knocks the sink's speed by
     // footfall_dip cells a step, so a step lands as a small give in the body.
+    //
+    // Nor is the body driven at a constant speed: it gathers speed and loses
+    // it at walk_accel cells a second each step, toward its walking speed
+    // times the share of its legs planted -- a foot in the air is a foot not
+    // pushing, so the body surges and eases with the gait -- and leans into
+    // speeding up by accel_lean radians per cell a second gained in a step.
     Response body_follow;
     int body_sink;
     fx::v body_tilt;
     fx::v footfall_dip;
+    fx::v walk_accel;
+    fx::v accel_lean;
 
     // --- the lure ----------------------------------------------------------
     // How the bulb follows where it wants to be (see Response). Loose and
@@ -262,12 +302,20 @@ struct Motion {
     fx::v crawl_share;
 
     // A tentacle cut off does not turn straight to sand: the piece falls and
-    // lies where it lands, a chain of its own, wriggling for piece_steps --
-    // a wave piece_wriggle cells either side, one every piece_wriggle_steps,
-    // dying away with it -- and then it crumbles.
+    // lies where it lands, a chain of its own, writhing for piece_steps and
+    // then crumbling. Slowly: a wave piece_wriggle cells either side at the
+    // free tip and nothing at the cut, so the whole piece curls into S-curves
+    // from the end that is still alive; about one every piece_wriggle_steps,
+    // its speed and size pushed about by a slow two-octave noise
+    // (Enemy::writhe_noise), so no two pieces writhe alike and neither is a
+    // metronome. It dies away easing out, with the square of the time left.
+    // piece_push of the writhe each step goes into the piece's own Verlet
+    // chain, so it flops and rolls where it lies rather than only drawing a
+    // ripple over a still chain.
     int piece_steps;
     fx::v piece_wriggle;
     int piece_wriggle_steps;
+    fx::v piece_push;
 };
 
 // A species' tentacles: up to three chains and how they move. The chains'
@@ -346,6 +394,13 @@ inline void reach(Points& p, const Lengths& len, int links, rig::Point root, rig
 // anything done to the middle of a chain that must leave its ends alone.
 inline fx::v midway(int i, int links) { return fx::sin(2 * fx::HALF_PI * i / links); }
 
+// sin(pi/2 * i / links): 0 at the root, 1 at the tip. The envelope for a piece
+// cut off, whose root is the cut and whose tip is the end still alive.
+inline fx::v toward_tip(int i, int links) { return fx::sin(fx::HALF_PI * i / links); }
+
+// Which of the two a wave is shaped by.
+enum class Envelope : uint8_t { Midway, Tip };
+
 // Each middle joint pushed by (dx, dy) times its envelope.
 inline void nudge(Points& p, int links, fx::v dx, fx::v dy) {
     for (int i = 1; i < links; ++i) {
@@ -356,12 +411,19 @@ inline void nudge(Points& p, int links, fx::v dx, fx::v dy) {
 }
 
 // The travelling wave: joint i pushed sideways to the link that ends at it, by
-// `amplitude` times sin(phase + i * spread) times its envelope. Positive is to
-// the link's right as it runs root to tip (clockwise, with y down).
-inline void wave(Points& p, int links, fx::v amplitude, fx::v phase, fx::v spread) {
-    for (int i = 1; i < links; ++i) {
-        const fx::v push =
-            fx::mul(fx::mul(amplitude, fx::sin(phase + spread * i)), midway(i, links));
+// `amplitude` times its envelope times two sines -- three quarters of
+// sin(phase + i * spread) and a quarter of sin(3 phase + 2 i spread), a
+// quicker, shorter ripple riding on the first. Positive is to the link's right
+// as it runs root to tip (clockwise, with y down). A Tip envelope moves the
+// tip as well.
+inline void wave(Points& p, int links, fx::v amplitude, fx::v phase, fx::v spread,
+                 Envelope shape = Envelope::Midway) {
+    const int last = shape == Envelope::Tip ? links : links - 1;
+    for (int i = 1; i <= last; ++i) {
+        const fx::v sines =
+            (3 * fx::sin(phase + spread * i) + fx::sin(3 * phase + 2 * spread * i)) / 4;
+        const fx::v env = shape == Envelope::Tip ? toward_tip(i, links) : midway(i, links);
+        const fx::v push = fx::mul(fx::mul(amplitude, sines), env);
         const fx::v dx = p[i].x - p[i - 1].x, dy = p[i].y - p[i - 1].y;
         const fx::v d = length(dx, dy);
         if (d == 0) continue;
@@ -412,17 +474,77 @@ inline bool sweep_touches(rig::Point a, rig::Point b, fx::v r, int x0, int y0, i
     return false;
 }
 
-// Each middle joint moved by the share `k` of the way toward the midpoint of
-// its neighbours. A chain whose target moves back toward its root has slack to
-// take up, and the solve takes it up wherever the last pose leaves room -- often
-// as a zigzag, which a link-per-turn skin draws as branches and stray pixels.
-// Relaxing toward straight before every solve irons a fold out over a few steps
-// instead of letting the next solve fold it tighter. Leaves the ends alone.
-inline void smooth(Points& p, int links, fx::v k) {
-    const Points q = p;
+// --- the soft chain ------------------------------------------------------------
+
+// The bend at each joint of a chain at rest, as a cosine and sine (entry i for
+// joint i; the ends are straight), taken from the rest chain smoothed twice by
+// a 1-2-1 average. The art's chain is rounded to whole cells, so a leg's
+// three-cell links zigzag a cell here and there; sprung toward that, a leg
+// would hold the zigzag. Smoothed, it is the arc the art was drawn along.
+struct Curl {
+    std::array<fx::v, MAX_JOINTS> c{};
+    std::array<fx::v, MAX_JOINTS> s{};
+};
+
+inline Curl rest_curl(const Chain& ch) {
+    Points p = rest_points(ch);
+    const int n = ch.links();
+    for (int round = 0; round < 2; ++round) {
+        const Points q = p;
+        for (int i = 1; i < n; ++i) {
+            p[i].x = (q[i - 1].x + 2 * q[i].x + q[i + 1].x) / 4;
+            p[i].y = (q[i - 1].y + 2 * q[i].y + q[i + 1].y) / 4;
+        }
+    }
+    Curl k;
+    k.c[0] = k.c[n] = fx::ONE;
+    for (int i = 1; i < n; ++i) {
+        const fx::v ax = p[i].x - p[i - 1].x, ay = p[i].y - p[i - 1].y;
+        const fx::v bx = p[i + 1].x - p[i].x, by = p[i + 1].y - p[i].y;
+        const int64_t norm = int64_t{length(ax, ay)} * length(bx, by);
+        if (norm == 0) {
+            k.c[i] = fx::ONE;
+            continue;
+        }
+        k.c[i] = static_cast<fx::v>((int64_t{ax} * bx + int64_t{ay} * by) * fx::ONE / norm);
+        k.s[i] = static_cast<fx::v>((int64_t{ax} * by - int64_t{ay} * bx) * fx::ONE / norm);
+    }
+    return k;
+}
+
+// Verlet: each joint but the root carries on by `keep` of what it moved last
+// step and sags `sag` cells, and `was` becomes where it was. The root rides
+// the body and the tip is put on its target by reach after, so only the middle
+// truly drifts.
+inline void drift(Points& p, Points& was, int links, fx::v keep, fx::v sag) {
+    for (int i = 1; i <= links; ++i) {
+        const rig::Point at = p[i];
+        p[i].x += fx::mul(p[i].x - was[i].x, keep);
+        p[i].y += fx::mul(p[i].y - was[i].y, keep) + sag;
+        was[i] = at;
+    }
+}
+
+// The soft angular spring: root to tip, joint i+1 moved the share `k` of the
+// way toward where the rest bend at joint i would put it -- the link before
+// turned by that bend, at the next link's present length. A share, not all
+// the way, so a tentacle pushed into a sharper bend gives and comes back
+// rather than snapping to its rest shape; and toward a curl, not toward
+// straight, so a leg left alone keeps its arc.
+inline void curl(Points& p, int links, const Curl& rest, fx::v k) {
     for (int i = 1; i < links; ++i) {
-        p[i].x += fx::mul((q[i - 1].x + q[i + 1].x) / 2 - q[i].x, k);
-        p[i].y += fx::mul((q[i - 1].y + q[i + 1].y) / 2 - q[i].y, k);
+        const fx::v ax = p[i].x - p[i - 1].x, ay = p[i].y - p[i - 1].y;
+        const fx::v la = length(ax, ay);
+        const fx::v lb = length(p[i + 1].x - p[i].x, p[i + 1].y - p[i].y);
+        if (la == 0 || lb == 0) continue;
+        // The link before as a unit vector, turned by the rest bend, at lb.
+        const int64_t ux = int64_t{ax} * fx::ONE / la, uy = int64_t{ay} * fx::ONE / la;
+        const int64_t wx = (ux * rest.c[i] - uy * rest.s[i]) / fx::ONE;
+        const int64_t wy = (ux * rest.s[i] + uy * rest.c[i]) / fx::ONE;
+        const fx::v tx = p[i].x + static_cast<fx::v>(wx * lb / fx::ONE);
+        const fx::v ty = p[i].y + static_cast<fx::v>(wy * lb / fx::ONE);
+        p[i + 1].x += fx::mul(tx - p[i + 1].x, k);
+        p[i + 1].y += fx::mul(ty - p[i + 1].y, k);
     }
 }
 
@@ -434,7 +556,7 @@ inline rig::Point turn_about(rig::Point o, rig::Point q, fx::v c, fx::v s) {
 
 // No joint bent further than the angle whose cosine and sine these are: root
 // to tip, a joint bent too far has the rest of the chain turned back about it
-// until it is bent exactly that far. Smoothing makes a sharp fold rare; this
+// until it is bent exactly that far. The curl makes a sharp fold rare; this
 // makes it impossible, which is what bounds the notch at the outside of a bend
 // that tentacle_pixel in enemy.cpp fills -- the further a joint bends, the
 // further the filled cell is from where its pixel really is. The tip may end a

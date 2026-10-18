@@ -422,25 +422,43 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             // about a third of a wavelength down each tentacle at once: enough
             // that a tentacle standing still is visibly not still, not so much
             // that a leg reads as wobbling under the weight.
+            // The amplitude is a leg's (about 34 cells long); the lure, twice
+            // that, waves twice as far.
             .wave_steps = 110,
             .wave_amplitude = fx::from_ratio(3, 2),
             .wave_spread = rig::deg(45),
+            .wave_length = 34,
             .iterations = 3,
-            // A quarter of the way to straight each step irons out a fold in a
-            // few steps without visibly stiffening a tentacle that is meant to
-            // curl. The bend limit is just over the sharpest joint of the
-            // lure's own hook at rest (34 degrees), so the art's pose is always
-            // one the limit allows; it is also what keeps a cell filled in at
-            // the outside of a bend within two cells of its pixel (tentacle.h).
-            .smoothing = fx::from_ratio(1, 4),
+            // Seven eighths of last step's movement kept: a body that stops
+            // has its tentacles swing on after it for a few steps and settle in
+            // about half a second. A twentieth of a cell's sag a step, which the
+            // solve mostly takes back out, so slack hangs rather than bows up.
+            // An eighth of the way back to the rest curl each step: soft enough
+            // to give under a step or a strike, firm enough that a fold irons
+            // out in a dozen steps. The bend limit is just over the sharpest
+            // joint of the lure's own hook at rest (34 degrees), so the art's
+            // pose is always one the limit allows; it is also what keeps a cell
+            // filled in at the outside of a bend within two cells of its pixel
+            // (tentacle.h). The curl keeps the legs' twelve finer links far
+            // inside it.
+            .keep = fx::from_ratio(7, 8),
+            .sag = fx::from_ratio(1, 20),
+            .curl = fx::from_ratio(1, 8),
             .max_bend = rig::deg(35),
             // A fifth of a second a swing. At chase speed the body covers
-            // eight cells in that; at patrol, under four. A foot steps once it
-            // is ten cells from home: about a box width's stride at a walk,
-            // longer at a run, inside what a leg reaches either way.
+            // eight cells in that; at patrol, under four. The foot chases its
+            // aim on a quick spring that just overshoots, so it lags into the
+            // step and lands with a little settle. A second foot may lift
+            // once the first is eight steps in, two thirds of its swing. A
+            // foot steps once it is ten cells from home: about a box width's
+            // stride at a walk, longer at a run, inside what a leg reaches
+            // either way; bracing for a strike it shuffles at six.
             .swing_steps = 12,
+            .swing_follow = tentacle::response(8, fx::from_ratio(4, 5), fx::from_ratio(1, 2)),
+            .overlap_steps = 8,
             .step_trigger = 10,
             .settle_trigger = 3,
+            .brace_trigger = 6,
             .step_lead = fx::from_ratio(1, 2),
             .foot_probe = 4,
             .step_lift = 5,
@@ -453,6 +471,12 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             .body_sink = 2,
             .body_tilt = rig::deg(12),
             .footfall_dip = fx::from_ratio(1, 4),
+            // Up to chase speed in about ten steps and to patrol in five: a
+            // lunge that builds rather than a switch. A degree of lean for
+            // each cell a second gained in a step, so setting off pitches it
+            // forward about four degrees, under body_tilt.
+            .walk_accel = fx::from_int(4),
+            .accel_lean = rig::deg(1) / 2,
             // About a third of a second to swing across to a new spot, and a
             // little past it. The spring this replaced (1/12 of the gap, 1/5
             // of the speed lost a step) is a 22-step swing damped at 9/26,
@@ -485,11 +509,14 @@ inline constexpr tentacle::Set ANGLER_TENTACLES{
             .hop_speed = fx::from_int(90),
             .legless_sink = 26,
             .crawl_share = fx::from_ratio(1, 3),
-            // A second of wriggling, quick and wide at first -- a wave every
-            // fifth of a second, two cells either side -- and still by the end.
-            .piece_steps = 60,
-            .piece_wriggle = fx::from_int(2),
-            .piece_wriggle_steps = 12,
+            // Two seconds of slow writhing -- about one wave every five sixths
+            // of a second, three cells either side at the tip -- easing to
+            // still by the end. A sixteenth of it pushed into the chain each
+            // step is enough to roll the piece over without crawling it off.
+            .piece_steps = 120,
+            .piece_wriggle = fx::from_int(3),
+            .piece_wriggle_steps = 50,
+            .piece_push = fx::from_ratio(1, 16),
         },
 };
 
@@ -867,6 +894,9 @@ private:
     // limb turning a degree does.
     struct Limb {
         tentacle::Points joint{};  // the solved chain, in posed frame space
+        // Where each joint of it was last step, which makes it a Verlet chain
+        // (tentacle::drift): what it moved is what it carries on moving.
+        tentacle::Points joint_was{};
         // The links as placed this step -- with the wave, which the remembered
         // chain does not carry -- and the rectangle each can draw into.
         std::array<rig::Affine, tentacle::MAX_LINKS> fwd{};
@@ -877,8 +907,8 @@ private:
         // (tentacle_pixel). Entry j - 1 is joint j.
         std::array<rig::Affine, tentacle::MAX_LINKS> joint_bwd{};
         rig::Point tip{};       // world fx: the foot, or the bulb
-        rig::Point vel{};       // world fx per step: the bulb's swing
-        rig::Point aim{};       // world fx: where the bulb wanted to be last step
+        rig::Point vel{};       // world fx per step: the bulb's swing, or the foot's
+        rig::Point aim{};       // world fx: where the bulb (foot) wanted to be last step
         rig::Point lift_off{};  // world fx: where a swinging foot left the ground
         rig::Point home{};      // world fx: where this foot belongs now (plan_steps)
         int swing_t = 0;        // steps into the current swing
@@ -912,6 +942,11 @@ private:
         int seam = -1;
         int piece_left = 0;
         int piece_pixels = 0;
+        // The piece's writhe: how far round its wave is, in fx radians,
+        // advanced each step by a noisy speed, and the seed of that noise,
+        // fixed when it is cut so a replay writhes the same.
+        fx::v piece_phase = 0;
+        uint64_t piece_seed = 0;
         tentacle::Points piece{};
         tentacle::Points piece_was{};
     };
@@ -953,6 +988,11 @@ private:
     bool limbs_face_left = false;
     // On one leg: steps until the next hop.
     int hop_wait = 0;
+    // A tentacled body's walking speed, in fx cells a second, gathered and lost
+    // at Motion::walk_accel rather than set; and what it gained this step, for
+    // the lean into it (carry_body).
+    fx::v walk_speed = 0;
+    fx::v walk_gain = 0;
 
     // compute_pose, in the three pieces update() runs with the tentacles' step
     // between: the rig's angles, then the chains (which root on the body the
@@ -986,6 +1026,8 @@ private:
     bool crawling() const;
     // The pieces' step: fall, wriggle, and crumble at the end.
     void move_pieces(Grid& grid);
+    // The slow noise a piece writhes by, in [-ONE, ONE] (enemy.cpp).
+    static fx::v writhe_noise(uint64_t seed, int step, int period);
     void crumble_piece(Grid& grid, int limb);
     rig::Box pad_limit() const;
     // Posed frame space to world and back, in fx, sub-cell remainder included:

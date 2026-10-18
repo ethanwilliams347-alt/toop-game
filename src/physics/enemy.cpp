@@ -1,6 +1,7 @@
 #include "enemy.h"
 #include <algorithm>
 #include <cstdlib>
+#include "random.h"
 
 namespace {
 
@@ -371,6 +372,9 @@ void Enemy::cut_pieces(std::array<uint8_t, MAX_FRAME_PIXELS>& seen) {
         limb.cut = limb.seam = cut;
         limb.piece_pixels = count;
         limb.piece_left = set.motion.piece_steps;
+        limb.piece_phase = 0;
+        limb.piece_seed = sim_random::mix((uint64_t(uint32_t(body.x)) << 32) ^ uint32_t(body.y) ^
+                                          (uint64_t(k) << 24) ^ (uint64_t(cut) << 16));
         for (int j = cut; j <= c.links(); ++j) {
             const int link = std::min(j, c.links() - 1);
             limb.piece[j] = to_world(limb.fwd[link].at(c.rest[j].x, c.rest[j].y));
@@ -620,6 +624,32 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
                     hop_wait = m.hop_rest;
                 }
             }
+        }
+
+        // A body on tentacles gathers its speed rather than having it
+        // (Motion::walk_accel), toward what its planted feet can push: a foot
+        // in the air is a foot not pushing. Not while it hops, whose speed is
+        // the jump's, and not when it stops dead -- a wall turned from, a
+        // strike planted -- which the feet can brace for.
+        walk_gain = 0;
+        if (kind->tentacles && legs_standing() != 1) {
+            const tentacle::Motion& m = kind->tentacles->motion;
+            int legs = 0, down = 0;
+            for (int k = 0; k < kind->tentacles->count; ++k) {
+                if (arm(k).role != tentacle::Role::Leg || !arm(k).intact) continue;
+                ++legs;
+                down += !arm(k).swinging;
+            }
+            fx::v aim = body.vel_x;
+            if (legs > 0) aim = static_cast<fx::v>(int64_t{aim} * (legs + down) / (2 * legs));
+            if (body.vel_x == 0) {
+                walk_speed = 0;
+            } else {
+                const fx::v was = walk_speed;
+                walk_speed += std::clamp(aim - walk_speed, -m.walk_accel, m.walk_accel);
+                walk_gain = face_left ? was - walk_speed : walk_speed - was;
+            }
+            body.vel_x = walk_speed;
         }
 
         // The box's motion: the player's, from box_body.h, with this species'
@@ -925,6 +955,9 @@ void Enemy::carry_body() {
     // With no leg under it the body comes down its box onto the ground, and
     // what is left of it is dragged along there.
     if (crawling()) sink = fx::from_int(m.legless_sink);
+    // Leant into speeding up, back from slowing: the hips push and the body
+    // follows a step behind.
+    lean = std::clamp(lean + fx::mul(walk_gain, m.accel_lean), -m.body_tilt, m.body_tilt);
     if (footfalls != footfalls_felt) {
         carried_sink.vel += m.footfall_dip;
         footfalls_felt = footfalls;
@@ -937,10 +970,11 @@ void Enemy::rest_tentacles() {
     const tentacle::Set& set = *kind->tentacles;
     limbs_face_left = face_left;
     wave_clock = 0;
+    walk_speed = walk_gain = 0;
     for (int k = 0; k < set.count; ++k) {
         const tentacle::Chain& c = set.chain[k];
         Limb& limb = arm(k);
-        limb.joint = tentacle::rest_points(c);
+        limb.joint = limb.joint_was = tentacle::rest_points(c);
         limb.tip = to_world(limb.joint[c.links()]);
         limb.lift_off = limb.tip;
         limb.vel = {};
@@ -973,8 +1007,10 @@ void Enemy::move_tentacles(const Grid& grid, int target_x, int target_y) {
     // back the long way round.
     if (face_left != limbs_face_left) {
         const fx::v edge = fx::from_int(kind->frame_w() - 1);
-        for (int k = 0; k < set.count; ++k)
+        for (int k = 0; k < set.count; ++k) {
             for (rig::Point& p : arm(k).joint) p.x = edge - p.x;
+            for (rig::Point& p : arm(k).joint_was) p.x = edge - p.x;
+        }
         limbs_face_left = face_left;
     }
 
@@ -1010,13 +1046,32 @@ void Enemy::move_tentacles(const Grid& grid, int target_x, int target_y) {
         goal.y =
             std::clamp(goal.y, fx::from_int(limit.y0 + margin), fx::from_int(limit.y1 - margin));
 
-        tentacle::smooth(limb.joint, n, m.smoothing);
+        // The soft chain: carried on by last step's movement and sagging,
+        // then sprung toward its rest curl, then solved onto its ends.
+        limb.joint[0] = root;
+        tentacle::drift(limb.joint, limb.joint_was, n, m.keep, m.sag);
+        tentacle::curl(limb.joint, n, tentacle::rest_curl(c), m.curl);
         if (limb.role == tentacle::Role::Leg) {
             // The rear tentacle bows back and the front one forward.
             const fx::v out = c.part == rig::RearLeg ? -m.bow : m.bow;
             tentacle::nudge(limb.joint, n, out, 0);
         }
         tentacle::reach(limb.joint, len, n, root, goal, m.iterations);
+        // A leg's middle joints are kept out of the ground they would sag or
+        // be dragged into, pushed up a cell at a time as far as the radius
+        // twice over, without the speed of the push (or Verlet would throw
+        // the joint upward next step). The foot is the ground's already.
+        if (limb.role == tentacle::Role::Leg) {
+            for (int j = 1; j < n; ++j) {
+                for (int up = 0; up < 2 * c.radius; ++up) {
+                    const rig::Point w = to_world(limb.joint[j]);
+                    if (!is_solid(grid.get_element(rig::nearest(w.x), rig::nearest(w.y)).type))
+                        break;
+                    limb.joint[j].y -= fx::ONE;
+                    limb.joint_was[j].y -= fx::ONE;
+                }
+            }
+        }
         tentacle::limit_bend(limb.joint, n, bend.c, bend.s);
 
         // What is drawn: the solved chain with the wave through it, held to the
@@ -1030,8 +1085,9 @@ void Enemy::move_tentacles(const Grid& grid, int target_x, int target_y) {
         // A lure also carries the strike's two flourishes on the drawn copy:
         // the bend rolling down it through the whip, and the thrash after.
         tentacle::Points shown = limb.joint;
-        tentacle::wave(shown, n, m.wave_amplitude + limb.flourish, phase + k * (TURN / 3),
-                       m.wave_spread);
+        const fx::v amplitude = static_cast<fx::v>(
+            int64_t{m.wave_amplitude} * tentacle::total_length(c) / fx::from_int(m.wave_length));
+        tentacle::wave(shown, n, amplitude + limb.flourish, phase + k * (TURN / 3), m.wave_spread);
         if (limb.crack >= 0) tentacle::pulse(shown, n, m.lure_crack, limb.crack);
         tentacle::limit_bend(shown, n, bend.c, bend.s);
         tentacle::reach(shown, len, n, root, goal, 1);
@@ -1111,35 +1167,44 @@ rig::Point Enemy::foot_home(const Grid& grid, int k, rig::Point root, bool& grou
 void Enemy::plan_steps(const Grid& grid, const tentacle::Points& roots) {
     const tentacle::Set& set = *kind->tentacles;
     const tentacle::Motion& m = set.motion;
-    int swinging = -1, best = -1;
+    int swinging = 0, best = -1;
+    bool overlap = true;
     fx::v best_far = 0;
     const bool standing = body.x == prev_x && body.rem_x == prev_rem_x;
-    // Standing, a foot steps to tidy itself under the body -- but not while a
-    // strike is wound up: the stillness is half the telegraph.
-    const bool tidy = windup == 0;
+    // Standing, a foot steps to tidy itself under the body. While a strike is
+    // wound up only a foot well out of place does, to brace: the stillness is
+    // half the telegraph, a shuffle the other half.
+    const bool bracing = windup > 0;
     for (int k = 0; k < set.count; ++k) {
         Limb& limb = arm(k);
         // A leg without its foot does not step; it hangs (leg_goal).
         if (limb.role != tentacle::Role::Leg || !limb.intact) continue;
         limb.home = foot_home(grid, k, roots[k], limb.grounded);
         if (limb.swinging) {
-            swinging = k;
+            ++swinging;
+            overlap = overlap && limb.swing_t >= m.overlap_steps;
             continue;
         }
-        if (standing && !tidy) continue;
         const fx::v far = tentacle::length(limb.tip.x - limb.home.x, limb.tip.y - limb.home.y);
-        const fx::v trigger = fx::from_int(standing ? m.settle_trigger : m.step_trigger);
+        const fx::v trigger = fx::from_int(bracing    ? m.brace_trigger
+                                           : standing ? m.settle_trigger
+                                                      : m.step_trigger);
         if (limb.grounded && far > trigger && far > best_far) {
             best = k;
             best_far = far;
         }
     }
-    // In the air nobody steps: leg_goal lets the feet trail instead.
-    if (swinging >= 0 || best < 0 || (!body.on_ground && body.vel_y != 0)) return;
+    // In the air nobody steps: leg_goal lets the feet trail instead. A second
+    // foot lifts only once the first is overlap_steps into its swing, and
+    // never a third.
+    if (best < 0 || swinging > 1 || (swinging == 1 && !overlap) ||
+        (!body.on_ground && body.vel_y != 0))
+        return;
     Limb& limb = arm(best);
     limb.swinging = true;
     limb.swing_t = 0;
-    limb.lift_off = limb.tip;
+    limb.lift_off = limb.aim = limb.tip;
+    limb.vel = {};
 }
 
 rig::Point Enemy::leg_goal(const Grid& grid, int k, rig::Point root) {
@@ -1163,32 +1228,46 @@ rig::Point Enemy::leg_goal(const Grid& grid, int k, rig::Point root) {
     // step, so the foot follows a body that speeds up or slows under it --
     // along an arc that peaks mid-swing, higher by half the climb when the
     // step is up onto something.
+    //
+    // That is the aim; the foot chases it on swing_follow, so it lags into the
+    // step and settles onto the ground. It lands once the aim is home and the
+    // foot is within a cell of it, or a whole swing late regardless.
     if (limb.swinging) {
         ++limb.swing_t;
-        if (limb.swing_t >= m.swing_steps) {
-            limb.swinging = false;
-            limb.tip = limb.home;
-            ++footfalls;
-            return to_frame(limb.tip);
-        }
-        const fx::v t = fx::from_ratio(limb.swing_t, m.swing_steps);
-        limb.tip = lerp(limb.lift_off, limb.home, ease(limb.swing_t, m.swing_steps));
+        const int t_aim = std::min(limb.swing_t, m.swing_steps);
+        const fx::v t = fx::from_ratio(t_aim, m.swing_steps);
+        rig::Point want = lerp(limb.lift_off, limb.home, ease(t_aim, m.swing_steps));
         const fx::v climb = std::max<fx::v>(0, limb.lift_off.y - limb.home.y);
         const fx::v lift = fx::from_int(m.step_lift) + climb / 2;
-        limb.tip.y -= fx::mul(lift, fx::sin(fx::mul(2 * fx::HALF_PI, t)));
+        want.y -= fx::mul(lift, fx::sin(fx::mul(2 * fx::HALF_PI, t)));
+        tentacle::Follow fx_{limb.tip.x, limb.vel.x, limb.aim.x};
+        tentacle::Follow fy{limb.tip.y, limb.vel.y, limb.aim.y};
+        tentacle::follow(fx_, want.x, m.swing_follow);
+        tentacle::follow(fy, want.y, m.swing_follow);
+        limb.tip = {fx_.pos, fy.pos};
+        limb.vel = {fx_.vel, fy.vel};
+        limb.aim = want;
+        const bool near =
+            tentacle::length(limb.tip.x - limb.home.x, limb.tip.y - limb.home.y) <= fx::ONE;
+        if ((limb.swing_t >= m.swing_steps && near) || limb.swing_t >= 2 * m.swing_steps) {
+            limb.swinging = false;
+            limb.tip = limb.home;
+            limb.vel = {};
+            ++footfalls;
+        }
         return to_frame(limb.tip);
     }
 
     // Planted, the foot stays where it is unless it cannot: dragged further
     // from the hip than the tentacle reaches -- a lift out of the body's own
-    // dust, a landing far from where it took off -- it is put straight down
-    // where it belongs; with nothing under it -- the ground dug or shot away --
-    // it drops a cell a step until it lands, and the next plan steps it
-    // somewhere better once it is far enough from home.
+    // dust, a landing far from where it took off -- it is dragged after the
+    // hip, along the line to it, to where the tentacle just reaches, and the
+    // next plan steps it somewhere better; with nothing under it -- the
+    // ground dug or shot away -- it drops a cell a step until it lands.
     const rig::Point hip = to_world(root);
     const fx::v full = tentacle::total_length(c);
-    if (tentacle::length(limb.tip.x - hip.x, limb.tip.y - hip.y) > full + fx::from_int(2)) {
-        limb.tip = limb.home;
+    if (tentacle::length(limb.tip.x - hip.x, limb.tip.y - hip.y) > full) {
+        limb.tip = tentacle::place(hip, limb.tip, full);
     } else {
         const int deepest = rig::nearest(hip.y) + fx::trunc(full);
         const int fx_col = rig::nearest(limb.tip.x), fy = rig::nearest(limb.tip.y);
@@ -1391,6 +1470,23 @@ int Enemy::tentacle_pixel(int k, int px, int py) const {
 // -- drawn and hit through the piece's links -- which is why it needs no pool
 // of its own, and why it must stay inside the pad: one that leaves it, the
 // body walking away, crumbles where it is.
+// Two octaves of deterministic value noise in [-ONE, ONE]: a value drawn at
+// every `period` steps and eased between, plus one at a third the period and
+// half the size, the sum scaled back into range. A pure function of the seed
+// and the step, as everything random in the simulation is (random.h).
+fx::v Enemy::writhe_noise(uint64_t seed, int step, int period) {
+    const auto octave = [seed](int t, int len, uint64_t tag) {
+        const int cell = t / len;
+        const auto at = [&](int i) {
+            return sim_random::spread(fx::ONE, seed, static_cast<uint64_t>(i), tag,
+                                      sim_random::Stream::PieceWrithe);
+        };
+        return lerp(at(cell), at(cell + 1), ease(t % len, len));
+    };
+    const int fine = std::max(1, period / 3);
+    return (2 * octave(step, period, 0) + octave(step, fine, 1)) / 3;
+}
+
 void Enemy::move_pieces(Grid& grid) {
     const tentacle::Set& set = *kind->tentacles;
     const tentacle::Motion& m = set.motion;
@@ -1466,13 +1562,29 @@ void Enemy::move_pieces(Grid& grid) {
         tentacle::Lengths qlen{};
         for (int j = 0; j <= links; ++j) q[j] = to_frame(limb.piece[from + j]);
         for (int j = 0; j < links; ++j) qlen[j] = len[from + j];
-        const fx::v amplitude =
-            static_cast<fx::v>(int64_t{m.piece_wriggle} * limb.piece_left / m.piece_steps);
-        const fx::v phase = static_cast<fx::v>(
-            int64_t{TURN} * (limb.piece_left % m.piece_wriggle_steps) / m.piece_wriggle_steps);
-        tentacle::wave(q, links, amplitude, phase, m.wave_spread);
+        // Eased out with the square of the time left; a slow noise pushes its
+        // speed between half and one and a half of the wave's and its size
+        // between two thirds and four thirds.
+        const int age = m.piece_steps - limb.piece_left;
+        const fx::v speed = fx::ONE + writhe_noise(limb.piece_seed, age, 40) / 2;
+        const fx::v size = fx::ONE + writhe_noise(limb.piece_seed ^ 1, age, 15) / 3;
+        limb.piece_phase = (limb.piece_phase + fx::mul(TURN / m.piece_wriggle_steps, speed)) % TURN;
+        const fx::v left = fx::from_ratio(limb.piece_left, m.piece_steps);
+        const fx::v amplitude = fx::mul(fx::mul(m.piece_wriggle, fx::mul(left, left)), size);
+        tentacle::wave(q, links, amplitude, limb.piece_phase, m.wave_spread,
+                       tentacle::Envelope::Tip);
         for (int j = 0; j < links; ++j) q[j + 1] = tentacle::place(q[j], q[j + 1], qlen[j]);
         tentacle::limit_bend(q, links, bend.c, bend.s);
+        // A share of the writhe into the chain itself: the drawn pose pulls the
+        // remembered one after it, which Verlet carries on as speed, so the
+        // piece flops and rolls. Not the cut end, which the writhe leaves be.
+        for (int j = 1; j <= links; ++j) {
+            const rig::Point w = to_world(q[j]);
+            rig::Point& at = limb.piece[from + j];
+            const rig::Point to{at.x + fx::mul(w.x - at.x, m.piece_push),
+                                at.y + fx::mul(w.y - at.y, m.piece_push)};
+            if (!solid(to)) at = to;
+        }
 
         const int margin = c.radius + 3;
         bool inside = true;

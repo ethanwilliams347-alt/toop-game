@@ -15,6 +15,7 @@
 #include "physics/arrow.h"
 #include "physics/enemy.h"
 #include "test_util.h"
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <set>
@@ -1305,6 +1306,11 @@ int main() {
                 bulb_y = y;
             }
     const rig::Joint rear_tip = rear_chain.rest[rear_chain.links()];
+    // The longest both feet may be off the ground together: the first foot's
+    // swing after the second lifts, run as late as a swing may run (a whole
+    // swing past its aim, Enemy::leg_goal).
+    const int AN_SWING_OVERLAP =
+        2 * AN.tentacles->motion.swing_steps - AN.tentacles->motion.overlap_steps;
     const rig::Joint front_tip = TS.chain[1].rest[TS.chain[1].links()];
     auto angler_arena = [&](int player_x) {
         auto run = std::make_unique<Run>(WORLD_W, WORLD_H);
@@ -1453,7 +1459,7 @@ int main() {
         }
         bool sound = true;
         std::string why;
-        int skates = 0, rear_up = 0, front_up = 0, both_up = 0;
+        int skates = 0, rear_up = 0, front_up = 0, both_up = 0, both_run = 0;
         int prev[2][2] = {{0, 0}, {0, 0}};
         const int start_x = run.enemies[0].cell_x();
         const rig::Joint tips[2] = {rear_tip, front_tip};
@@ -1479,13 +1485,18 @@ int main() {
             }
             if (up[0] && !up[1]) ++rear_up;
             if (up[1] && !up[0]) ++front_up;
-            if (up[0] && up[1]) ++both_up;
+            // The gait overlaps (Motion::overlap_steps): a second foot may
+            // lift as the first comes down, so both are up now and then -- but
+            // only for the end of one swing, never for a stride.
+            both_run = up[0] && up[1] ? both_run + 1 : 0;
+            both_up = std::max(both_up, both_run);
         }
         const int walked = std::abs(run.enemies[0].cell_x() - start_x);
         check("a wandering angler walks", walked > 60, "walked=" + std::to_string(walked));
         check("each tentacle lifts its foot in turn", rear_up > 10 && front_up > 10,
               "rear=" + std::to_string(rear_up) + " front=" + std::to_string(front_up));
-        check("never both at once", both_up == 0, "both=" + std::to_string(both_up));
+        check("both up only as one lands and the other lifts", both_up <= AN_SWING_OVERLAP,
+              "longest both=" + std::to_string(both_up));
         check("and a planted foot does not skate", skates == 0, "skates=" + std::to_string(skates));
         check("every walking angler pose draws what is hit, within its pad", sound, why);
     }
@@ -1510,7 +1521,7 @@ int main() {
             run.step(in);
         }
         const rig::Joint tips[2] = {rear_tip, front_tip};
-        int both_up = 0, buried = 0, on_top = 0;
+        int both_up = 0, both_run = 0, buried = 0, on_top = 0, joint_in = 0, stretched = 0;
         // Two body pixels a row apart in height at rest -- the first and last
         // of the body's on a row through the middle of the fish -- so the body's
         // tilt is the difference in their heights: negative is nose up.
@@ -1551,11 +1562,34 @@ int main() {
             }
             // Counted from the body, not from where feet are drawn: a foot
             // dangling over a drop it cannot reach down to is not a step.
-            if (e.feet_swinging() > 1) ++both_up;
+            both_run = e.feet_swinging() > 1 ? both_run + 1 : 0;
+            both_up = std::max(both_up, both_run);
+            // The soft chains: no middle joint of a leg inside the step or the
+            // floor, and every link still its length, give or take the two
+            // cells of a link's forward map (rig.h) and the wave.
+            for (int k = 0; k < 2; ++k) {
+                const tentacle::Chain& c = TS.chain[k];
+                for (int j = 1; j < c.links(); ++j) {
+                    const rig::Joint a = c.rest[j], b = c.rest[j + 1];
+                    const int ax = world_x(e, a.x, a.y), ay = world_y(e, a.x, a.y);
+                    if (is_solid(run.grid.get_element(ax, ay).type)) ++joint_in;
+                    const int dx = world_x(e, b.x, b.y) - ax, dy = world_y(e, b.x, b.y) - ay;
+                    const int rx = b.x - a.x, ry = b.y - a.y;
+                    const double d = std::sqrt(double(dx * dx + dy * dy));
+                    if (std::abs(d - std::sqrt(double(rx * rx + ry * ry))) > 3) ++stretched;
+                }
+            }
         }
-        check("over a step, an angler never has two feet in the middle of a step", both_up == 0,
-              "both=" + std::to_string(both_up));
-        check("and keeps stepping", run.enemies[0].footfall_count() > 20,
+        check("no leg joint is ever inside the ground", joint_in == 0,
+              "inside=" + std::to_string(joint_in));
+        check("and every leg link keeps its length", stretched == 0,
+              "stretched=" + std::to_string(stretched));
+        check("over a step, an angler's two feet swing together only as one lands",
+              both_up <= AN_SWING_OVERLAP, "longest both=" + std::to_string(both_up));
+        // Fewer than a body at constant speed would take: it gathers speed
+        // and eases with each swing (Motion::walk_accel), so covers less
+        // ground in the same time.
+        check("and keeps stepping", run.enemies[0].footfall_count() > 15,
               "footfalls=" + std::to_string(run.enemies[0].footfall_count()));
         check("never put down inside the step", buried == 0, "buried=" + std::to_string(buried));
         check("climbing on, its body leans back with its feet, nose up", nose_up > 3,
@@ -1786,8 +1820,13 @@ int main() {
               "sand=" + std::to_string(count_sand(g)) + " hole=" + std::to_string(hole));
         // It wriggles where it lies -- its tip drawn in a different place
         // from one step to the next -- and is a pose as sound as any.
+        // The writhe is the free tip's: past the first steps of the fall,
+        // the tip travels further than the joint just past the cut.
+        const rig::Joint base = rear_chain.rest[rear_chain.links() / 2 + 1];
         int moved = 0, last_x = world_x(e, rear_tip.x, rear_tip.y),
             last_y = world_y(e, rear_tip.x, rear_tip.y);
+        int base_x = world_x(e, base.x, base.y), base_y = world_y(e, base.x, base.y);
+        int tip_path = 0, base_path = 0;
         bool sound = true;
         std::string why;
         for (int i = 0; i < TS.motion.piece_steps / 2 && sound; ++i) {
@@ -1795,11 +1834,20 @@ int main() {
             sound = pose_is_sound(e, why);
             const int x = world_x(e, rear_tip.x, rear_tip.y),
                       y = world_y(e, rear_tip.x, rear_tip.y);
+            const int bx = world_x(e, base.x, base.y), by = world_y(e, base.x, base.y);
             if (x != last_x || y != last_y) ++moved;
+            if (i >= 20) {
+                tip_path += std::abs(x - last_x) + std::abs(y - last_y);
+                base_path += std::abs(bx - base_x) + std::abs(by - base_y);
+            }
             last_x = x;
             last_y = y;
+            base_x = bx;
+            base_y = by;
         }
         check("the piece wriggles", moved > 5, "moved=" + std::to_string(moved));
+        check("from its free tip more than its cut end", tip_path > base_path,
+              "tip=" + std::to_string(tip_path) + " base=" + std::to_string(base_path));
         check("every pose with a piece off draws what is hit", sound, why);
         settle(g, e, TS.motion.piece_steps);
         check("then crumbles", e.is_alive() && !e.has_pixel(rear_tip.x, rear_tip.y));
