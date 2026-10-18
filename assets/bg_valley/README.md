@@ -28,3 +28,11 @@ Corner-anchored and locked vertically; the factors are the art's own, and
 | bg_valley_03_hills_midnear.bmp | 0.55 | |
 | bg_valley_02_hills_near.bmp | 0.70 | Foot at row 89. |
 | bg_valley_01_fg_rocks.bmp | 1.00 | Foreground, in front of the player. |
+
+## Mood
+
+`bg_valley_mood.txt` is the scene's light: a pale high sun from the left, sky-teal shade, a teal haze on the far hills. It names `bg_valley_grade.bmp`, the
+colour-grade LUT strip written by `python tools/make_lut.py` (daylight grade),
+and the material tiles in `assets/materials/`. Both are read by the lit
+renderer; until `scenes.txt` gives the scene `mood=`, the scene keeps the
+legacy look.

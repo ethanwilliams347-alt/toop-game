@@ -1,0 +1,83 @@
+# bg_tarn_noir's mood: the same lake at night in the rain -- the Backbone
+# target. Read by the `bg_tarn_noir` scene, which is bg_tarn's world and
+# backdrop under this mood (see this folder's README for why it lives here).
+#
+# What makes it Backbone rather than merely dark:
+#   - a cold teal ambient and a weak blue moon, so everything not near a lamp is
+#     a muted grey-blue silhouette, never black;
+#   - warm sodium lamps along the shore, the practical light the eye walks
+#     between, and two saturated neon accents that the noir grade deliberately
+#     leaves saturated;
+#   - wet surfaces: rain, raised reflect/spec on rock and sand so lamp light
+#     sparkles on them, and the pond mirroring the lamps;
+#   - fog that eats the far shore and the mountains, so depth reads as layers
+#     of haze (Rain World's depth fog too).
+#
+# Units, as this file assumes them (the parser in src/render/mood.h is the
+# authority; tune the numbers in game with F6 hot reload):
+#   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
+#   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
+#   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
+#   bloom        threshold on linear luminance; strength 0..1
+#   weather      density 0..1, angle degrees from vertical (+ leans right),
+#                speed cells/s
+#   light x/y    world cells, y down (this world's surface is row 264); radius
+#                in cells; flicker 0..1
+#   material     tint multiplies the albedo; texture=<name> is
+#                assets/materials/materials_<name>.bmp, `none` for no tile;
+#                strength is s in albedo*(1+s*(tile-0.5)); rim, reflect, spec
+#                and depth 0..1 (assets/materials/README.md has each one)
+
+light_model multiply
+
+# Night: the ambient is a third of daylight's and leans teal; the "sun" is the
+# moon, high and slightly left, cold and weak, and still casts shadow so the
+# rain-dark rock keeps a lit top edge.
+ambient 0.10 0.13 0.18
+sun 0.14 0.18 0.28 dir=-0.30,-1.00 shadow=on
+
+# Heavy, cold fog from the near pines back. near=0.10 starts it just behind the
+# world plane, so the player stays crisp and the far shore is half gone.
+fog 0.09 0.13 0.16 near=0.10 far=0.90 amount=0.65
+
+# Lamps and neon bloom; nothing lit by the moon reaches the threshold.
+bloom threshold=0.60 strength=0.70
+grade bg_tarn_noir_grade.bmp
+vignette 0.35
+grain 0.06
+
+# Steady rain, leaning a little right: dense enough to read as weather, sparse
+# enough that the lamp halos still show between the streaks.
+weather rain density=0.60 angle=12 speed=240
+
+# The lamps. bg_tarn's world is flat ground at row 264, a pond at columns
+# 96..152, a sand bank at 520..596 (crest about row 259), the player starting at
+# column 80 and the objective at 636 (bg_tarn_level.txt). A lamp head sits about
+# 18 cells up, a sign about 10. Sodium is (1.00, 0.62, 0.24); the neons are a
+# magenta and a cyan, the two hues the noir grade's saturation keeper favours.
+#
+# Spawn lamp: the first thing the player sees, warm and steady.
+light x=72  y=246 color=1.00,0.62,0.24 radius=48 flicker=0.03
+# Pond lamp: just east of the water, so its reflection lies across the pond.
+light x=168 y=246 color=1.00,0.62,0.24 radius=44 flicker=0.03
+# Mid-shore lamp between the two ghouls.
+light x=330 y=244 color=1.00,0.60,0.22 radius=50 flicker=0.03
+# A failing lamp over the second ghoul: the flicker is the point.
+light x=410 y=246 color=1.00,0.58,0.20 radius=40 flicker=0.45
+# Magenta neon sign in front of the sand bank and the troll: buzzes slightly.
+light x=478 y=254 color=1.00,0.18,0.62 radius=32 flicker=0.12
+# Cyan neon at the objective: the run's goal reads as the one cold bright thing.
+light x=628 y=252 color=0.15,0.85,1.00 radius=36 flicker=0.06
+
+# Materials: wet and cold. Tints pull every surface a little toward blue-grey
+# (Backbone's muted base), the light does the warming. Rock and sand are rain
+# soaked: darker, more reflect and spec, so the lamps sparkle on them. Water
+# goes deeper and more mirror-like; fire stays untinted, it must never be muted.
+material sand     tint=0.78,0.78,0.82 texture=none     strength=0.00 rim=0.30 reflect=0.20 spec=0.45 depth=0.00
+material water    tint=0.80,0.92,1.00 texture=caustics strength=0.30 rim=0.00 reflect=0.80 spec=0.85 depth=0.85
+material wall     tint=0.86,0.90,0.96 texture=rock     strength=0.70 rim=0.60 reflect=0.15 spec=0.35 depth=0.00
+material wood     tint=0.84,0.86,0.90 texture=wood     strength=0.60 rim=0.40 reflect=0.05 spec=0.20 depth=0.00
+material oil      tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.45 spec=1.00 depth=0.40
+material steam    tint=0.85,0.92,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material fire     tint=1.00,1.00,1.00 texture=none     strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
+material charred  tint=0.90,0.90,0.94 texture=charred  strength=0.75 rim=0.25 reflect=0.05 spec=0.20 depth=0.00

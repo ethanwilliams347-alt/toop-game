@@ -48,3 +48,20 @@ the ground.
 
 Flat terrain at row 264 (the contact row), with a pond of real Water cells in a
 dip at columns 96..152 and a Sand bank at 520..596.
+
+## Mood
+
+`bg_tarn_mood.txt` is the scene's light: a low warm sun, cool sky-fill shade, a thin warm haze on the far layers. It names `bg_tarn_grade.bmp`, the
+colour-grade LUT strip written by `python tools/make_lut.py` (golden_hour grade),
+and the material tiles in `assets/materials/`. Both are read by the lit
+renderer; until `scenes.txt` gives the scene `mood=`, the scene keeps the
+legacy look.
+
+`bg_tarn_noir_mood.txt` is a second mood for the same world and backdrop: the
+lake at night in the rain, Backbone-style -- cold teal ambient and moon, fog,
+rain, warm sodium lamps along the shore and two neon accents, wet reflective
+rock. It names `bg_tarn_noir_grade.bmp` (noir grade). It is read by the
+`bg_tarn_noir` scene, which is this folder's world and layers under that mood;
+it lives here rather than in a `bg_tarn_noir/` folder because nothing but the
+light differs, and copying eleven layers and two maps to change the light would
+be two sets drifting apart.
