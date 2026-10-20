@@ -44,5 +44,9 @@ __pycache__/
 # ASan build tree (just asan)
 /build-asan/
 
-# Local session handoff notes -- written only on request, never shared
+# Local session notes (handoff, playtest checklist) -- written only on request, never shared
 /HANDOFF.md
+/PLAYTEST.md
+
+# Claude Code agent worktrees -- each is its own checkout, merged back into main
+/.claude/worktrees/
