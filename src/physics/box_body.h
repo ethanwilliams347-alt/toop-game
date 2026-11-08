@@ -306,7 +306,8 @@ struct BoxBody {
         if (push_x != 0) {
             if (on_ground) {
                 const fx::v d = fx::per_step(KNOCK_GROUND_DECEL);
-                push_x = push_x > 0 ? std::max<fx::v>(0, push_x - d) : std::min<fx::v>(0, push_x + d);
+                push_x =
+                    push_x > 0 ? std::max<fx::v>(0, push_x - d) : std::min<fx::v>(0, push_x + d);
             } else {
                 push_x -= fx::mul(push_x, KNOCK_AIR_DRAG);
             }

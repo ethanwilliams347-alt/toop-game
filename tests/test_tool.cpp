@@ -322,8 +322,8 @@ int main() {
         const Arrow* stuck = nullptr;
         for (const Arrow& a : quiver.arrows())
             if (a.live && a.stuck) stuck = &a;
-        check("the arrow sticks in the plank", stuck && g.get_element(stuck->x, stuck->y).type ==
-                                                         ElementType::Wood);
+        check("the arrow sticks in the plank",
+              stuck && g.get_element(stuck->x, stuck->y).type == ElementType::Wood);
         const int y0 = stuck ? stuck->y : 0;
         fill(g, 70, 60, 72, 109, ElementType::Empty);
         fill(g, 96, 60, 98, 109, ElementType::Empty);

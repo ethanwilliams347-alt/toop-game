@@ -718,7 +718,8 @@ int main() {
               "raft " + std::to_string(raft_moved) + " player " + std::to_string(player_moved));
         check("without the player falling off it or flickering into the air", grounded >= 117,
               std::to_string(grounded) + " of 120 steps on the ground");
-        check("and the player is never inside the raft", !p.overlaps_solid(g, p.cell_x(), p.cell_y()));
+        check("and the player is never inside the raft",
+              !p.overlaps_solid(g, p.cell_x(), p.cell_y()));
     }
 
     // --- the raft carries the player's weight ---
@@ -754,7 +755,8 @@ int main() {
         };
         const int64_t empty = raft_depth(false), loaded = raft_depth(true);
         check("a raft with the player on it floats lower than one without", loaded > empty,
-              "mean row x100 empty " + std::to_string(empty) + ", loaded " + std::to_string(loaded));
+              "mean row x100 empty " + std::to_string(empty) + ", loaded " +
+                  std::to_string(loaded));
         check("and still floats", loaded < 100 * 62,
               "mean row x100 " + std::to_string(loaded) + ", surface at row 60");
     }
@@ -786,8 +788,8 @@ int main() {
         check("a crate slid into the player pushes it along", p.cell_x() > x0 + 4,
               "moved " + std::to_string(p.cell_x() - x0));
         check("and never buries it, so it is never dug out", !teleported && !buried);
-        check("a crate sliding at a few cells a second does not hurt", p.health() == Player::MAX_HEALTH,
-              "hp=" + std::to_string(p.health()));
+        check("a crate sliding at a few cells a second does not hurt",
+              p.health() == Player::MAX_HEALTH, "hp=" + std::to_string(p.health()));
     }
 
     // --- a falling slab hurts; a light one dropped as far hurts less ---
@@ -830,9 +832,10 @@ int main() {
         };
         const int crate = pushed(10, 10, ElementType::Wood);
         const int stone = pushed(16, 12, ElementType::Wall);
-        check("walking into a wooden crate pushes it", crate > 20, "moved " + std::to_string(crate));
-        check("no faster than the player walks",
-              crate <= fx::trunc(Player::MOVE_SPEED) * 2, "moved " + std::to_string(crate));
+        check("walking into a wooden crate pushes it", crate > 20,
+              "moved " + std::to_string(crate));
+        check("no faster than the player walks", crate <= fx::trunc(Player::MOVE_SPEED) * 2,
+              "moved " + std::to_string(crate));
         check("walking into a heavy stone does not move it", stone == 0,
               "moved " + std::to_string(stone));
     }
@@ -851,14 +854,14 @@ int main() {
             left_ground = left_ground || !p.is_on_ground();
             if (s > 20 && p.push_velocity() == 0) break;
         }
-        check("a knock throws the player off its feet and away", left_ground && p.cell_x() > x0 + 20,
-              "thrown " + std::to_string(p.cell_x() - x0));
+        check("a knock throws the player off its feet and away",
+              left_ground && p.cell_x() > x0 + 20, "thrown " + std::to_string(p.cell_x() - x0));
         check("and it skids to a stop", p.push_velocity() == 0, "after " + std::to_string(s));
         const int x1 = p.cell_x();
         step(g, p, held_right(), 60);
         const int expected = fx::trunc(Player::MOVE_SPEED) * 66 / 100;
-        check("walking afterwards is walking", p.cell_x() - x1 > expected &&
-                                                   p.velocity_x() == Player::MOVE_SPEED,
+        check("walking afterwards is walking",
+              p.cell_x() - x1 > expected && p.velocity_x() == Player::MOVE_SPEED,
               "moved " + std::to_string(p.cell_x() - x1));
     }
 
@@ -880,8 +883,8 @@ int main() {
         }
         check("in water, the body sinks slowly", fastest_under < fx::from_int(60),
               "fastest " + std::to_string(fx::to_float(fastest_under)) + " cells/s");
-        check("and does reach the bottom", feet(p) == FLOOR_Y, feet_detail(p) +
-                                                               " after " + std::to_string(steps_to_floor));
+        check("and does reach the bottom", feet(p) == FLOOR_Y,
+              feet_detail(p) + " after " + std::to_string(steps_to_floor));
         check("landing at the bottom of a pool does not hurt", p.health() == Player::MAX_HEALTH,
               "hp=" + std::to_string(p.health()));
 

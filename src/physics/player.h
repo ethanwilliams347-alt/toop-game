@@ -556,7 +556,8 @@ static_assert(Player::SWIM_IMPULSE >
 
 // Swimming is slower than flying, which is the whole of what makes water a
 // place rather than more air.
-static_assert(Player::SWIM_IMPULSE < Player::FLAP_IMPULSE && Player::SWIM_MAX_CLIMB < Player::FLAP_MAX_CLIMB,
+static_assert(Player::SWIM_IMPULSE < Player::FLAP_IMPULSE &&
+                  Player::SWIM_MAX_CLIMB < Player::FLAP_MAX_CLIMB,
               "swimming is now at least as strong as flying");
 
 // A falling slab hurts and settling against one does not: the threshold sits

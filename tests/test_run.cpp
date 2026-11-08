@@ -682,7 +682,8 @@ int main() {
               fish.forward > 15 && fish.rise >= 4,
               "forward " + std::to_string(fish.forward) + " rise " + std::to_string(fish.rise));
         check("landing from the throw costs nothing more",
-              fish.hp == Player::MAX_HEALTH - species::FISH.damage, "hp=" + std::to_string(fish.hp));
+              fish.hp == Player::MAX_HEALTH - species::FISH.damage,
+              "hp=" + std::to_string(fish.hp));
 
         // The troll's club breaks the ground under the player and throws the
         // rubble over the crater's rim, into the path of the throw, which stops
@@ -693,7 +694,8 @@ int main() {
               troll.knocked == 1 && troll.rise >= 10 && troll.forward >= 0,
               "rise " + std::to_string(troll.rise) + " forward " + std::to_string(troll.forward));
         check("and costs only the club's damage",
-              troll.hp == Player::MAX_HEALTH - species::TROLL.damage, "hp=" + std::to_string(troll.hp));
+              troll.hp == Player::MAX_HEALTH - species::TROLL.damage,
+              "hp=" + std::to_string(troll.hp));
     }
 
     // --- a ghoul's swipe shoves the player off it ---
@@ -740,7 +742,8 @@ int main() {
             int right = 0;
             for (int y = 0; y < 80; ++y)
                 for (int x = 0; x < 240; ++x)
-                    if (run.grid.get_element(x, y).type == ElementType::Wood) right = std::max(right, x);
+                    if (run.grid.get_element(x, y).type == ElementType::Wood)
+                        right = std::max(right, x);
             return right;
         };
         check("unshot, a post leaning on its foot stands", shot(false) == 155);

@@ -168,7 +168,7 @@ int64_t Grid::carried_liquid(const Body& b) const {
         const int x = idx - y * width;
         for (int side = -1; side <= 1; side += 2) {
             if (!is_within_bounds(x + side, y)) continue;
-            const Element& e = cells[static_cast<size_t>(idx + side)];
+            const Element& e = cells[idx + side];
             if (!is_liquid(e.type)) continue;  // a liquid cell is never the body's own
             const int64_t fill = static_cast<int64_t>(e.mass) * ONE / LIQUID_FULL;
             if (y < water_row || (y == water_row && fill > water_fill)) {

@@ -1212,9 +1212,9 @@ int main() {
                   !g.queue_impulse(50, 28, -fx::from_int(100), 0) && g.tipping_count() == 0);
             check("nor does pressing down on it, however hard",
                   !g.queue_impulse(55, 24, 0, 100 * strong) && g.tipping_count() == 0);
-            check("a real push wakes it into a body",
-                  g.queue_impulse(50, 28, strong, 0) && g.tipping_count() == 1 &&
-                      g.queued_impulses() == 1);
+            check("a real push wakes it into a body", g.queue_impulse(50, 28, strong, 0) &&
+                                                          g.tipping_count() == 1 &&
+                                                          g.queued_impulses() == 1);
         }
         {
             // Pushed as the player pushes, a step at a time, it slides: the push

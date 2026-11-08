@@ -324,7 +324,8 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
             body.vel_y = -JUMP_SPEED;
         } else {
             const fx::v beat = FLAP_IMPULSE + fx::mul(SWIM_IMPULSE - FLAP_IMPULSE, wet.share);
-            const fx::v climb = FLAP_MAX_CLIMB + fx::mul(SWIM_MAX_CLIMB - FLAP_MAX_CLIMB, wet.share);
+            const fx::v climb =
+                FLAP_MAX_CLIMB + fx::mul(SWIM_MAX_CLIMB - FLAP_MAX_CLIMB, wet.share);
             body.vel_y -= beat;
             if (body.vel_y < -climb) body.vel_y = -climb;
         }

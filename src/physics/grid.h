@@ -1547,9 +1547,9 @@ public:
 
 private:
     struct QueuedImpulse {
-        int cell = 0;      // grid index
-        uint8_t tag = 0;   // the piece tag that cell wore when it was pushed
-        int64_t jx = 0;    // Material::weight units times fx cells per second
+        int cell = 0;  // grid index
+        uint8_t tag = 0;  // the piece tag that cell wore when it was pushed
+        int64_t jx = 0;  // Material::weight units times fx cells per second
         int64_t jy = 0;
     };
     std::vector<QueuedImpulse> impulses;

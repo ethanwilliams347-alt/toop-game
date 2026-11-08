@@ -48,7 +48,7 @@ struct Knob {
     int64_t value;  // fx raw bits
 };
 
-const Knob PLAYER_KNOBS[] = {
+constexpr Knob PLAYER_KNOBS[] = {
     {"MOVE_SPEED", Player::MOVE_SPEED},
     {"JUMP_SPEED", Player::JUMP_SPEED},
     {"GRAVITY", Player::GRAVITY},

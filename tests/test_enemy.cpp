@@ -1971,8 +1971,8 @@ int main() {
             e.update(g, -10000, -10000, false);
             crushed += e.crushed_this_step();
         }
-        check("a falling slab crushes the troll it lands on", crushed > 0 &&
-                                                                 (!e.is_alive() || e.pixel_count() < whole),
+        check("a falling slab crushes the troll it lands on",
+              crushed > 0 && (!e.is_alive() || e.pixel_count() < whole),
               "crushed " + std::to_string(crushed) + " of " + std::to_string(whole));
         check("hard enough to kill it", !e.is_alive(),
               "pixels left " + std::to_string(e.pixel_count()));
