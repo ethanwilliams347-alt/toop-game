@@ -125,6 +125,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     fracture_lowest.reserve(static_cast<size_t>(width));
     snap_cols.reserve(static_cast<size_t>(width));
     level_queue.reserve(LIQUID_LEVEL_CELLS + 4);
+    impulses.reserve(IMPULSE_CAPACITY);  // body_coupling.cpp: entities push on the step
 
     // Nothing to seed. The seed is stored and read straight out of world_seed by
     // the hash in random.h, so the whole 64 bits reach the work by construction.
@@ -189,6 +190,8 @@ void Grid::reset(uint64_t seed) {
     load_cells.clear();
     load_stack.clear();
     load_pieces.clear();
+    impulses.clear();
+    impulse_step = 0;
 
     frame_tag = 0;
     step_count = 0;

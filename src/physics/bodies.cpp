@@ -1736,6 +1736,9 @@ void Grid::step_tipping() {
         gather_contacts(i);
         apply_body_forces(tip_bodies[i]);
     }
+    // What the player, the enemies and the arrows pushed with last step
+    // (body_coupling.cpp): one more force, answered by the same solve.
+    apply_queued_impulses();
     solve_contacts();
 
     // Leaning wakes what it leans on. A body pressed sideways against a piece at

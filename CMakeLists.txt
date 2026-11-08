@@ -100,6 +100,7 @@ endif()
 set(ENGINE_SOURCES
     src/physics/grid.cpp
     src/physics/bodies.cpp
+    src/physics/body_coupling.cpp
     src/physics/player.cpp
     src/physics/tool.cpp
     src/physics/enemy.cpp
