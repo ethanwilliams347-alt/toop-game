@@ -928,18 +928,29 @@ int main(int argc, char* argv[]) {
             } else if (e.type == SDL_MOUSEWHEEL) {
                 brush_size = std::clamp(brush_size + e.wheel.y, BRUSH_MIN, BRUSH_MAX);
             } else if (e.type == SDL_KEYDOWN) {
+                // Held keys repeat, and every binding below except the step key is a
+                // toggle or a one-shot. SDL sends a KEYDOWN per repeat, so without
+                // this a held pause key flickers at the OS repeat rate, a held reset
+                // rebuilds the world dozens of times a second, a held F7 races
+                // through the scene list and a held F9 writes a recording per
+                // repeat -- all of which read as the key not working rather than
+                // as working too well. The step key is the exception and wants the
+                // repeats: stepping at the repeat rate is how you scrub through a
+                // collapse. Movement is read from the key state, not from here.
+                const bool repeat = e.key.repeat != 0;
+
                 // The material keys are a loop over ui::HOTBAR rather than a switch
                 // for one reason: the row drawn at the bottom of the screen has to
                 // be telling the truth about what each key does, and the only way to
                 // guarantee that is for the binding and the icon to come out of the
                 // same table.
-                for (int i = 0; i < ui::HOTBAR_COUNT; ++i) {
+                for (int i = 0; i < ui::HOTBAR_COUNT && !repeat; ++i) {
                     if (e.key.keysym.sym == ui::HOTBAR[i].key) {
                         current_brush = ui::HOTBAR[i].type;
                         break;
                     }
                 }
-                if (e.key.keysym.sym == SDLK_ESCAPE) {
+                if (e.key.keysym.sym == SDLK_ESCAPE && !repeat) {
                     screen = Screen::Settings;
                     // Asked again on every opening, because the window may have
                     // been dragged to another display since the last.
@@ -958,15 +969,6 @@ int main(int argc, char* argv[]) {
                 // else if, because with the run over both branches match and a reset
                 // that ran twice would be invisible -- the second one produces exactly
                 // the world the first one did.
-                //
-                // Held keys repeat, and every binding below except the step key is a
-                // toggle or a one-shot. SDL sends a KEYDOWN per repeat, so without this
-                // a held pause key flickers at the OS repeat rate and a held reset
-                // rebuilds the world dozens of times a second -- both of which read as
-                // the key not working rather than as working too well. The step key is
-                // the exception and wants the repeats: stepping at the repeat rate is
-                // how you scrub through a collapse.
-                const bool repeat = e.key.repeat != 0;
                 const bool ctrl_held = (e.key.keysym.mod & KMOD_CTRL) != 0;
                 if (e.key.keysym.sym == SDLK_r && ctrl_held && !repeat) {
                     // The same seed, not a fresh one, for two reasons. A debugging
@@ -1079,7 +1081,7 @@ int main(int argc, char* argv[]) {
                 //
                 // It does nothing when the list holds one scene. Silence is right
                 // there: nothing changed, so nothing is reported.
-                if (e.key.keysym.sym == SDLK_F7 && scenes.size() > 1) {
+                if (e.key.keysym.sym == SDLK_F7 && !repeat && scenes.size() > 1) {
                     activate_scene((active_scene + 1) % static_cast<int>(scenes.size()));
                     reset_presentation(true);
 
@@ -1090,7 +1092,7 @@ int main(int argc, char* argv[]) {
                 // bound to a letter: every letter within reach of the movement keys is
                 // a hotbar slot, and a key that saves a file is a bad thing to hit
                 // while reaching for sand.
-                if (e.key.keysym.sym == SDLK_F9) {
+                if (e.key.keysym.sym == SDLK_F9 && !repeat) {
                     // The end state is captured at the moment of writing, not at the end
                     // of the session, because this is the end of the recording being
                     // written -- the replay has to check against the world the last
