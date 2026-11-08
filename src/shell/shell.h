@@ -12,7 +12,7 @@
 #include "render/light.h"
 #include "scene/scene_list.h"
 
-// The SDL side of the game: the window's render targets, the display modes, and
+// The SDL side of the game: the window and its modes, the render targets, and
 // turning asset files into textures. What main.cpp used to define above main()
 // and inside it, collected so main.cpp is the loop and the wiring and nothing
 // else.
@@ -38,12 +38,26 @@ struct Display {
     gpu::GlCanvas* gl = nullptr;
 };
 
-// Opens the window at `mode` with the backend `want` asks for. GL that fails at
-// any step -- no 3.3 core context, a missing entry point, a shader that will not
-// compile, an incomplete framebuffer -- is reported on stderr and replaced by the
-// SDL renderer on a fresh window, so asking for GL never costs a session. Returns
-// false only when SDL itself cannot open a window, which is fatal either way.
-bool open_display(const DisplayMode& mode, RendererChoice want, Display& out);
+// Opens the window, hidden, with the backend `want` asks for and VSync as
+// `vsync` says. GL that fails at any step -- no 3.3 core context, a missing
+// entry point, a shader that will not compile, an incomplete framebuffer -- is
+// reported on stderr and replaced by the SDL renderer on a fresh window, so
+// asking for GL never costs a session. Returns false only when SDL itself cannot
+// open a window, which is fatal either way.
+//
+// Hidden until show_display, so the window can be measured -- its title bar
+// decides which sizes fit -- before anything decides what size it is.
+bool open_display(RendererChoice want, bool vsync, Display& out);
+
+// What the display the window is on offers: its desktop size, which common
+// windowed sizes fit its usable area with the window's title bar and borders,
+// and its fullscreen modes (game/display.h decides from these).
+ScreenOptions screen_options(SDL_Window* window);
+
+// Puts the window open_display made into `settings`' mode and size, and shows
+// it. A mode the display refuses opens windowed instead, and `settings` is
+// changed to say so -- a session at the wrong size beats none.
+void show_display(Display& d, DisplaySettings& settings, const ScreenOptions& options);
 
 // Releases the canvas, then the renderer, then the window -- the order each
 // depends on the next. Every texture the canvas made must be destroyed first.
@@ -78,17 +92,36 @@ struct RenderTargets {
     LightField light{1, 1};  // replaced wholesale on every mode change
 };
 
-// Builds the render targets for `mode` at `scale` and, on success, swaps them in
-// and resizes the window. Constructs everything new before releasing anything
-// old: on failure nothing has been destroyed, so the caller keeps playing at the
-// mode it already had. The argument for each texture setting is at the
+// Builds the render targets for a `size`-pixel output at `scale` and, on
+// success, swaps them in. Constructs everything new before releasing anything
+// old: on failure nothing has been destroyed, so the caller keeps playing with
+// the targets it already had. The argument for each texture setting is at the
 // definition.
-bool apply_mode(SDL_Window* window, gfx::Canvas& canvas, const DisplayMode& mode, int scale,
-                RenderTargets& targets);
+//
+// Touches no window. It is called for three reasons -- a mode switch, a scene
+// with a different scale, and the window system resizing the window -- and only
+// the first is a reason to move the window.
+bool rebuild_targets(gfx::Canvas& canvas, const DisplayMode& size, int scale,
+                     RenderTargets& targets);
 
-// Whether a mode's window actually fits on the display. No answer counts as yes:
-// a driver that cannot report its own bounds should not hide every mode.
-bool mode_fits(const DisplayMode& mode, int display_index);
+// Moves the window from `from` to `to`: window mode, size, VSync. A move that
+// keeps the mode and size touches only VSync, so a VSync toggle does not
+// re-centre a window the player has dragged somewhere. False, with the reason on
+// stderr, when SDL refuses the mode; the window may then be part-way, and the
+// caller puts it back by moving it to `from`.
+bool apply_window(Display& d, const DisplaySettings& from, const DisplaySettings& to,
+                  const ScreenOptions& options);
+
+// VSync on or off, on whichever backend draws: SDL_RenderSetVSync for the SDL
+// renderer, the swap interval for GL. False, with the reason on stderr, when the
+// driver refuses -- which leaves the frame unpaced or paced, not broken.
+bool set_vsync(Display& d, bool on);
+
+// The size, in physical pixels, of what the backend draws into: the renderer's
+// output, or the GL drawable. What the render targets are sized from, rather
+// than the window's size, because under DPI scaling the two differ and the
+// window's is the one that is not pixels.
+DisplayMode output_size(const Display& d);
 
 // The scene's backdrop: every layer of assets/<def.backdrop>/backdrop.txt as a
 // texture, at `scale`. Destroys whatever `backdrop` held first. A scene with no

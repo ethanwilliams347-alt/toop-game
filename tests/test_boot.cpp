@@ -3,8 +3,9 @@
 // Everything asserted below used to run inside main(), print a line to stdout,
 // and be checkable only by a person reading the line at launch.
 //
-// Two halves. The unit half covers the decisions in game/boot.h and
-// choose_display_mode in game/display.h against worlds this file builds. The
+// Two halves. The unit half covers the decisions in game/boot.h against worlds
+// this file builds, and the window decisions in game/display.h -- which size
+// and mode to open at, the lists the settings menu offers, settings.txt. The
 // fixture half runs the shipped scene, which covers the launch lines that were
 // otherwise eyeballed on stdout -- the objective's position and the placed-prop
 // count.
@@ -170,37 +171,228 @@ void test_choose_display_mode() {
     }
 }
 
-// settings.txt holds two keys now, and each is written by a different path: the
-// menu rewrites the file on a mode switch, and renderer= is hand-edited. A
-// rewrite that dropped the hand-edited line would switch the renderer back
-// without anyone asking.
+// settings.txt is written by the menu and may be edited by hand, and it has
+// outlived one format already: a file from before display= and vsync= holds
+// resolution= alone (perhaps with renderer=), and has to load as the windowed
+// size it always meant. A rewrite that dropped a line it did not recognise would
+// lose a setting some later feature put there, by touching a different one.
 void test_settings_file() {
     const char* path = "boot_test_settings.tmp";
-    {
+    auto write = [&](const char* text) {
         std::FILE* f = std::fopen(path, "w");
-        std::fputs("# old header\nresolution=1x1\nrenderer=gl\n", f);
+        std::fputs(text, f);
         std::fclose(f);
-    }
-    check("settings: renderer=gl is read", load_renderer_choice(path) == RendererChoice::Gl);
-    check("settings: saving the mode succeeds", save_display_mode(DISPLAY_MODES[0], path));
-    check("settings: saving the mode keeps renderer=",
-          load_renderer_choice(path) == RendererChoice::Gl);
-    check("settings: saving the mode stores the mode", load_display_mode(path) == 0);
+    };
+
+    write("# old header\nresolution=2560x1440\n");
     {
-        std::FILE* f = std::fopen(path, "w");
-        std::fputs("renderer=vulkan\n", f);
-        std::fclose(f);
+        const DisplaySettings s = load_settings(path);
+        check("settings: a file with only resolution= still loads its size",
+              s.size == DisplayMode{2560, 1440});
+        check("settings: ...as a window, with VSync on and the SDL renderer",
+              s.window == WindowMode::Windowed && s.vsync && s.renderer == RendererChoice::Sdl);
     }
-    check("settings: an unknown renderer is the default",
-          load_renderer_choice(path) == RendererChoice::Sdl);
+    write("resolution=1920x1080\nrenderer=gl\n");
+    check("settings: the old format's renderer= is read",
+          load_settings(path).renderer == RendererChoice::Gl);
+
+    write("resolution=1x1\nrenderer=sdl\nfuture_key=7\n");
+    const DisplaySettings want{WindowMode::Borderless, {3440, 1440}, false, RendererChoice::Gl};
+    check("settings: saving succeeds", save_settings(want, path));
+    check("settings: what was saved loads back, every field", load_settings(path) == want);
+    {
+        std::string text;
+        if (std::FILE* f = std::fopen(path, "r")) {
+            char line[128];
+            while (std::fgets(line, sizeof(line), f)) text += line;
+            std::fclose(f);
+        }
+        check("settings: a line the game does not know survives a save",
+              text.find("future_key=7\n") != std::string::npos, text);
+        check("settings: a rewritten key appears once, not beside its old value",
+              text.find("resolution=") == text.rfind("resolution=") &&
+                  text.find("resolution=1x1") == std::string::npos,
+              text);
+    }
+
+    for (WindowMode m : {WindowMode::Windowed, WindowMode::Borderless, WindowMode::Fullscreen}) {
+        const std::string line = std::string("display=") + window_mode_name(m) + "\r\n";
+        write(line.c_str());
+        check(("settings: " + line.substr(0, line.size() - 2) + " reads back").c_str(),
+              load_settings(path).window == m);
+    }
+    write("vsync=off\n");
+    check("settings: vsync=off is read", !load_settings(path).vsync);
+
+    // Every value wrong. Each key falls back to its default on its own, rather
+    // than the whole file being refused: there is nothing a player could do about
+    // an error at launch that the menu cannot do better.
+    write("display=maximised\nvsync=maybe\nrenderer=vulkan\nresolution=0x900\n");
+    check("settings: unreadable values are the defaults", load_settings(path) == DisplaySettings{});
+
     std::remove(path);
-    check("settings: no file is the default", load_renderer_choice(path) == RendererChoice::Sdl);
+    check("settings: no file is the defaults", load_settings(path) == DisplaySettings{});
 
     RendererChoice c = RendererChoice::Sdl;
     check("settings: the command-line spelling parses",
           parse_renderer_choice("gl", c) && c == RendererChoice::Gl);
     check("settings: a bad value is refused and changes nothing",
           !parse_renderer_choice("g", c) && c == RendererChoice::Gl);
+}
+
+// A 3440x1440 desktop with a taskbar: 1392 usable rows, and a title bar to fit
+// in them as well, so the windowed list stops at 2560x1080 -- which is why
+// playing at 3440x1440 means borderless or fullscreen.
+ScreenOptions ultrawide() {
+    ScreenOptions o;
+    o.desktop = DisplayMode{3440, 1440};
+    for (int i = 0; i < COMMON_SIZE_COUNT; ++i)
+        o.windowed_fits[static_cast<size_t>(i)] =
+            COMMON_SIZES[i].window_w <= 3440 && COMMON_SIZES[i].window_h + 31 <= 1392;
+    o.fullscreen = fullscreen_sizes({{{3440, 1440}, 100},
+                                     {{3440, 1440}, 144},
+                                     {{2560, 1080}, 60},
+                                     {{1920, 1080}, 144},
+                                     {{640, 480}, 60}});
+    return o;
+}
+
+void test_fullscreen_sizes() {
+    const std::vector<FullscreenMode> out = fullscreen_sizes({{{1920, 1080}, 60},
+                                                              {{640, 480}, 60},
+                                                              {{1920, 1080}, 144},
+                                                              {{3440, 1440}, 100},
+                                                              {{1280, 1024}, 75},
+                                                              {{1920, 1080}, 120},
+                                                              {{1280, 720}, 60}});
+    check("fullscreen_sizes: one entry per size, and nothing under 1280x720", out.size() == 4,
+          std::to_string(out.size()) + " entries");
+    if (out.size() == 4) {
+        check("fullscreen_sizes: smallest first, by width then height",
+              out[0].size == DisplayMode{1280, 720} && out[1].size == DisplayMode{1280, 1024} &&
+                  out[2].size == DisplayMode{1920, 1080} && out[3].size == DisplayMode{3440, 1440});
+        check("fullscreen_sizes: each size at its highest refresh rate",
+              out[2].refresh_hz == 144 && out[1].refresh_hz == 75);
+    }
+}
+
+void test_resolution_lists() {
+    ScreenOptions o;
+    o.desktop = DisplayMode{1920, 1080};
+    for (int i = 0; i < COMMON_SIZE_COUNT; ++i)
+        o.windowed_fits[static_cast<size_t>(i)] = COMMON_SIZES[i].window_h <= 900;
+    o.fullscreen = {{{1280, 720}, 60}, {{1920, 1080}, 144}};
+
+    const std::vector<DisplayMode> windowed = resolutions(WindowMode::Windowed, o);
+    check("resolutions: windowed is the common sizes that fit",
+          windowed.size() == 3 && windowed.back() == DisplayMode{1600, 900});
+    check("resolutions: borderless is the desktop alone",
+          resolutions(WindowMode::Borderless, o) == std::vector<DisplayMode>{{1920, 1080}});
+    check("resolutions: fullscreen is the display's modes",
+          resolutions(WindowMode::Fullscreen, o).size() == 2);
+
+    check("fit_size: a size the mode offers is kept",
+          fit_size(WindowMode::Windowed, {1366, 768}, o) == DisplayMode{1366, 768});
+    // Borderless -> windowed on a desktop the window cannot fill: the largest
+    // window that fits, not the desktop's size carried into a window.
+    check("fit_size: a size the mode lacks becomes the largest no larger",
+          fit_size(WindowMode::Windowed, {1920, 1080}, o) == DisplayMode{1600, 900});
+    check("fit_size: ...and a fullscreen size the display lacks likewise",
+          fit_size(WindowMode::Fullscreen, {1600, 900}, o) == DisplayMode{1280, 720});
+    check("fit_size: smaller than everything offered is the smallest",
+          fit_size(WindowMode::Fullscreen, {1000, 600}, o) == DisplayMode{1280, 720});
+    check("fit_size: borderless is the desktop whatever was asked",
+          fit_size(WindowMode::Borderless, {1280, 720}, o) == o.desktop);
+
+    // Neither list is ever empty: a row with nothing on it is a menu that cannot
+    // say what the window is.
+    ScreenOptions bare;
+    bare.desktop = DisplayMode{1024, 600};
+    check("resolutions: no fullscreen modes reported is the desktop alone",
+          resolutions(WindowMode::Fullscreen, bare) == std::vector<DisplayMode>{{1024, 600}});
+    check("resolutions: no window fitting is the smallest window anyway",
+          resolutions(WindowMode::Windowed, bare) == std::vector<DisplayMode>{COMMON_SIZES[0]});
+
+    // A window the system shrank to nothing still draws its text.
+    check("ui_scale: never below 1", DisplayMode{640, 200}.ui_scale() == 1);
+    check("ui_scale: 5 at 1440 rows, as the 21:9 overlay case is drawn",
+          WIDEST_VIEW.ui_scale() == 5);
+}
+
+void test_choose_start() {
+    const ScreenOptions o = ultrawide();
+    auto start = [&](WindowMode m, DisplayMode size) {
+        DisplaySettings s;
+        s.window = m;
+        s.size = size;
+        return choose_start(s, o);
+    };
+    {
+        const StartChoice c = start(WindowMode::Windowed, {0, 0});
+        check("choose_start: nothing stored opens at the largest window that fits",
+              c.settings.size == DisplayMode{2560, 1080} && c.why == StartChoice::Why::Largest);
+    }
+    {
+        const StartChoice c = start(WindowMode::Windowed, {1920, 1080});
+        check("choose_start: a stored window size that fits is kept",
+              c.settings.size == DisplayMode{1920, 1080} && c.why == StartChoice::Why::Stored);
+    }
+    {
+        // The settings.txt of somebody who chose 4K on another monitor.
+        const StartChoice c = start(WindowMode::Windowed, {3840, 2160});
+        check("choose_start: a stored window too big for this desktop falls to the largest",
+              c.settings.window == WindowMode::Windowed &&
+                  c.settings.size == DisplayMode{2560, 1080} &&
+                  c.why == StartChoice::Why::StoredTooBig);
+    }
+    {
+        // The pre-display= file of somebody who chose 3440x1440 when the old menu
+        // offered it as a window -- on this very monitor, to fill it.
+        const StartChoice c = start(WindowMode::Windowed, {3440, 1440});
+        check("choose_start: a stored window the desktop's exact size opens borderless",
+              c.settings.window == WindowMode::Borderless && c.settings.size == WIDEST_VIEW &&
+                  c.why == StartChoice::Why::DesktopWindow);
+    }
+    {
+        const StartChoice c = start(WindowMode::Borderless, {1280, 720});
+        check("choose_start: borderless is the desktop's size",
+              c.settings.size == WIDEST_VIEW && c.why == StartChoice::Why::Stored);
+    }
+    {
+        const StartChoice c = start(WindowMode::Fullscreen, {2560, 1080});
+        check("choose_start: a stored fullscreen mode the display has is kept",
+              c.settings.size == DisplayMode{2560, 1080} && c.why == StartChoice::Why::Stored);
+    }
+    {
+        // A different monitor than last time.
+        const StartChoice c = start(WindowMode::Fullscreen, {1600, 900});
+        check("choose_start: a fullscreen size the display lacks opens at the desktop's",
+              c.settings.window == WindowMode::Fullscreen && c.settings.size == WIDEST_VIEW &&
+                  c.why == StartChoice::Why::NotAMode);
+    }
+    {
+        const StartChoice c = start(WindowMode::Fullscreen, {0, 0});
+        check("choose_start: fullscreen with no size stored is the desktop's, unremarked",
+              c.settings.size == WIDEST_VIEW && c.why == StartChoice::Why::Stored);
+    }
+    {
+        ScreenOptions tiny;
+        tiny.desktop = DisplayMode{1024, 600};
+        DisplaySettings s;
+        s.size = DisplayMode{1920, 1080};
+        const StartChoice c = choose_start(s, tiny);
+        check("choose_start: nothing fitting still opens, at the smallest window",
+              c.settings.size == COMMON_SIZES[0] && c.why == StartChoice::Why::NothingFits);
+    }
+    {
+        DisplaySettings s;
+        s.window = WindowMode::Borderless;
+        s.vsync = false;
+        s.renderer = RendererChoice::Gl;
+        const StartChoice c = choose_start(s, o);
+        check("choose_start: VSync and the renderer pass through untouched",
+              !c.settings.vsync && c.settings.renderer == RendererChoice::Gl);
+    }
 }
 
 // The empty scene's spawn. A world with no terrain at all is a legitimate scene
@@ -536,6 +728,9 @@ int main() {
     test_free_first_landing();
     test_choose_display_mode();
     test_settings_file();
+    test_fullscreen_sizes();
+    test_resolution_lists();
+    test_choose_start();
     test_shipped_fixture();
     test_scene_resolve();
     test_scene_resolve_shipped_rows();

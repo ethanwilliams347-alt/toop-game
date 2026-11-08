@@ -82,8 +82,11 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
 int main(int argc, char* argv[]) {
-    // renderer= in settings.txt, overridden for this run by --renderer=gl|sdl.
-    RendererChoice renderer_choice = load_renderer_choice();
+    // Everything settings.txt says (game/display.h has the format). The renderer
+    // can be overridden for this run by --renderer=gl|sdl; the override is not
+    // saved, and the menu goes on showing the stored choice.
+    const DisplaySettings stored = load_settings();
+    RendererChoice renderer_choice = stored.renderer;
     for (int i = 1; i < argc; ++i) {
         if (std::strncmp(argv[i], "--renderer=", 11) == 0 &&
             !parse_renderer_choice(argv[i] + 11, renderer_choice))
@@ -91,45 +94,88 @@ int main(int argc, char* argv[]) {
                          argv[i]);
     }
 
+    // Per-monitor DPI awareness, and before SDL_Init because Windows fixes a
+    // process's awareness the first time it is asked, which SDL does during
+    // init. Without it, a process on a desktop scaled to 125% is told a
+    // 3440x1440 monitor is 2752x1152, and whatever window it opens is stretched
+    // back up by the compositor, blurring every cell edge. With it, every size
+    // the game sees is the monitor's own pixels.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
         return 1;
     }
 
-    // Which modes this display can actually show, and which of them to open at.
-    // Only the first needs SDL: mode_fits asks the display, choose_display_mode
-    // decides, and the deciding is the half with the wrong answers in it -- a
-    // stored mode that no longer fits, and a desktop smaller than every mode in
-    // the table. Both are in display_test rather than in a checklist step nobody
-    // can run without two monitors.
-    bool mode_available[DISPLAY_MODE_COUNT];
-    for (int i = 0; i < DISPLAY_MODE_COUNT; ++i)
-        mode_available[i] = shell::mode_fits(DISPLAY_MODES[i], 0);
-
-    const int stored_mode = load_display_mode();
-    const ModeChoice choice =
-        choose_display_mode(mode_available, DISPLAY_MODE_COUNT, stored_mode);
-    int mode_index = choice.index;
-    switch (choice.why) {
-        case ModeChoice::Why::NothingFits:
-            std::fprintf(stderr, "No display mode fits this desktop; opening at %dx%d anyway.\n",
-                         DISPLAY_MODES[mode_index].window_w, DISPLAY_MODES[mode_index].window_h);
-            break;
-        case ModeChoice::Why::StoredTooBig:
-            // choose_display_mode only answers StoredTooBig for a stored index it
-            // has already checked is inside the table (display.h). The analyzer
-            // does not carry that check back out of the call, so it sees a
-            // stored_mode that could still be -1 here.
-            // NOLINTBEGIN(clang-analyzer-security.ArrayBound)
-            std::fprintf(stderr, "Stored mode %dx%d does not fit this display; ignoring it.\n",
-                         DISPLAY_MODES[stored_mode].window_w, DISPLAY_MODES[stored_mode].window_h);
-            // NOLINTEND(clang-analyzer-security.ArrayBound)
-            break;
-        case ModeChoice::Why::Stored:
-        case ModeChoice::Why::Largest:
-            break;
+    // The window and its backend, GL or SDL (shell::open_display falls back from
+    // GL to SDL on its own), hidden until it is in its mode. Everything below
+    // draws, and makes and fills textures, through `canvas` (render/canvas.h) and
+    // never asks which it is, apart from the GL-only debug keys, which go through
+    // display.gl.
+    shell::Display display;
+    if (!shell::open_display(renderer_choice, stored.vsync, display)) {
+        SDL_Quit();
+        return 1;
     }
-    DisplayMode mode = DISPLAY_MODES[mode_index];
+    SDL_Window* window = display.window;
+    gfx::Canvas& canvas = *display.canvas;
+    // Which backend is actually drawing, which the stored choice is not always:
+    // an override on the command line, or GL that fell back.
+    const RendererChoice running_renderer = display.gl ? RendererChoice::Gl : RendererChoice::Sdl;
+    // The GL light pass propagates with the CPU LightField's own numbers.
+    if (display.gl) display.gl->set_light_constants(LightField::gpu_constants());
+
+    // How the window is shown. shell::screen_options asks the display the hidden
+    // window is on what it offers -- measured with the window's own title bar,
+    // which is why the window exists first -- and choose_start decides. The
+    // deciding is the half with the wrong answers in it -- a stored size that no
+    // longer fits, a fullscreen mode the monitor no longer has, a desktop smaller
+    // than every window size -- and it is in boot_test rather than in a checklist
+    // step nobody can run without two monitors.
+    //
+    // `offered` is asked again whenever the menu opens, because by then the
+    // window may be on a different display.
+    ScreenOptions offered = shell::screen_options(window);
+    const StartChoice start = choose_start(stored, offered);
+    // Printed for the same reason the seed is: a size chosen by a fallback path
+    // is invisible otherwise, and "it opened smaller than I asked for" is not
+    // something a player can debug from the window alone.
+    switch (start.why) {
+        case StartChoice::Why::NothingFits:
+            std::fprintf(stderr, "No window size fits this desktop; opening at %dx%d anyway.\n",
+                         start.settings.size.window_w, start.settings.size.window_h);
+            break;
+        case StartChoice::Why::StoredTooBig:
+            std::fprintf(stderr, "Stored size %dx%d does not fit this display; opening at %dx%d.\n",
+                         stored.size.window_w, stored.size.window_h, start.settings.size.window_w,
+                         start.settings.size.window_h);
+            break;
+        case StartChoice::Why::NotAMode:
+            std::fprintf(
+                stderr,
+                "Stored fullscreen size %dx%d is not a mode of this display; using %dx%d.\n",
+                stored.size.window_w, stored.size.window_h, start.settings.size.window_w,
+                start.settings.size.window_h);
+            break;
+        case StartChoice::Why::DesktopWindow:
+            std::printf("Stored window %dx%d is the whole desktop; opening borderless.\n",
+                        stored.size.window_w, stored.size.window_h);
+            break;
+        case StartChoice::Why::Stored:
+        case StartChoice::Why::Largest: break;
+    }
+    // What the window is showing now. The settings menu reads it on opening and
+    // apply_display, below, is the only thing that changes it after this --
+    // show_display writes into it only when the display refuses the mode and
+    // the window opens windowed instead.
+    DisplaySettings in_effect = start.settings;
+    shell::show_display(display, in_effect, offered);
+
+    // The size everything is drawn at: the backend's output in physical pixels.
+    // Read back from the window rather than taken from in_effect, because the
+    // window system has the last word -- a fullscreen mode lands on the nearest
+    // one the monitor has -- and the frame has to be the size it actually got.
+    DisplayMode mode = shell::output_size(display);
 
     // How many screen pixels one world cell covers, for the scene loaded right
     // now. It starts at the default and activate_scene moves it, so it is
@@ -138,35 +184,22 @@ int main(int argc, char* argv[]) {
     //
     // Everything sized in cells is a function of the pair (mode, view_scale): the
     // two render targets, the light field, the camera's viewport, and the upload
-    // rect. When either half moves, apply_mode rebuilds all of it.
+    // rect. When either half moves, rebuild_targets rebuilds all of it.
     int view_scale = Camera::DEFAULT_SCALE;
 
-    // Printed for the same reason the seed is: a mode chosen by a fallback path
-    // is invisible otherwise, and "it opened smaller than I asked for" is not
-    // something a player can debug from the window alone.
-    std::printf("Display: %dx%d (%dx%d cells at %dx)\n", mode.window_w, mode.window_h,
-                mode.viewport_w(view_scale), mode.viewport_h(view_scale), view_scale);
-
-    // The window and its backend, GL or SDL (shell::open_display falls back from
-    // GL to SDL on its own). Everything below draws, and makes and fills
-    // textures, through `canvas` (render/canvas.h) and never asks which it is,
-    // apart from the GL-only debug keys, which go through display.gl.
-    shell::Display display;
-    if (!shell::open_display(mode, renderer_choice, display)) {
-        SDL_Quit();
-        return 1;
-    }
-    SDL_Window* window = display.window;
-    gfx::Canvas& canvas = *display.canvas;
-    // The GL light pass propagates with the CPU LightField's own numbers.
-    if (display.gl) display.gl->set_light_constants(LightField::gpu_constants());
+    // With the desktop's size beside it, in pixels, because which sizes fit is
+    // decided against that number and a DPI-unaware build would see a smaller one.
+    std::printf("Display: %s %dx%d on a %dx%d desktop (%dx%d cells at %dx), vsync %s\n",
+                window_mode_name(in_effect.window), mode.window_w, mode.window_h,
+                offered.desktop.window_w, offered.desktop.window_h, mode.viewport_w(view_scale),
+                mode.viewport_h(view_scale), view_scale, in_effect.vsync ? "on" : "off");
 
     // The world's ARGB8888 streaming texture and the light texture, both sized
     // to the viewport rather than to the whole grid, and both rebuilt by this
-    // same call whenever the mode changes. Here a failure is fatal, unlike in
-    // the menu: there is no earlier mode to fall back to.
+    // same call whenever the output size or the scale changes. Here a failure is
+    // fatal, unlike in the menu: there is no earlier size to fall back to.
     shell::RenderTargets targets;
-    if (!shell::apply_mode(window, canvas, mode, view_scale, targets)) {
+    if (!shell::rebuild_targets(canvas, mode, view_scale, targets)) {
         shell::close_display(display);
         SDL_Quit();
         return 1;
@@ -539,7 +572,7 @@ int main(int argc, char* argv[]) {
         if (resolved.scale_changed) {
             const int previous = view_scale;
             view_scale = resolved.scale;
-            if (!shell::apply_mode(window, canvas, mode, view_scale, targets)) {
+            if (!shell::rebuild_targets(canvas, mode, view_scale, targets)) {
                 std::fprintf(stderr, "WARNING: could not rebuild render targets at %dx "
                                      "for scene '%s'; staying at %dx.\n",
                              view_scale, def.name.c_str(), previous);
@@ -639,17 +672,66 @@ int main(int argc, char* argv[]) {
     enum class Screen { Playing, Settings };
     Screen screen = Screen::Playing;
 
-    // The navigation and selection live in game/settings_menu.h and have a suite.
-    // What is left here is the keysyms and the two calls that need a window. The
-    // cursor stays in a local because the drawing code below reads it.
+    // The navigation, the values and the confirm-or-revert countdown live in
+    // game/settings_menu.h and have a suite. What is left here is the keysyms
+    // and the calls that need a window or a file.
     menu::State menu_state;
-    menu::open(menu_state, mode_index);
-    int& menu_cursor = menu_state.cursor;
+    menu::open(menu_state, in_effect);
 
     // Shown under the menu for a few seconds after a switch is attempted, so a
     // refused mode says so instead of looking like a dead key.
     std::string menu_notice;
     double menu_notice_timer = 0.0;
+
+    // A switch the menu asked for: the window into its new mode, then everything
+    // sized in cells rebuilt to the output that mode gives. Either half failing
+    // puts the window back as it was, so false from here means nothing changed --
+    // which is what menu::applied is told it means.
+    auto apply_display = [&](const DisplaySettings& want) {
+        if (!shell::apply_window(display, in_effect, want, offered)) {
+            shell::apply_window(display, want, in_effect, offered);
+            return false;
+        }
+        const DisplayMode out = shell::output_size(display);
+        if (!shell::rebuild_targets(canvas, out, view_scale, targets)) {
+            shell::apply_window(display, want, in_effect, offered);
+            return false;
+        }
+        mode = out;
+        in_effect = want;
+        std::printf("Display: %s %dx%d (%dx%d cells at %dx), vsync %s\n",
+                    window_mode_name(in_effect.window), mode.window_w, mode.window_h,
+                    mode.viewport_w(view_scale), mode.viewport_h(view_scale), view_scale,
+                    in_effect.vsync ? "on" : "off");
+        return true;
+    };
+
+    // Carries out what the menu asks for -- a switch, a save -- and reports how it
+    // went, until the menu asks for nothing more; then shows its notice and leaves
+    // the menu if it says to. Every outcome goes through here, from a key or from
+    // the countdown running out, so a revert the clock asked for is carried out
+    // by the same lines as one the player asked for.
+    auto settle_menu = [&](menu::Outcome out) {
+        for (;;) {
+            if (out.act == menu::Act::Apply)
+                out = menu::applied(menu_state, apply_display(out.settings));
+            else if (out.act == menu::Act::Save)
+                // Persisted at the point it is kept, not on the way out of the
+                // menu: a crash between the two would otherwise lose a setting the
+                // player watched succeed.
+                out = menu::saved(save_settings(out.settings));
+            else
+                break;
+        }
+        if (out.notice) {
+            menu_notice = out.notice;
+            menu_notice_timer = out.notice_seconds;
+        }
+        if (out.act == menu::Act::Close)
+            screen = Screen::Playing;
+        else if (out.act == menu::Act::Quit)
+            running = false;
+    };
 
     uint64_t prev_counter = SDL_GetPerformanceCounter();
     const double counter_freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -796,16 +878,35 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&e) != 0) {
             if (e.type == SDL_QUIT) {
                 running = false;
-            }
-            else if (screen == Screen::Settings && e.type == SDL_KEYDOWN) {
+            } else if (e.type == SDL_WINDOWEVENT &&
+                       e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                // The window system changed the window's size: a mode switch
+                // landing a frame late, the display changing resolution under a
+                // fullscreen window, a monitor's DPI changing. Everything sized in
+                // cells is rebuilt to the new output, and the window is left where
+                // the window system put it -- moving it back would be arguing with
+                // the one party that knows what the display can show.
+                const DisplayMode out = shell::output_size(display);
+                if (out != mode && out.window_w > 0 && out.window_h > 0) {
+                    if (shell::rebuild_targets(canvas, out, view_scale, targets)) {
+                        mode = out;
+                    } else {
+                        std::fprintf(stderr,
+                                     "WARNING: could not rebuild render targets at %dx%d; "
+                                     "still drawing at %dx%d.\n",
+                                     out.window_w, out.window_h, mode.window_w, mode.window_h);
+                    }
+                }
+            } else if (screen == Screen::Settings && e.type == SDL_KEYDOWN) {
                 // Keyboard-driven rather than click-driven, which is a scope decision:
                 // this project has no widget layer, no hit-testing and no focus
                 // model, and adding three of them to change a resolution would be a
                 // larger feature than the one being built.
                 //
                 // This switch is only the binding -- which keysyms mean which of the
-                // menu's four verbs. Every branch that would otherwise follow is
-                // menu::key in game/settings_menu.h, where shell_test can reach it.
+                // menu's six verbs. Every branch that would otherwise follow,
+                // including which of them a held key repeats, is menu::key in
+                // game/settings_menu.h, where shell_test can reach it.
                 menu::Key mk = menu::Key::Back;
                 bool bound = true;
                 switch (e.key.keysym.sym) {
@@ -813,43 +914,20 @@ int main(int argc, char* argv[]) {
                     case SDLK_w: mk = menu::Key::Prev; break;
                     case SDLK_DOWN:
                     case SDLK_s: mk = menu::Key::Next; break;
+                    case SDLK_LEFT:
+                    case SDLK_a:        mk = menu::Key::Left; break;
+                    case SDLK_RIGHT:
+                    case SDLK_d:        mk = menu::Key::Right; break;
                     case SDLK_RETURN:
                     case SDLK_KP_ENTER:
                     case SDLK_SPACE: mk = menu::Key::Confirm; break;
                     case SDLK_ESCAPE: mk = menu::Key::Back; break;
                     default: bound = false; break;
                 }
-                if (bound) {
-                    menu::Outcome out = menu::key(menu_state, mk, mode_available,
-                                                  DISPLAY_MODE_COUNT, mode_index);
-                    // The one thing the state machine cannot do for itself: try the
-                    // switch, on a window, and report which way it went.
-                    if (out.act == menu::Act::ApplyMode) {
-                        const DisplayMode& wanted = DISPLAY_MODES[out.mode];
-                        if (shell::apply_mode(window, canvas, wanted, view_scale, targets)) {
-                            mode = wanted;
-                            mode_index = out.mode;
-                            // Persisted at the point it takes effect, not on the way out
-                            // of the menu: a crash between the two would otherwise lose a
-                            // setting the player watched succeed.
-                            out = menu::mode_applied(menu_state, out.mode,
-                                                     save_display_mode(mode));
-                        } else {
-                            out = menu::mode_refused(menu_state, mode_index);
-                        }
-                    }
-                    if (out.notice) {
-                        menu_notice = out.notice;
-                        menu_notice_timer = out.notice_seconds;
-                    }
-                    if (out.act == menu::Act::Close) screen = Screen::Playing;
-                    else if (out.act == menu::Act::Quit) running = false;
-                }
-            }
-            else if (e.type == SDL_MOUSEWHEEL) {
+                if (bound) settle_menu(menu::key(menu_state, mk, e.key.repeat != 0, offered));
+            } else if (e.type == SDL_MOUSEWHEEL) {
                 brush_size = std::clamp(brush_size + e.wheel.y, BRUSH_MIN, BRUSH_MAX);
-            }
-            else if (e.type == SDL_KEYDOWN) {
+            } else if (e.type == SDL_KEYDOWN) {
                 // The material keys are a loop over ui::HOTBAR rather than a switch
                 // for one reason: the row drawn at the bottom of the screen has to
                 // be telling the truth about what each key does, and the only way to
@@ -863,7 +941,10 @@ int main(int argc, char* argv[]) {
                 }
                 if (e.key.keysym.sym == SDLK_ESCAPE) {
                     screen = Screen::Settings;
-                    menu::open(menu_state, mode_index);
+                    // Asked again on every opening, because the window may have
+                    // been dragged to another display since the last.
+                    offered = shell::screen_options(window);
+                    menu::open(menu_state, in_effect);
                 }
                 // Only while the run is over, so R is inert during play rather than a
                 // key that throws a session away by mis-hitting it -- the same
@@ -1054,6 +1135,11 @@ int main(int argc, char* argv[]) {
 
         if (menu_notice_timer > 0.0) menu_notice_timer -= frame_time;
         if (record_notice_timer > 0.0) record_notice_timer -= frame_time;
+        // The confirm-or-revert countdown, in the same clamped seconds as
+        // everything else here. The clamp is what keeps a monitor's resync -- a
+        // second or two in which no frame is drawn -- from eating the countdown
+        // the player needs to answer it.
+        if (screen == Screen::Settings) settle_menu(menu::tick(menu_state, frame_time));
 
         // Movement is read from live key state rather than key events, so holding a
         // key keeps moving instead of firing once and repeating on the OS key-repeat
@@ -1429,11 +1515,8 @@ int main(int argc, char* argv[]) {
         op.won = run.outcome() == Run::Outcome::Won;
 
         op.settings_open = (screen == Screen::Settings);
-        op.cursor = menu_cursor;
-        op.mode_count = DISPLAY_MODE_COUNT;
-        op.current_mode = mode_index;
-        op.modes = DISPLAY_MODES;
-        op.available = mode_available;
+        if (op.settings_open)
+            op.settings = menu::view(menu_state, offered, running_renderer, view_scale);
         // An expired notice is handed over as no notice at all. The timer is a fact
         // about this loop, not about the drawing, and passing it would put a second
         // copy of "is it still showing" on the far side of the seam.

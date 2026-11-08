@@ -10,26 +10,154 @@ namespace shell {
 
 namespace {
 
-SDL_Window* make_window(const DisplayMode& mode, Uint32 extra_flags) {
+// Made hidden and windowed, at the smallest size, and shown only once
+// show_display has put it in its mode. Hidden for two reasons. A fullscreen
+// window shown at creation switches the display to the closest mode SDL can
+// find at the desktop's refresh, and then again to the one asked for; a hidden
+// one switches once, when it is shown. And a hidden window already has its
+// title bar and borders, which is the only way to measure them -- and which
+// sizes fit the desktop depends on them.
+//
+// ALLOW_HIGHDPI with the per-monitor DPI awareness main.cpp sets: on Windows the
+// window is then measured in physical pixels, so a 3440x1440 window is that many
+// pixels on a desktop scaled to 150% rather than a smaller one stretched by the
+// compositor.
+SDL_Window* make_window(Uint32 extra_flags) {
     return SDL_CreateWindow("SLOP Pixel Physics", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                            mode.window_w, mode.window_h, SDL_WINDOW_SHOWN | extra_flags);
+                            COMMON_SIZES[0].window_w, COMMON_SIZES[0].window_h,
+                            SDL_WINDOW_HIDDEN | SDL_WINDOW_ALLOW_HIGHDPI | extra_flags);
+}
+
+// The window's title bar and borders, as last measured while it had them. A
+// borderless or fullscreen window has none to measure, but the question the
+// menu asks of it -- which windowed sizes would fit -- is about the window it
+// would become, decorations and all. Measured first on the hidden window
+// before it is ever shown, so it is known from the start.
+struct Borders {
+    int top = 0, left = 0, bottom = 0, right = 0;
+};
+Borders last_borders;
+
+// The refresh rate a fullscreen size is entered at: the highest the display
+// lists for it (fullscreen_sizes), or 0 -- the desktop's -- for a size it does
+// not list.
+int refresh_for(const ScreenOptions& o, const DisplayMode& size) {
+    for (const FullscreenMode& m : o.fullscreen)
+        if (m.size == size) return m.refresh_hz;
+    return 0;
+}
+
+// Puts the window into `to`'s mode and size. Shared by start-up and the menu,
+// so the window the game opens in and the one the menu switches to are made the
+// same way.
+bool set_window_mode(SDL_Window* window, const DisplaySettings& to, const ScreenOptions& o) {
+    switch (to.window) {
+        case WindowMode::Windowed: {
+            if (SDL_SetWindowFullscreen(window, 0) != 0) return false;
+            SDL_SetWindowSize(window, to.size.window_w, to.size.window_h);
+            // Centred on the display it is on, not on display 0: a player who
+            // dragged the window to a second monitor switched sizes there.
+            const int index = std::max(0, SDL_GetWindowDisplayIndex(window));
+            SDL_SetWindowPosition(window, static_cast<int>(SDL_WINDOWPOS_CENTERED_DISPLAY(index)),
+                                  static_cast<int>(SDL_WINDOWPOS_CENTERED_DISPLAY(index)));
+            return true;
+        }
+        case WindowMode::Borderless:
+            return SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0;
+        case WindowMode::Fullscreen: {
+            // Out of exclusive fullscreen first, when already in it. SDL applies a
+            // new mode to a window that is already fullscreen by switching the
+            // display and reporting the new size, without resizing the window's
+            // own rectangle to match; leaving and re-entering is the path that
+            // resizes everything, at the cost of one more resync of the monitor,
+            // on a switch that is rare and is confirmed anyway.
+            if ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) ==
+                SDL_WINDOW_FULLSCREEN)
+                SDL_SetWindowFullscreen(window, 0);
+            SDL_DisplayMode dm{};
+            dm.w = to.size.window_w;
+            dm.h = to.size.window_h;
+            dm.refresh_rate = refresh_for(o, to.size);
+            if (SDL_SetWindowDisplayMode(window, &dm) != 0) return false;
+            return SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN) == 0;
+        }
+    }
+    return false;
 }
 
 } // namespace
 
-bool open_display(const DisplayMode& mode, RendererChoice want, Display& out) {
+void show_display(Display& d, DisplaySettings& settings, const ScreenOptions& options) {
+    if (!set_window_mode(d.window, settings, options)) {
+        std::fprintf(stderr, "Could not open %s at %dx%d (%s); opening windowed.\n",
+                     window_mode_name(settings.window), settings.size.window_w,
+                     settings.size.window_h, SDL_GetError());
+        settings.window = WindowMode::Windowed;
+        settings.size = fit_size(WindowMode::Windowed, settings.size, options);
+        set_window_mode(d.window, settings, options);
+    }
+    SDL_ShowWindow(d.window);
+}
+
+ScreenOptions screen_options(SDL_Window* window) {
+    ScreenOptions o;
+    const int index = window ? std::max(0, SDL_GetWindowDisplayIndex(window)) : 0;
+
+    SDL_DisplayMode desk{};
+    if (SDL_GetDesktopDisplayMode(index, &desk) == 0) o.desktop = DisplayMode{desk.w, desk.h};
+
+    // Usable bounds rather than the display's, so the taskbar counts; and the
+    // window's own decorations on top, so it is the whole window that fits and
+    // not only the part the game draws in. A window that does not fit is one
+    // SDL will happily create, with its title bar -- the handle to move it by --
+    // or the bottom of the game off the edge of the desktop.
+    //
+    // That is not a formality on a monitor with an auto-hiding taskbar, where
+    // the usable area is the whole display: there a 3440x1440 window on a
+    // 3440x1440 monitor "fits" until its title bar is counted, and then has it
+    // above the top of the screen.
+    SDL_Rect usable{};
+    const bool know_usable = SDL_GetDisplayUsableBounds(index, &usable) == 0;
+    Borders b;
+    if (window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0 &&
+        SDL_GetWindowBordersSize(window, &b.top, &b.left, &b.bottom, &b.right) == 0)
+        last_borders = b;
+    b = last_borders;
+    for (int i = 0; i < COMMON_SIZE_COUNT; ++i) {
+        // No answer is not the same as "no". A driver that cannot report its own
+        // bounds should not be able to hide every size in the menu.
+        o.windowed_fits[static_cast<size_t>(i)] =
+            !know_usable || (COMMON_SIZES[i].window_w + b.left + b.right <= usable.w &&
+                             COMMON_SIZES[i].window_h + b.top + b.bottom <= usable.h);
+    }
+
+    std::vector<FullscreenMode> reported;
+    const int n = SDL_GetNumDisplayModes(index);
+    for (int k = 0; k < n; ++k) {
+        SDL_DisplayMode m{};
+        if (SDL_GetDisplayMode(index, k, &m) == 0)
+            reported.push_back(FullscreenMode{DisplayMode{m.w, m.h}, m.refresh_rate});
+    }
+    o.fullscreen = fullscreen_sizes(reported);
+    return o;
+}
+
+bool open_display(RendererChoice want, bool vsync, Display& out) {
     if (want == RendererChoice::Gl) {
         gpu::GlCanvas::set_window_attributes();
-        SDL_Window* window = make_window(mode, SDL_WINDOW_OPENGL);
+        SDL_Window* window = make_window(SDL_WINDOW_OPENGL);
         std::string why = SDL_GetError();
         if (window) {
             std::unique_ptr<gpu::GlCanvas> gl =
-                gpu::GlCanvas::create(window, "assets/shaders", true, why);
+                gpu::GlCanvas::create(window, "assets/shaders", vsync, why);
             if (gl) {
                 std::printf("Renderer: OpenGL (%s)\n", gl->describe().c_str());
                 out.window = window;
                 out.gl = gl.get();
                 out.canvas = std::move(gl);
+                // Stated either way, not only when on: a new context's swap
+                // interval is the driver's choice, and "off" has to mean off.
+                set_vsync(out, vsync);
                 return true;
             }
             // A fresh window for the SDL renderer rather than this one: a window
@@ -41,13 +169,13 @@ bool open_display(const DisplayMode& mode, RendererChoice want, Display& out) {
                      why.c_str());
     }
 
-    SDL_Window* window = make_window(mode, 0);
+    SDL_Window* window = make_window(0);
     if (!window) {
         std::fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
         return false;
     }
-    SDL_Renderer* renderer =
-        SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    const Uint32 flags = SDL_RENDERER_ACCELERATED | (vsync ? SDL_RENDERER_PRESENTVSYNC : 0u);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, flags);
     if (!renderer) {
         std::fprintf(stderr, "Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
         SDL_DestroyWindow(window);
@@ -59,6 +187,41 @@ bool open_display(const DisplayMode& mode, RendererChoice want, Display& out) {
     out.gl = nullptr;
     out.canvas = std::make_unique<gfx::SdlCanvas>(renderer);
     return true;
+}
+
+bool apply_window(Display& d, const DisplaySettings& from, const DisplaySettings& to,
+                  const ScreenOptions& options) {
+    if (from.window != to.window || from.size != to.size) {
+        if (!set_window_mode(d.window, to, options)) {
+            std::fprintf(stderr, "Could not switch to %s at %dx%d: %s\n",
+                         window_mode_name(to.window), to.size.window_w, to.size.window_h,
+                         SDL_GetError());
+            return false;
+        }
+    }
+    // Set again after a mode switch as well as on a toggle: some drivers reset
+    // the swap chain's pacing when the window goes in or out of fullscreen.
+    set_vsync(d, to.vsync);
+    return true;
+}
+
+bool set_vsync(Display& d, bool on) {
+    // GlCanvas made its context current on this thread when it was created and
+    // never releases it, so the swap interval set here is that context's.
+    const int r =
+        d.gl ? SDL_GL_SetSwapInterval(on ? 1 : 0) : SDL_RenderSetVSync(d.renderer, on ? 1 : 0);
+    if (r != 0)
+        std::fprintf(stderr, "Could not turn VSync %s: %s\n", on ? "on" : "off", SDL_GetError());
+    return r == 0;
+}
+
+DisplayMode output_size(const Display& d) {
+    int w = 0, h = 0;
+    if (d.renderer)
+        SDL_GetRendererOutputSize(d.renderer, &w, &h);
+    else
+        SDL_GL_GetDrawableSize(d.window, &w, &h);
+    return DisplayMode{w, h};
 }
 
 void close_display(Display& d) {
@@ -121,8 +284,8 @@ gfx::Texture load_art_texture(gfx::Canvas& canvas, const char* path, bool colork
     return tex;
 }
 
-// Builds the render targets for `mode` and, on success, swaps them in and
-// resizes the window.
+// Builds the render targets for a `mode`-sized output and, on success, swaps
+// them in.
 //
 // Constructs everything new before releasing anything old, which is why this
 // returns a bool instead of exiting. At startup a failed texture allocation can
@@ -133,10 +296,9 @@ gfx::Texture load_art_texture(gfx::Canvas& canvas, const char* path, bool colork
 //
 // `scale` joins `mode` because the render targets are sized in cells, and how
 // many cells a window holds is a question about both. It is therefore called on
-// a scene change as well as a mode change; the window resize at the bottom is
-// idempotent when only the scale moved.
-bool apply_mode(SDL_Window* window, gfx::Canvas& canvas, const DisplayMode& mode, int scale,
-                RenderTargets& targets) {
+// a scene change and a window resize as well as a mode change.
+bool rebuild_targets(gfx::Canvas& canvas, const DisplayMode& mode, int scale,
+                     RenderTargets& targets) {
     // Both blend modes and the light's filtering are given here, not set once at
     // startup, because they are properties of a texture and these are new
     // textures. Each of the three is load-bearing and none is obvious from the
@@ -192,26 +354,7 @@ bool apply_mode(SDL_Window* window, gfx::Canvas& canvas, const DisplayMode& mode
     targets.cells = cells;
     targets.light_texture = light_texture;
     targets.light = std::move(light);
-
-    SDL_SetWindowSize(window, mode.window_w, mode.window_h);
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     return true;
-}
-
-// Whether a mode's window actually fits on the display the window is on.
-//
-// A window larger than the desktop is one SDL will happily create, with the
-// bottom and right of the game off-screen -- including the settings menu the
-// player would use to change it back. Usable bounds rather than raw bounds, so a
-// taskbar counts.
-bool mode_fits(const DisplayMode& mode, int display_index) {
-    SDL_Rect usable;
-    if (SDL_GetDisplayUsableBounds(display_index, &usable) != 0) {
-        // No answer is not the same as "no". A driver that cannot report its own
-        // bounds should not be able to hide every mode in the menu.
-        return true;
-    }
-    return mode.window_w <= usable.w && mode.window_h <= usable.h;
 }
 
 // --- the backdrop -----------------------------------------------------------

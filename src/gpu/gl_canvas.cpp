@@ -133,7 +133,7 @@ bool GlCanvas::init(std::string& why) {
     verts_.reserve(6 * 4096);
 
     int w = 0, h = 0;
-    SDL_GetWindowSize(window_, &w, &h);
+    SDL_GL_GetDrawableSize(window_, &w, &h);
     if (!resize_target(w, h)) {
         why = error_;
         return false;
@@ -317,14 +317,16 @@ bool GlCanvas::resize_target(int w, int h) {
     return true;
 }
 
-// The first draw of a frame. The window's size is read here rather than pushed
-// in, so shell::apply_mode resizing the window is all a mode change needs: the
-// next frame finds the new size and rebuilds the target.
+// The first draw of a frame. The drawable's size is read here rather than pushed
+// in, so shell::apply_window moving the window to a new mode or size is all a
+// mode change needs: the next frame finds the new size and rebuilds the target.
+// The drawable's and not the window's, because under DPI scaling the window is
+// measured in points and the drawable in the pixels this draws.
 void GlCanvas::begin_frame() {
     if (frame_open_) return;
     frame_open_ = true;
     int w = 0, h = 0;
-    SDL_GetWindowSize(window_, &w, &h);
+    SDL_GL_GetDrawableSize(window_, &w, &h);
     // A failed resize keeps the old target; the frame draws clipped or with a
     // margin, which is a bad frame rather than a crash.
     if (w != target_w_ || h != target_h_) resize_target(w, h);
@@ -531,8 +533,9 @@ void GlCanvas::present() {
     begin_frame();
     flush();
     int dw = 0, dh = 0;
-    // The drawable can be larger than the window under DPI scaling; the frame is
-    // drawn at window size and stretched to it, nearest, as SDL's renderer does.
+    // The target is the drawable's size (begin_frame), so this is 1:1 except on
+    // the frame the drawable changes size under it, which is stretched, nearest,
+    // as SDL's renderer does.
     SDL_GL_GetDrawableSize(window_, &dw, &dh);
     gl::BindFramebuffer(GL_READ_FRAMEBUFFER, fbo_);
     gl::BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);

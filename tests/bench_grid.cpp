@@ -351,7 +351,7 @@ double run(const char* name, const WorldSize& size, void (*build)(Grid&, Bench&)
 // The widest display mode, not the narrowest, because the viewport is a runtime
 // choice and the one worth having a number for is the largest. Whatever this
 // reads is the cost the widest mode pays; every other mode pays less.
-constexpr DisplayMode WIDEST = DISPLAY_MODES[DISPLAY_MODE_COUNT - 1];
+constexpr DisplayMode WIDEST = WIDEST_VIEW;
 constexpr int LIGHT_VIEW_W = WIDEST.padded_w(Camera::DEFAULT_SCALE);
 constexpr int LIGHT_VIEW_H = WIDEST.padded_h(Camera::DEFAULT_SCALE);
 constexpr int LIGHT_FRAMES = 300;

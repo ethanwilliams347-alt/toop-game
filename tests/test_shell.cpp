@@ -148,105 +148,374 @@ void test_teleport_flag() {
 
 // --- the settings menu -----------------------------------------------------
 //
-// Three display modes, the middle one in use, the last too large for this
-// display -- the arrangement that produces every branch worth testing.
+// A 2560x1440 desktop with a taskbar, so windows stop at 2560x1080; fullscreen
+// offers three modes. The window starts as a 1920x1080 window with VSync on and
+// the SDL renderer -- the arrangement that reaches every branch below.
+ScreenOptions desk() {
+    ScreenOptions o;
+    o.desktop = DisplayMode{2560, 1440};
+    for (int i = 0; i < COMMON_SIZE_COUNT; ++i)
+        o.windowed_fits[static_cast<size_t>(i)] = COMMON_SIZES[i].window_h <= 1080;
+    o.fullscreen = {{{1280, 720}, 60}, {{1920, 1080}, 144}, {{2560, 1440}, 144}};
+    return o;
+}
+
+DisplaySettings windowed_1080() {
+    return DisplaySettings{WindowMode::Windowed, {1920, 1080}, true, RendererChoice::Sdl};
+}
+
+menu::Outcome press(menu::State& s, menu::Key k, const ScreenOptions& o) {
+    return menu::key(s, k, false, o);
+}
+
 void test_menu_navigation() {
-    const bool fits[3] = {true, true, false};
+    const ScreenOptions o = desk();
     menu::State s;
-    menu::open(s, 1);
-    check("opening puts the cursor on the mode in use", s.cursor == 1);
+    s.cursor = 4;
+    s.pending.vsync = false;  // left over from a visit that was abandoned
+    menu::open(s, windowed_1080());
+    check("opening puts the cursor on the top row", s.cursor == 0);
+    check("opening shows what is in effect, not what was abandoned",
+          s.pending == windowed_1080() && s.applied == windowed_1080());
 
-    // Four items: three modes and Quit.
-    check("quit is the row after the last mode", menu::quit_index(3) == 3);
-
-    menu::key(s, menu::Key::Next, fits, 3, 1);
-    menu::key(s, menu::Key::Next, fits, 3, 1);
-    check("down moves the cursor", s.cursor == 3);
-    menu::key(s, menu::Key::Next, fits, 3, 1);
-    check("down wraps off the end onto the first mode", s.cursor == 0);
-    menu::key(s, menu::Key::Prev, fits, 3, 1);
-    check("up wraps backwards onto quit", s.cursor == 3);
+    press(s, menu::Key::Prev, o);
+    check("up from the top wraps onto quit", s.cursor == static_cast<int>(menu::Row::Quit));
+    press(s, menu::Key::Next, o);
+    check("down from quit wraps onto the top", s.cursor == 0);
 
     // Navigation says nothing and changes no screen.
-    const menu::Outcome nav = menu::key(s, menu::Key::Prev, fits, 3, 1);
+    const menu::Outcome nav = press(s, menu::Key::Next, o);
     check("moving the cursor is not an action",
           nav.act == menu::Act::None && nav.notice == nullptr);
 }
 
-void test_menu_selection() {
-    const bool fits[3] = {true, true, false};
+void test_menu_values() {
+    const ScreenOptions o = desk();
+    menu::State s;
+    menu::open(s, windowed_1080());
+
+    // The display row: each mode, with the size following it.
+    press(s, menu::Key::Right, o);
+    check("right on the display row: borderless, at the desktop's size",
+          s.pending.window == WindowMode::Borderless && s.pending.size == o.desktop);
+    press(s, menu::Key::Right, o);
+    check("again: fullscreen, keeping the desktop's size because it is a mode",
+          s.pending.window == WindowMode::Fullscreen && s.pending.size == DisplayMode{2560, 1440});
+    press(s, menu::Key::Right, o);
+    // Borderless -> windowed would carry 2560x1440 into a window the desktop
+    // cannot hold; it lands on the largest window that fits instead.
+    check("again: back to a window, at the largest that fits",
+          s.pending.window == WindowMode::Windowed && s.pending.size == DisplayMode{2560, 1080});
+    check("changing values touches nothing in effect", s.applied == windowed_1080());
+
+    // The resolution row steps through the list and wraps.
+    menu::open(s, windowed_1080());
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Right, o);
+    check("right on the resolution row: the next size up",
+          s.pending.size == DisplayMode{2560, 1080});
+    press(s, menu::Key::Right, o);
+    check("past the largest window wraps to the smallest",
+          s.pending.size == DisplayMode{1280, 720});
+    press(s, menu::Key::Left, o);
+    check("left steps back", s.pending.size == DisplayMode{2560, 1080});
+
+    // Borderless has one size, and stepping it does nothing.
+    menu::open(s, DisplaySettings{WindowMode::Borderless, {2560, 1440}, true, RendererChoice::Sdl});
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Right, o);
+    check("the borderless size does not step", s.pending.size == DisplayMode{2560, 1440});
+
+    // A size off the list -- the window system resized the window -- lands on
+    // the list at the first press rather than skipping past where it should be.
+    menu::open(s, DisplaySettings{WindowMode::Windowed, {1700, 950}, true, RendererChoice::Sdl});
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Right, o);
+    check("a size off the list lands on the nearest one no larger",
+          s.pending.size == DisplayMode{1600, 900});
+
+    menu::open(s, windowed_1080());
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Left, o);
+    check("the VSync row toggles", !s.pending.vsync);
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Right, o);
+    check("the renderer row toggles", s.pending.renderer == RendererChoice::Gl);
+    press(s, menu::Key::Next, o);
+    const DisplaySettings before = s.pending;
+    press(s, menu::Key::Right, o);
+    press(s, menu::Key::Next, o);
+    press(s, menu::Key::Left, o);
+    check("left and right on apply and quit change nothing", s.pending == before);
+}
+
+void test_menu_confirm_keys() {
+    const ScreenOptions o = desk();
 
     // Back leaves the menu. It must never quit: a key that ends a session with no
     // confirmation is the wrong key to leave next to a menu.
     {
-        menu::State s; menu::open(s, 1);
-        check("back closes the menu rather than quitting",
-              menu::key(s, menu::Key::Back, fits, 3, 1).act == menu::Act::Close);
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Right, o);
+        check("back closes the menu rather than quitting, pending or not",
+              press(s, menu::Key::Back, o).act == menu::Act::Close);
     }
 
-    // Confirming the row already in use is a way out, not a no-op.
+    // Enter with nothing changed is a way out, not a no-op -- from any row.
     {
-        menu::State s; menu::open(s, 1);
-        check("confirming the current mode closes the menu",
-              menu::key(s, menu::Key::Confirm, fits, 3, 1).act == menu::Act::Close);
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Next, o);
+        check("enter with nothing pending closes the menu",
+              press(s, menu::Key::Confirm, o).act == menu::Act::Close);
     }
 
     // Quit is reachable only by landing on its row and confirming -- two
-    // deliberate presses.
+    // deliberate presses -- and it does not apply on the way out.
     {
-        menu::State s; s.cursor = menu::quit_index(3);
-        check("confirming quit quits",
-              menu::key(s, menu::Key::Confirm, fits, 3, 1).act == menu::Act::Quit);
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Right, o);
+        press(s, menu::Key::Prev, o);
+        check("enter on quit quits, even with a change pending",
+              press(s, menu::Key::Confirm, o).act == menu::Act::Quit);
     }
 
-    // A mode too large for this display is refused with a sentence. Silence here
-    // is indistinguishable from a dead key, which is the whole reason the notice
-    // exists.
-    {
-        menu::State s; s.cursor = 2;
-        const menu::Outcome o = menu::key(s, menu::Key::Confirm, fits, 3, 1);
-        check("a mode that does not fit is refused and says so",
-              o.act == menu::Act::None && o.notice != nullptr && o.notice_seconds > 0.0);
-        check("a refused mode leaves the cursor alone", s.cursor == 2);
-    }
-
-    // A real switch is handed back to the caller rather than performed here.
-    {
-        menu::State s; s.cursor = 0;
-        const menu::Outcome o = menu::key(s, menu::Key::Confirm, fits, 3, 1);
-        check("confirming a different mode asks the caller to apply it",
-              o.act == menu::Act::ApplyMode && o.mode == 0);
+    // Enter with something pending hands the whole pending set to the caller,
+    // from a value row or from the apply row alike.
+    for (int row : {static_cast<int>(menu::Row::Resolution), static_cast<int>(menu::Row::Apply)}) {
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Next, o);
+        press(s, menu::Key::Right, o);
+        s.cursor = row;
+        const menu::Outcome out = press(s, menu::Key::Confirm, o);
+        check(("enter applies what is pending, from row " + std::to_string(row)).c_str(),
+              out.act == menu::Act::Apply && out.settings.size == DisplayMode{2560, 1080} &&
+                  out.settings.window == WindowMode::Windowed);
     }
 }
 
-void test_menu_switch_results() {
-    // Applied and saved: the menu closes and the cursor holds the new mode.
+void test_menu_round_trip() {
+    const ScreenOptions o = desk();
+
+    // VSync alone cannot leave a screen unusable, so it is saved at once.
     {
-        menu::State s; s.cursor = 0;
-        const menu::Outcome o = menu::mode_applied(s, 0, true);
-        check("a saved switch closes the menu",
-              o.act == menu::Act::Close && o.notice == nullptr && s.cursor == 0);
+        menu::State s;
+        menu::open(s, windowed_1080());
+        s.cursor = static_cast<int>(menu::Row::VSync);
+        press(s, menu::Key::Right, o);
+        const menu::Outcome a = press(s, menu::Key::Confirm, o);
+        const menu::Outcome b = menu::applied(s, true);
+        check("a VSync change is saved without asking", a.act == menu::Act::Apply &&
+                                                            b.act == menu::Act::Save &&
+                                                            !b.settings.vsync && !s.confirming);
+        const menu::Outcome c = menu::saved(true);
+        check("a save keeps the menu open and says so",
+              c.act == menu::Act::None && c.notice != nullptr);
+        check("in effect is what was applied", !s.applied.vsync && s.pending == s.applied);
+        check("a second enter, nothing pending now, closes",
+              press(s, menu::Key::Confirm, o).act == menu::Act::Close);
     }
 
-    // Applied but not saved: the menu stays open. The mode did change -- the
-    // player is looking at the proof -- so there is nothing to roll back; what
-    // there is, is a promise about next launch the game cannot keep, and the only
-    // place to say so is the screen still open.
+    // A save that fails says so, and the menu stays open: the change happened,
+    // and what failed is a promise about the next launch.
     {
-        menu::State s; s.cursor = 0;
-        const menu::Outcome o = menu::mode_applied(s, 0, false);
-        check("a switch that could not be saved stays open and says so",
-              o.act == menu::Act::None && o.notice != nullptr);
+        const menu::Outcome o2 = menu::saved(false);
+        check("a failed save stays open and says so",
+              o2.act == menu::Act::None && o2.notice != nullptr && o2.notice_seconds > 0.0);
     }
 
-    // Refused: nothing changed, so the cursor returns to the mode in use and the
-    // marker and the highlight agree again.
+    // A switch that fails is said, and the rows go back to what is in effect.
     {
-        menu::State s; s.cursor = 2;
-        const menu::Outcome o = menu::mode_refused(s, 1);
-        check("a refused switch returns the cursor to the mode in use",
-              s.cursor == 1 && o.act == menu::Act::None && o.notice != nullptr);
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Right, o);
+        press(s, menu::Key::Confirm, o);
+        const menu::Outcome out = menu::applied(s, false);
+        check("a failed switch says so and asks nothing more",
+              out.act == menu::Act::None && out.notice != nullptr);
+        check("...and the rows show what is in effect again",
+              s.pending == windowed_1080() && s.applied == windowed_1080() && !s.confirming);
     }
+}
+
+// The confirmation, which is the whole defence against a mode the monitor
+// cannot show: nothing about such a mode is saved until somebody who can see it
+// says to keep it, and doing nothing at all goes back.
+void test_menu_confirmation() {
+    const ScreenOptions o = desk();
+    auto switched = [&]() {
+        menu::State s;
+        menu::open(s, windowed_1080());
+        press(s, menu::Key::Right, o);  // borderless
+        press(s, menu::Key::Confirm, o);
+        menu::applied(s, true);
+        return s;
+    };
+
+    {
+        menu::State s = switched();
+        check("a new mode waits to be kept, unsaved",
+              s.confirming && s.applied.window == WindowMode::Borderless &&
+                  s.confirm_left == menu::CONFIRM_SECONDS);
+        // Every other key is ignored while the question is on screen.
+        press(s, menu::Key::Next, o);
+        press(s, menu::Key::Right, o);
+        check("while waiting, moving and changing do nothing",
+              s.cursor == 0 && s.pending.window == WindowMode::Borderless);
+        const menu::Outcome keep = press(s, menu::Key::Confirm, o);
+        check("enter keeps it, and only then is it saved",
+              keep.act == menu::Act::Save && keep.settings.window == WindowMode::Borderless &&
+                  !s.confirming);
+        check("a kept mode does not revert later", menu::tick(s, 60.0).act == menu::Act::None &&
+                                                       s.applied.window == WindowMode::Borderless);
+    }
+
+    {
+        menu::State s = switched();
+        const menu::Outcome back = press(s, menu::Key::Back, o);
+        check("ESC while waiting goes back rather than leaving the menu",
+              back.act == menu::Act::Apply && back.settings == windowed_1080());
+        const menu::Outcome done = menu::applied(s, true);
+        check("a revert is not itself asked to be confirmed, and says it happened",
+              !s.confirming && done.act == menu::Act::None && done.notice != nullptr);
+        check("...and the menu shows the old mode in effect again",
+              s.applied == windowed_1080() && s.pending == windowed_1080());
+    }
+
+    {
+        menu::State s = switched();
+        check("the countdown does nothing before it runs out",
+              menu::tick(s, menu::CONFIRM_SECONDS - 0.1).act == menu::Act::None && s.confirming);
+        const menu::Outcome out = menu::tick(s, 0.2);
+        check("doing nothing goes back when it runs out",
+              out.act == menu::Act::Apply && out.settings == windowed_1080());
+        check("while the revert is being carried out, the clock asks nothing twice",
+              menu::tick(s, 1.0).act == menu::Act::None);
+        check("...and keys cannot keep a mode already being undone",
+              press(s, menu::Key::Confirm, o).act == menu::Act::None);
+        menu::applied(s, true);
+        check("the timed revert lands on the old mode", s.applied == windowed_1080());
+    }
+
+    {
+        menu::State s = switched();
+        press(s, menu::Key::Back, o);
+        const menu::Outcome out = menu::applied(s, false);
+        check("a revert that fails says so, and the new mode stays unsaved",
+              out.notice != nullptr && out.act == menu::Act::None && !s.confirming &&
+                  s.applied.window == WindowMode::Borderless);
+    }
+
+    {
+        // A size change in the same mode is confirmed too; VSync is not.
+        DisplaySettings a = windowed_1080();
+        DisplaySettings b = a;
+        b.size = DisplayMode{1280, 720};
+        check("a resolution change needs keeping", menu::needs_confirmation(a, b));
+        b = a;
+        b.vsync = false;
+        b.renderer = RendererChoice::Gl;
+        check("VSync and the renderer do not", !menu::needs_confirmation(a, b));
+    }
+}
+
+// Held keys. The one that matters is Enter: a held Enter would apply a mode and,
+// on its next repeat, keep it -- before the player has seen it.
+void test_menu_repeat() {
+    const ScreenOptions o = desk();
+    check("navigation repeats",
+          menu::accepts_repeat(menu::Key::Next) && menu::accepts_repeat(menu::Key::Prev) &&
+              menu::accepts_repeat(menu::Key::Right) && menu::accepts_repeat(menu::Key::Left));
+    check("enter and ESC do not",
+          !menu::accepts_repeat(menu::Key::Confirm) && !menu::accepts_repeat(menu::Key::Back));
+
+    menu::State s;
+    menu::open(s, windowed_1080());
+    menu::key(s, menu::Key::Next, true, o);
+    menu::key(s, menu::Key::Right, true, o);
+    check("a held arrow still moves and changes",
+          s.cursor == 1 && s.pending.size == DisplayMode{2560, 1080});
+    check("a held enter does not apply",
+          menu::key(s, menu::Key::Confirm, true, o).act == menu::Act::None);
+    check("a held ESC does not close",
+          menu::key(s, menu::Key::Back, true, o).act == menu::Act::None);
+
+    press(s, menu::Key::Confirm, o);
+    menu::applied(s, true);
+    check("a held enter does not keep a new mode",
+          menu::key(s, menu::Key::Confirm, true, o).act == menu::Act::None && s.confirming);
+}
+
+// What the screen says. Each string is a claim about the state, so each is held
+// to the state here.
+void test_menu_view() {
+    const ScreenOptions o = desk();
+    menu::State s;
+    menu::open(s, windowed_1080());
+    menu::View v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("six rows, in order", v.rows.size() == 6 && v.rows[0].label == "DISPLAY" &&
+                                    v.rows[1].label == "RESOLUTION" && v.rows[2].label == "VSYNC" &&
+                                    v.rows[3].label == "RENDERER" && v.rows[4].label == "APPLY" &&
+                                    v.rows[5].label == "QUIT");
+    if (v.rows.size() != 6) return;
+    check("the resolution says how many cells it shows at the scene's scale",
+          v.rows[1].value == "1920X1080" && v.rows[1].note == "192X108 CELLS", v.rows[1].note);
+    check("nothing pending: nothing amber, apply greyed",
+          !v.rows[0].changed && !v.rows[1].changed && !v.rows[4].enabled);
+    check("the cursor's row is the selected one", v.rows[0].selected && !v.rows[1].selected);
+    check("the key help is the footer while nothing waits", !v.confirming && !v.footer.empty());
+
+    s.cursor = static_cast<int>(menu::Row::Resolution);
+    press(s, menu::Key::Right, o);
+    v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("a pending value is marked changed, and apply lights up",
+          v.rows[1].changed && v.rows[4].enabled);
+    check("at the top of a cut-short window list, it says why it stops",
+          v.rows[1].note.find("LARGEST THAT FITS") != std::string::npos, v.rows[1].note);
+
+    s.cursor = static_cast<int>(menu::Row::Renderer);
+    press(s, menu::Key::Right, o);
+    v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("a renderer other than the one drawing says it waits for a restart",
+          v.rows[3].value == "OPENGL" && v.rows[3].note == "ON RESTART");
+    v = menu::view(s, o, RendererChoice::Gl, 10);
+    check("...and says nothing when it is the one drawing", v.rows[3].note.empty());
+
+    menu::open(s, DisplaySettings{WindowMode::Borderless, {2560, 1440}, true, RendererChoice::Sdl});
+    v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("borderless's size is the desktop's and cannot be stepped",
+          !v.rows[1].adjustable && v.rows[1].note.find("DESKTOP") == 0, v.rows[1].note);
+
+    menu::open(s, windowed_1080());
+    press(s, menu::Key::Right, o);
+    press(s, menu::Key::Confirm, o);
+    menu::applied(s, true);
+    v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("while waiting, the footer is the countdown, from ten",
+          v.confirming && v.footer.find("REVERTING IN 10") != std::string::npos, v.footer);
+    menu::tick(s, menu::CONFIRM_SECONDS - 0.3);
+    v = menu::view(s, o, RendererChoice::Sdl, 10);
+    check("the last part-second reads 1, not 0",
+          v.footer.find("REVERTING IN 1") != std::string::npos &&
+              v.footer.find("REVERTING IN 10") == std::string::npos,
+          v.footer);
+
+    // ui::draw_text draws these as gaps, so a notice using one would read wrong.
+    auto drawable = [](const char* t) {
+        return t && std::string(t).find_first_of(",;'?!") == std::string::npos;
+    };
+    menu::State n;
+    menu::open(n, windowed_1080());
+    press(n, menu::Key::Right, o);
+    press(n, menu::Key::Confirm, o);
+    const bool notices_ok = drawable(menu::saved(true).notice) &&
+                            drawable(menu::saved(false).notice) &&
+                            drawable(menu::applied(n, false).notice);
+    check("every notice is made of characters the HUD font has", notices_ok);
 }
 
 }  // namespace
@@ -257,7 +526,11 @@ int main() {
     test_interpolation();
     test_teleport_flag();
     test_menu_navigation();
-    test_menu_selection();
-    test_menu_switch_results();
+    test_menu_values();
+    test_menu_confirm_keys();
+    test_menu_round_trip();
+    test_menu_confirmation();
+    test_menu_repeat();
+    test_menu_view();
     return report();
 }

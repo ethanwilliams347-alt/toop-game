@@ -196,9 +196,7 @@ std::vector<Shipped> shipped_sets() {
         // and so repeats at any width; its art has to be sparse enough not to
         // be caught doing it.
         if (s.set.anchor == backdrop_set::Anchor::Standing && def.scale > 0) {
-            int widest = 0;
-            for (const DisplayMode& m : DISPLAY_MODES)
-                widest = std::max(widest, m.padded_w(def.scale));
+            const int widest = WIDEST_VIEW.padded_w(def.scale);
             const int world_w = def.custom_width > 0 ? def.custom_width : s.set.native_w;
             for (const backdrop_set::Layer& l : s.set.layers) {
                 if (l.width <= 0 || l.plane || l.drift != 0.0f || !l.bands.empty()) continue;

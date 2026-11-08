@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "game/display.h"
+#include "game/settings_menu.h"
 #include "render/canvas.h"
 
 // The screen-space layer of one frame: the reticle, the HUD stack, the hotbar,
@@ -71,16 +72,14 @@ struct Params {
     bool run_over = false;
     bool won = false;
 
-    // The settings screen. `modes`/`available` are arrays of `mode_count`, and
-    // `cursor` may be `mode_count` itself, which is the Quit row -- the same index
-    // menu::quit_index returns, passed rather than recomputed so the drawing and the
-    // state machine cannot disagree about which row is which.
+    // The settings screen: its rows and footer as menu::view describes them, and
+    // a notice under them. What each row says is decided there, where shell_test
+    // checks every claim it makes about the menu's state -- that a value is not
+    // applied yet, that the renderer waits for a restart, how many seconds are
+    // left; where the words land is decided here. Handed over as text so the
+    // drawing and the state machine cannot disagree about which row is which.
     bool settings_open = false;
-    int cursor = 0;
-    int mode_count = 0;
-    int current_mode = -1;
-    const DisplayMode* modes = nullptr;
-    const bool* available = nullptr;
+    menu::View settings;
     std::string notice;  // empty draws nothing
 };
 

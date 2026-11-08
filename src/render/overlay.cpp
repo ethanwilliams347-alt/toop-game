@@ -1,4 +1,5 @@
 #include "render/overlay.h"
+#include <algorithm>
 #include "ui/hotbar.h"
 #include "ui/text.h"
 
@@ -148,56 +149,72 @@ void draw(gfx::Canvas& canvas, const Params& p) {
     if (p.settings_open) {
         const int scale = p.ui_scale;
         const int line_h = (ui::GLYPH_HEIGHT + 3) * scale;
-        // The Quit row's index. Passed in as `mode_count` rather than derived
-        // from anything local, because menu::quit_index is the one definition of
-        // it and a second one here is how a highlight lands on the wrong row.
-        const int quit_row = p.mode_count;
+        const int char_w = (ui::GLYPH_WIDTH + 1) * scale;
+        const menu::View& v = p.settings;
 
         canvas.set_blend(gfx::Blend::Alpha);
         canvas.set_draw_color(0, 0, 0, 170);
         const gfx::Rect wash{0, 0, p.window_w, p.window_h};
         canvas.fill_rect(wash);
 
-        const int menu_x = p.window_w / 2 - 30 * ui::GLYPH_WIDTH * scale / 2;
-        int y = p.window_h / 2 - (quit_row + 4) * line_h / 2;
+        // Two columns. Every value starts the same distance after the longest
+        // label, so a changed value can be read down the column and the arrows
+        // of the selected one never push it sideways.
+        size_t label_chars = 0;
+        for (const menu::RowView& r : v.rows) label_chars = std::max(label_chars, r.label.size());
+        const int value_dx = static_cast<int>(label_chars + 4) * char_w;
+
+        // Centred on the two columns, at the width of the longest value any row
+        // can hold (BORDERLESS, FULLSCREEN), with the notes and the footer hanging
+        // to the right of where that puts the block. Not centred on the widest
+        // line drawn: a note comes and goes as a value is stepped, and a menu that
+        // re-centres on every key press slides sideways under the reader's eye.
+        constexpr int VALUE_COLUMN_CHARS = 10;
+        const int menu_x = p.window_w / 2 - (value_dx + VALUE_COLUMN_CHARS * char_w) / 2;
+        const int line_count = static_cast<int>(v.rows.size()) + 5;
+        int y = p.window_h / 2 - line_count * line_h / 2;
 
         ui::draw_text(canvas, menu_x, y, scale, "SETTINGS", 0xFFFFFFFF);
         y += line_h * 2;
 
-        for (int i = 0; i <= quit_row; ++i) {
-            const bool selected = (i == p.cursor);
-            std::string label;
-            uint32_t colour;
+        for (const menu::RowView& r : v.rows) {
+            // Greyed while there is nothing it would do (Apply with nothing
+            // pending), but still selectable: Enter there closes the menu.
+            uint32_t colour = r.selected ? 0xFFFFFFFF : 0xFFA0A0A0;
+            if (!r.enabled) colour = r.selected ? 0xFF909090 : 0xFF606060;
+            // The cursor is drawn beside the label as well as in its colour,
+            // because a colour alone is the cue that does not survive a bright
+            // world behind the wash.
+            if (r.selected) ui::draw_text(canvas, menu_x - 2 * char_w, y, scale, ">", colour);
+            ui::draw_text(canvas, menu_x, y, scale, r.label, colour);
 
-            if (i == quit_row) {
-                label = "QUIT";
-                colour = selected ? 0xFFFFFFFF : 0xFFA0A0A0;
-            } else {
-                const DisplayMode& m = p.modes[i];
-                label = std::to_string(m.window_w) + "X" + std::to_string(m.window_h) +
-                        "  " + std::to_string(m.viewport_w(p.view_scale)) + "X" +
-                        std::to_string(m.viewport_h(p.view_scale)) + " CELLS";
-                if (i == p.current_mode) label += "  *";
-                // Unavailable modes are shown greyed rather than hidden. A menu
-                // that silently omits a mode on one machine and lists it on
-                // another is a menu a player cannot learn.
-                if (!p.available[i]) {
-                    label += "  (TOO LARGE)";
-                    colour = selected ? 0xFF806060 : 0xFF605050;
-                } else {
-                    colour = selected ? 0xFFFFFFFF : 0xFFA0A0A0;
+            if (!r.value.empty()) {
+                // A value not applied yet is amber, so the rows say which of them
+                // Enter is about to act on. One that left and right cannot move
+                // (borderless's size, which is the desktop's) is dimmed.
+                uint32_t vc = colour;
+                if (r.changed)
+                    vc = 0xFFFFD060;
+                else if (!r.adjustable)
+                    vc = 0xFF808080;
+                const int vx = menu_x + value_dx;
+                const int vw = ui::text_width(r.value, scale);
+                if (r.selected && r.adjustable) {
+                    ui::draw_text(canvas, vx - 2 * char_w, y, scale, "<", vc);
+                    ui::draw_text(canvas, vx + vw + char_w, y, scale, ">", vc);
                 }
+                ui::draw_text(canvas, vx, y, scale, r.value, vc);
+                if (!r.note.empty())
+                    ui::draw_text(canvas, vx + vw + 3 * char_w, y, scale, r.note, 0xFF808080);
             }
-
-            if (selected) {
-                ui::draw_text(canvas, menu_x - 2 * ui::GLYPH_WIDTH * scale, y, scale, ">", colour);
-            }
-            ui::draw_text(canvas, menu_x, y, scale, label, colour);
             y += line_h;
         }
 
+        // The key help, or the question a new mode is waiting on -- the latter in
+        // the notice colour, because it is the one line on the screen that will
+        // act on its own if it is not read.
         y += line_h;
-        ui::draw_text(canvas, menu_x, y, scale, "ARROWS  ENTER  ESC RESUMES", 0xFF808080);
+        ui::draw_text(canvas, menu_x, y, scale, v.footer, v.confirming ? 0xFFFFC080 : 0xFF808080);
         // The notice is drawn when there is one; its timer is the caller's, and an
         // expired notice arrives here as an empty string.
         if (!p.notice.empty()) {
