@@ -1562,6 +1562,11 @@ private:
     // The hook in step_tipping, immediately before solve_contacts.
     void apply_queued_impulses();
 
+    // The weight of liquid body `b` drags along with it (LIQUID_ADDED_MASS of
+    // what it displaces), reckoned from its waterline the way apply_body_forces
+    // reckons it: what a push on a floating body has to move besides the body.
+    int64_t carried_liquid(const Body& b) const;
+
     // queue_impulse's wake: makes the piece at rest containing `idx` a body if the
     // push (jx, jy) is enough to, by the rule queue_impulse states.
     bool wake_for_push(int idx, int64_t jx, int64_t jy);

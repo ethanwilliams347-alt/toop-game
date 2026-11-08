@@ -156,6 +156,41 @@ bool Grid::wake_for_push(int idx, int64_t jx, int64_t jy) {
     return true;
 }
 
+int64_t Grid::carried_liquid(const Body& b) const {
+    // apply_body_forces marks a body touching when it is in liquid (or against
+    // something); one touching nothing is in the air and carries none.
+    if (!b.touching) return 0;
+    int water_row = INT32_MAX;
+    int64_t water_fill = 0;
+    int liquid_weight = 0;
+    for (const int idx : b.at) {
+        const int y = idx / width;
+        const int x = idx - y * width;
+        for (int side = -1; side <= 1; side += 2) {
+            if (!is_within_bounds(x + side, y)) continue;
+            const Element& e = cells[static_cast<size_t>(idx + side)];
+            if (!is_liquid(e.type)) continue;  // a liquid cell is never the body's own
+            const int64_t fill = static_cast<int64_t>(e.mass) * ONE / LIQUID_FULL;
+            if (y < water_row || (y == water_row && fill > water_fill)) {
+                water_row = y;
+                water_fill = fill;
+            }
+            liquid_weight = std::max<int>(liquid_weight, material_of(e.type).weight);
+        }
+    }
+    if (water_row == INT32_MAX) return 0;
+    // Whole cells against the waterline, without the continuous offset
+    // apply_body_forces refines it by: a push is judged against a step's motion,
+    // and a cell's rounding is far inside how exactly a push is ever aimed.
+    const int64_t waterline = static_cast<int64_t>(water_row + 1) * ONE - water_fill;
+    int64_t under = 0;
+    for (const int idx : b.at) {
+        const int64_t y = idx / width;
+        under += std::clamp<int64_t>((y + 1) * ONE - waterline, 0, ONE);
+    }
+    return liquid_weight * under / ONE * LIQUID_ADDED_MASS / ONE;
+}
+
 void Grid::apply_queued_impulses() {
     // Only last step's pushes. Anything older was queued before a step on which
     // nothing moved, and the body it was meant for is not this one.
@@ -164,6 +199,8 @@ void Grid::apply_queued_impulses() {
         return;
     }
 
+    int heavy_for = -1;  // the body `heavy` was last worked out for
+    int64_t heavy = 1;
     for (const QueuedImpulse& q : impulses) {
         // Still the body it was pushed as? A cell dug, burnt or crumbled since,
         // or a body that has stopped and handed its cells back, is not there to
@@ -174,9 +211,21 @@ void Grid::apply_queued_impulses() {
         if (i < 0) continue;
         Body& b = tip_bodies[static_cast<size_t>(i)];
 
-        // Per unit of the body's mass and per step: the solver's units, the same
-        // ones its `apply` adds a contact's impulse in.
-        const int64_t per = b.mass * fx::STEPS_PER_SECOND;
+        // How heavy it is to a push: its own mass, and in liquid the liquid it
+        // drags along with it as well (LIQUID_ADDED_MASS) -- the same inertia
+        // apply_body_forces divides its buoyancy by. Over its bare mass, the
+        // player's weight on a floating raft came to more than the lift that
+        // holds the raft up, because the lift is divided by the heavier number,
+        // and every raft the player stood on sank. Pushes come in runs on one
+        // body, so it is worked out once a run.
+        if (heavy_for != i) {
+            heavy_for = i;
+            heavy = std::max<int64_t>(1, b.mass + carried_liquid(b));
+        }
+
+        // Per unit of that and per step: the solver's units, the same ones its
+        // `apply` adds a contact's impulse in.
+        const int64_t per = heavy * fx::STEPS_PER_SECOND;
         const int64_t dvx = q.jx / per;
         const int64_t dvy = q.jy / per;
         const int y = q.cell / width;
