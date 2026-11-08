@@ -6,6 +6,7 @@
 // dig itself rather than the settling that follows it -- except the one test
 // where the settling is the point.
 
+#include "physics/arrow.h"
 #include "physics/tool.h"
 #include "test_util.h"
 #include <string>
@@ -299,6 +300,44 @@ int main() {
         const bool hit = dig_once(g, 30, 30, 30, 30);
         check("a zero-length aim is a no-op",
               !hit && count_of(g, ElementType::Wall) == before);
+    }
+
+    // --- an arrow stuck in a plank goes where the plank goes ---
+    // The bow's other half, the arrow, against the loose bodies: shot into a
+    // plank lying across two posts, then the posts taken away. The plank falls as
+    // a body, and the arrow, rather than being left in the air and dropping out
+    // on its own, falls with it, still in it.
+    {
+        Grid g(160, 120);
+        fill(g, 0, 110, 159, 119, ElementType::Wall);
+        fill(g, 70, 60, 72, 109, ElementType::Wall);
+        fill(g, 96, 60, 98, 109, ElementType::Wall);
+        fill(g, 66, 57, 101, 59, ElementType::Wood);
+        Quiver quiver;
+        quiver.update_bow(true, 20, 58, 100, 58);
+        for (int i = 0; i < 30; ++i) {
+            g.update();
+            quiver.update_arrows(g, nullptr, 0);
+        }
+        const Arrow* stuck = nullptr;
+        for (const Arrow& a : quiver.arrows())
+            if (a.live && a.stuck) stuck = &a;
+        check("the arrow sticks in the plank", stuck && g.get_element(stuck->x, stuck->y).type ==
+                                                         ElementType::Wood);
+        const int y0 = stuck ? stuck->y : 0;
+        fill(g, 70, 60, 72, 109, ElementType::Empty);
+        fill(g, 96, 60, 98, 109, ElementType::Empty);
+        bool held = true;
+        for (int i = 0; i < 40; ++i) {
+            g.update();
+            quiver.update_arrows(g, nullptr, 0);
+            held = held && stuck && stuck->live && stuck->stuck;
+        }
+        check("taken off its posts the plank falls, and the arrow with it",
+              stuck && stuck->y > y0 + 20,
+              "arrow fell " + std::to_string(stuck ? stuck->y - y0 : 0) + " rows");
+        check("and the arrow stays in it the whole way",
+              held && stuck && g.get_element(stuck->x, stuck->y).type == ElementType::Wood);
     }
 
     return report();

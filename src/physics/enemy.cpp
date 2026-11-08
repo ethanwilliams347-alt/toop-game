@@ -478,6 +478,9 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     prev_rem_x = body.rem_x;
     prev_rem_y = body.rem_y;
     did_teleport = false;
+    strike = BoxStrike{};
+    crushed = 0;
+    crushed_speed = 0;
     if (flinch > 0) --flinch;
     breath = (breath + 1) % kind->rig.breathe_steps;
 
@@ -541,6 +544,12 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
     // A species that wades never collides with powder (overlaps_solid), so it is
     // only ever stuck in something static; the powder in its box is shoved out
     // of it here, every step, before anything else looks at the box.
+    //
+    // A loose body in the box is not a burial, though, if it moved there: the
+    // body pushes the box out along its motion first (meet_bodies), and only a
+    // body crushed against something is left here, to lift out of it or stay.
+    meet_bodies(grid);
+    if (!alive) return false;
     if (kind->wades) shove_powder(grid);
     if (overlaps_solid(grid, body.x, body.y)) {
         const auto lift = [&]() {
@@ -561,8 +570,14 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
         body.vel_y = 0;
         body.rem_x = 0;
         body.rem_y = 0;
+        body.push_x = 0;
         body.on_ground = overlaps_solid(grid, body.x, body.y + 1);
     } else {
+        // Standing on a body that has dropped out from under the feet since last
+        // step: follow it down before anything asks whether this one is on the
+        // ground (BoxBody::stick).
+        body.stick(grid, rule());
+
         // --- deciding where to go ---
         //
         // Box centre to box centre, per axis, in whole cells.
@@ -652,9 +667,17 @@ bool Enemy::update(Grid& grid, int target_x, int target_y, bool target_alive) {
             body.vel_x = walk_speed;
         }
 
+        // What it stands on moving under it, and the water it is in: the
+        // player's, from box_body.h, with this species' density.
+        const bool was_on_ground = body.on_ground;
+        const Immersion wet = body.immersion(grid, rule());
+        body.ride(grid, rule());
+        body.wade(wet, GRAVITY, DENSITY);
+
         // The box's motion: the player's, from box_body.h, with this species'
         // rule.
-        body.integrate(grid, rule(), GRAVITY, MAX_FALL_SPEED);
+        const fx::v impact_speed = body.integrate(grid, rule(), GRAVITY, MAX_FALL_SPEED);
+        press_bodies(grid, was_on_ground, impact_speed);
     }
     advance_gait();
 
@@ -1825,4 +1848,98 @@ void Enemy::slam(Grid& grid) {
             grid.paint(cx, cy, ElementType::Sand, e.color);
         }
     }
+}
+
+// --- loose bodies ------------------------------------------------------------
+
+void Enemy::knock(int64_t jx, int64_t jy) {
+    const int64_t m = mass();
+    if (!alive || m <= 0) return;
+    // A body down to its last few pixels would be flung at thousands of cells a
+    // second by an arrow's momentum over a mass of next to nothing; no faster
+    // than a fall, which is the fastest anything in the box world goes.
+    const int64_t top = MAX_FALL_SPEED;
+    body.push_x += static_cast<fx::v>(std::clamp<int64_t>(jx / m, -top, top));
+    body.vel_y += static_cast<fx::v>(std::clamp<int64_t>(jy / m, -top, top));
+}
+
+void Enemy::blow(int target_x, fx::v& vx, fx::v& vy) const {
+    vx = 0;
+    vy = 0;
+    if (kind->knock_speed == 0 && kind->knock_lift == 0) return;
+    // Which way. A swipe shoves away from the body that swiped, whichever side
+    // of it the target is on -- the claws hang either side. A slam, club, hand
+    // or lure, comes down in front of the body and only lands on a target in
+    // front of it (target_in_reach), so it throws forward: out over the far rim
+    // of the crater. Away from the crater's centre instead threw a player
+    // standing between the troll and the crater back through the troll's own
+    // legs and into the debris the slam had just thrown that way.
+    int side = face_left ? -1 : 1;
+    if (kind->attack == Attack::Swipe) {
+        const int at = target_x + Player::WIDTH / 2;
+        if (at != center_x()) side = at > center_x() ? 1 : -1;
+    }
+    vx = side * kind->knock_speed;
+    vy = -kind->knock_lift;
+}
+
+void Enemy::meet_bodies(Grid& grid) {
+    if (grid.tipping_count() == 0) return;
+
+    // Crushed where a fast body is. Every surviving pixel against the cell it
+    // covers, the burn rule's walk; a pixel inside a loose body that is moving
+    // against this one faster than IMPACT_SAFE_SPEED is gone -- crumble() writes
+    // no grain into a cell a body holds, so it is simply crushed out. A block
+    // dropped on a troll's head takes the head; one sliding into a ghoul's arm
+    // takes the arm, and the severing fill the rest of it. Only when a body is
+    // near enough to be in the frame at all, which is nearly never.
+    const int pad = kind->rig.pad;
+    const int left = body.x - kind->offset_x();
+    const int top = body.y - kind->offset_y();
+    if (grid.body_near(left - pad, top - pad, left + kind->frame_w() + pad,
+                       top + kind->frame_h() + pad)) {
+        const fx::v own_x = body.vel_x + body.push_x + body.carry_x;
+        const int frame_w = kind->frame_w();
+        for (int i = 0; i < frame_w * kind->frame_h(); ++i) {
+            if (!pixel(i)) continue;
+            int wx = 0, wy = 0;
+            world_of(i % frame_w, i / frame_w, wx, wy);
+            const int b = grid.body_at(wx, wy);
+            if (b < 0) continue;
+            const Grid::BodyMotion m = grid.body_velocity_at(b, wx, wy);
+            // The larger of the two axes rather than the length: no root, and a
+            // blow is judged by how it comes in, which is nearly always along one.
+            const fx::v rel = std::max(std::abs(m.vx - own_x), std::abs(m.vy - body.vel_y));
+            if (rel <= IMPACT_SAFE_SPEED) continue;
+            crumble(grid, i);
+            ++crushed;
+            if (rel > crushed_speed) {
+                crushed_speed = rel;
+                crushed_at_x = wx;
+                crushed_at_y = wy;
+            }
+        }
+        if (crushed > 0) {
+            flinch = kind->rig.flinch_steps;
+            settle_after_loss(grid);
+            if (!alive) return;
+        }
+    }
+
+    // The box: pushed out of a body that moved into it, as the player's is, and
+    // pushing back with what it weighs.
+    strike = body.shove(grid, rule(), body.push_x + body.carry_x);
+    if (strike.dvx != 0 || strike.dvy != 0)
+        grid.queue_impulse(strike.x, strike.y, -mass() * strike.dvx, -mass() * strike.dvy);
+}
+
+void Enemy::press_bodies(Grid& grid, bool was_on_ground, fx::v impact_speed) {
+    if (grid.tipping_count() == 0 || !body.on_ground) return;
+    // Its weight on what it stands on, and the blow of landing on it: the
+    // player's rule (Player::press_bodies), so a troll on a raft sinks it.
+    const BoxFooting f = body.footing(grid, rule(), body.y);
+    if (f.body < 0) return;
+    int64_t jy = mass() * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+    if (!was_on_ground && impact_speed > 0) jy += mass() * impact_speed;
+    grid.queue_impulse(f.x, f.y, 0, jy);
 }

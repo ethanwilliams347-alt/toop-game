@@ -144,6 +144,71 @@ bool Player::resolve_overlap(const Grid& grid) {
     return true;
 }
 
+int Player::impact_damage(const BoxStrike& s) const {
+    if (!s.hit || s.speed <= IMPACT_SAFE_SPEED || s.mass <= 0) return 0;
+    // Whole cells a second over the threshold, as fall damage counts them, times
+    // the body's share of the two masses: the share of the blow that is the
+    // body's rather than the player's own give.
+    const int64_t over = fx::trunc(s.speed - IMPACT_SAFE_SPEED);
+    return static_cast<int>(over * s.mass / (s.mass + WEIGHT) / IMPACT_DAMAGE_DIVISOR);
+}
+
+void Player::press_bodies(const Grid& grid, const PlayerInput& input, bool was_on_ground,
+                          fx::v impact_speed) {
+    // A weight times the bodies' gravity, for one step: what resting on a body
+    // presses it with (Grid::BODY_WEIGHT_ACCEL says why it is theirs).
+    const int64_t per_step_weight = int64_t{fx::per_step(Grid::BODY_WEIGHT_ACCEL)};
+
+    // Standing on one: its weight, every step, at the cell under its middle --
+    // so a raft rides lower with the player on it and tips toward the end it
+    // stands at. Landing on one: the fall's momentum as well, so a raft jumped
+    // onto dips. Neither when nothing is moving: a piece at rest is not woken by
+    // being stood on, which is Grid::queue_impulse's rule anyway, and skipping
+    // the footing read is what keeps this free on still ground.
+    if (body.on_ground && grid.tipping_count() > 0) {
+        const BoxFooting f = body.footing(grid, BOX, body.y);
+        if (f.body >= 0) {
+            int64_t jy = WEIGHT * per_step_weight;
+            if (!was_on_ground && impact_speed > 0) jy += int64_t{WEIGHT} * impact_speed;
+            add_push(f.x, f.y, 0, jy);
+        }
+    }
+
+    // A jump off one kicks it down: the jump's momentum is the body's, taken
+    // from what it stood on. body.stood is what was underfoot before the move.
+    if (did_flap && was_on_ground && body.stood.body >= 0)
+        add_push(body.stood.x, body.stood.y, 0, int64_t{WEIGHT} * JUMP_SPEED);
+
+    // Walking into one. Only with the feet on the ground -- a push needs
+    // something to push from -- and only the way the walk key says, so a knock
+    // that slams the body into a crate does not then lean on it.
+    const int side = body.blocked;
+    if (side == 0 || !body.on_ground || stagger > 0) return;
+    if (!(side > 0 ? input.right && !input.left : input.left && !input.right)) return;
+
+    // What stops it: the structure in the column just past the leading edge,
+    // within the body's height. The push goes in at the middle of that, which
+    // for a crate shorter than the player is the crate's middle -- it slides --
+    // and for a post taller than it is the player's chest -- it may tip.
+    const int cx = side > 0 ? body.x + WIDTH : body.x - 1;
+    int rows[HEIGHT];
+    int n = 0;
+    for (int cy = body.y; cy < body.y + HEIGHT; ++cy)
+        if (is_structural(grid.get_element(cx, cy).type)) rows[n++] = cy;
+    if (n == 0) return;
+    const int cy = rows[n / 2];
+
+    // A motor, not a constant force: full strength from a standstill, nothing at
+    // walking pace, so a crate the player is pushing never gets ahead of it.
+    fx::v going = 0;
+    const int b = grid.body_at(cx, cy);
+    if (b >= 0) going = side * grid.body_velocity_at(b, cx, cy).vx;
+    if (going >= MOVE_SPEED) return;
+    const int64_t full = int64_t{PUSH_STRENGTH} * per_step_weight;
+    const int64_t j = going <= 0 ? full : full * (MOVE_SPEED - going) / MOVE_SPEED;
+    add_push(cx, cy, side * j, 0);
+}
+
 void Player::update(const Grid& grid, const PlayerInput& input) {
     // Cleared before the early return below, not after it. did_flap is a one-step
     // event and the overlap path returns without ever reaching the flap code, so
@@ -152,6 +217,9 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     did_flap = false;
     did_teleport = false;
     hurt_this_step = 0;
+    push_n = 0;
+    strike = BoxStrike{};
+    immersed = 0;
 
     // The burn rule, deliberately above the overlap early return rather than below
     // it. A body buried in burning terrain is exactly the case where being on fire
@@ -171,9 +239,40 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
         burn_timer = 0;
     }
 
+    // A loose body that moved into the box this step -- the grid moved it without
+    // knowing the body was there -- pushes it out along its motion and throws it
+    // (BoxBody::shove), and hurts it if it came fast. Ahead of the dig-out
+    // search, which would otherwise take the body out of a raft rising under it
+    // as a burial: a jump, drawn as one (teleported()), a cell up every few
+    // steps. Crushed against something, it is left for the search after all.
+    //
+    // What the body gained, the body that shoved it lost: pushed back on, at the
+    // cell that struck, so a raft nudging the player is slowed by its weight and
+    // a slab is not.
+    strike = body.shove(grid, BOX, body.push_x + body.carry_x);
+    if (strike.hit) {
+        hurt(impact_damage(strike));
+        if (strike.dvx != 0 || strike.dvy != 0)
+            add_push(strike.x, strike.y, -int64_t{WEIGHT} * strike.dvx,
+                     -int64_t{WEIGHT} * strike.dvy);
+    }
+
     // Running the normal movement code while inside terrain would just find every
     // direction blocked, so digging out replaces this step entirely.
     if (resolve_overlap(grid)) return;
+
+    // A blow's throw, now that the body is free to take it (see knock()).
+    if (knock_x != 0 || knock_y != 0) {
+        body.push_x += knock_x;
+        body.vel_y += knock_y;
+        knock_x = 0;
+        knock_y = 0;
+    }
+
+    // Standing on a body that has dropped a cell out from under the feet since
+    // last step: follow it down, before anything asks whether the body is on the
+    // ground (BoxBody::stick).
+    body.stick(grid, BOX);
 
     // Where the feet were at the start of the step, which is the only way to
     // recognise a landing. See the fall-damage block at the bottom of this function
@@ -184,9 +283,21 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // No acceleration curve: horizontal speed is a direct function of input.
     // Barebones on purpose -- acceleration, friction and air control are feel work,
     // and feel work is worth doing once there is something to feel.
+    //
+    // Except just after a knock: the legs give the throw a moment before they
+    // fight it (KNOCK_STAGGER_STEPS).
     body.vel_x = 0;
-    if (input.left) body.vel_x -= MOVE_SPEED;
-    if (input.right) body.vel_x += MOVE_SPEED;
+    if (stagger > 0) {
+        --stagger;
+    } else {
+        if (input.left) body.vel_x -= MOVE_SPEED;
+        if (input.right) body.vel_x += MOVE_SPEED;
+    }
+
+    // How deep in water or oil the body is, for the stroke below and the drag
+    // after it. Zero out of water, which leaves both exactly as they were.
+    const Immersion wet = body.immersion(grid, BOX);
+    immersed = wet.share;
 
     // Flapping, not jumping: the key beats wings on a fixed interval whether the
     // body is grounded or not.
@@ -202,17 +313,29 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
     // Applying a fraction of the impulse every step would produce the same altitude
     // curve and none of the rhythm, and the rhythm is the only thing that tells the
     // player, at this scale, that the bird is working.
+    //
+    // Underwater the air beat is a stroke (SWIM_IMPULSE, SWIM_MAX_CLIMB), by the
+    // share of the body that is under: wings coming clear of the surface get
+    // their full beat back, and that is how a bird climbs out of a pool. Out of
+    // water the share is zero and these are the flight constants exactly.
     if (flap_timer > 0) --flap_timer;
     if (input.jump && flap_timer == 0) {
         if (body.on_ground) {
             body.vel_y = -JUMP_SPEED;
         } else {
-            body.vel_y -= FLAP_IMPULSE;
-            if (body.vel_y < -FLAP_MAX_CLIMB) body.vel_y = -FLAP_MAX_CLIMB;
+            const fx::v beat = FLAP_IMPULSE + fx::mul(SWIM_IMPULSE - FLAP_IMPULSE, wet.share);
+            const fx::v climb = FLAP_MAX_CLIMB + fx::mul(SWIM_MAX_CLIMB - FLAP_MAX_CLIMB, wet.share);
+            body.vel_y -= beat;
+            if (body.vel_y < -climb) body.vel_y = -climb;
         }
         flap_timer = FLAP_INTERVAL_STEPS;
         did_flap = true;
     }
+
+    // What it stands on moving under it (BoxBody::ride), and the water it is in
+    // (BoxBody::wade): both nothing on still ground in air.
+    body.ride(grid, BOX);
+    body.wade(wet, GRAVITY, DENSITY);
 
     // The box's motion, shared with every enemy (box_body.h). What comes back is
     // the speed the body was travelling at when it arrived, read before the move
@@ -245,4 +368,7 @@ void Player::update(const Grid& grid, const PlayerInput& input) {
         }
         has_landed = true;
     }
+
+    // And what the body did to loose bodies this step, for Run to queue.
+    press_bodies(grid, input, was_on_ground, impact_speed);
 }

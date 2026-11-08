@@ -122,6 +122,8 @@ struct Coverage {
     int digs = 0;
     int falling_steps = 0;
     int most_enemies = 0;
+    bool spawned = false;
+    int struck = 0;
 };
 
 Coverage run_pass(Run& run) {
@@ -131,12 +133,16 @@ Coverage run_pass(Run& run) {
     allocations.store(0);
     counting.store(true);
     for (int i = 0; i < STEPS; ++i) {
+        const int alive_before = run.enemies_alive();
         run.step(input_for(i));
         // Read inside the counted window on purpose: these are the accessors a
         // frame calls, and they must not allocate either.
+        if (input_for(i).command.kind == Command::Kind::SpawnEnemy)
+            c.spawned = c.spawned || run.enemies_alive() > alive_before;
         c.loosed += run.events().count(Event::Kind::ArrowLoosed);
         c.hits += run.events().count(Event::Kind::ArrowHit);
         c.digs += run.events().count(Event::Kind::Dug);
+        c.struck += run.events().count(Event::Kind::Struck);
         if (run.grid.has_pending_support_checks()) ++c.falling_steps;
         if (run.enemies_alive() > c.most_enemies) c.most_enemies = run.enemies_alive();
     }
@@ -168,8 +174,14 @@ int main() {
     check("...digs", first.digs > 0, std::to_string(first.digs));
     check("...brings a structure down", first.falling_steps > 0,
           std::to_string(first.falling_steps) + " steps with a piece in the air");
-    check("...and spawns a body mid-run", first.most_enemies >= 3,
+    // Asked of the spawn step itself. It was asked as "three alive at once",
+    // which stopped holding when the falling slab began crushing the ghoul under
+    // it (Enemy::meet_bodies) before the troll arrived -- a fourth system this
+    // world now runs, checked on the next line.
+    check("...spawns a body mid-run", first.spawned,
           std::to_string(first.most_enemies) + " enemies at most");
+    check("...and drops a loose body on an enemy", first.struck > 0,
+          std::to_string(first.struck) + " struck");
     check("both passes are the same world, so the second needs nothing new",
           second.loosed == first.loosed && second.digs == first.digs &&
               second.falling_steps == first.falling_steps);

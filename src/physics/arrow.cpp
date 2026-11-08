@@ -82,11 +82,19 @@ void Quiver::step_one(Arrow& a, Grid& grid, Enemy* enemies, int enemy_count, int
         // Bodies before the world, so a body standing in front of a wall is hit
         // rather than shot through. The gaps in a body are gaps -- between an arm
         // and the ribs, between the legs -- and an arrow passes through them.
+        // What it hands on, wherever it stops: all of its momentum, since it
+        // stops there (WEIGHT).
+        const int64_t jx = int64_t{WEIGHT} * a.vel_x;
+        const int64_t jy = int64_t{WEIGHT} * a.vel_y;
+
         for (int e = 0; e < enemy_count; ++e) {
             if (enemies[e].pixel_at(cx, cy) < 0) continue;
             const int taken = enemies[e].shatter(grid, cx, cy, BITE_RADIUS);
             hit_pixels += taken;
             impacts[static_cast<size_t>(impacts_n++)] = ArrowImpact{cx, cy, e, taken};
+            // Knocked back by what is left of it -- after the bite, so a shot
+            // that took most of a body throws what remains the further.
+            enemies[e].knock(jx, jy);
             // Spent. An arrow that has just turned the thing it was stuck in into
             // sand has nothing left to be stuck in.
             a.live = false;
@@ -101,6 +109,13 @@ void Quiver::step_one(Arrow& a, Grid& grid, Enemy* enemies, int enemy_count, int
             a.stuck = true;
             a.life = STUCK_STEPS;
             impacts[static_cast<size_t>(impacts_n++)] = ArrowImpact{cx, cy, -1, 0};
+            // Into a loose body, or a piece light enough that the blow wakes it
+            // (Grid::queue_impulse): it is pushed, on the next step, at the cell
+            // it was struck. Terrain refuses and the arrow just sticks. Asked
+            // after the push, which is what makes a piece at rest a body.
+            grid.queue_impulse(cx, cy, jx, jy);
+            const int b = grid.body_at(cx, cy);
+            a.in_body = b >= 0 ? grid.body_id(b) : 0;
             return;
         }
         a.x = cx;
@@ -119,10 +134,49 @@ int Quiver::update_arrows(Grid& grid, Enemy* enemies, int enemy_count) {
         a.prev_rem_y = a.rem_y;
 
         if (a.stuck) {
+            // In a loose body: carried with the material it is in, by how that
+            // point of the body moved this step, so it stays in the plank it hit
+            // as the plank tumbles. Once the body has stopped it is terrain again
+            // and the arrow is stuck in that -- and if what it is stuck in comes
+            // loose later, the arrow goes with that too. A body starts from rest,
+            // so on its first step it has not yet moved off the arrow's cell.
+            if (a.in_body == 0 && grid.tipping_count() > 0) {
+                const int b = grid.body_at(a.x, a.y);
+                if (b >= 0) a.in_body = grid.body_id(b);
+            }
+            if (a.in_body != 0) {
+                const int b = grid.body_with_id(a.in_body);
+                if (b < 0) {
+                    a.in_body = 0;
+                } else {
+                    const Grid::BodyMotion m = grid.body_velocity_at(b, a.x, a.y);
+                    a.rem_x += fx::per_step(m.vx);
+                    a.rem_y += fx::per_step(m.vy);
+                    a.x += fx::trunc(a.rem_x);
+                    a.y += fx::trunc(a.rem_y);
+                    a.rem_x = fx::frac(a.rem_x);
+                    a.rem_y = fx::frac(a.rem_y);
+                    // The body's cells are its motion rounded to the lattice, and
+                    // the point can come out a cell beside them -- off the edge of
+                    // a plank one cell thick. The nearest cell of the body, then,
+                    // within a cell, in a fixed order.
+                    if (grid.body_at(a.x, a.y) != b) {
+                        for (int k = 0; k < 8; ++k) {
+                            constexpr int DX[8] = {0, -1, 1, 0, -1, 1, -1, 1};
+                            constexpr int DY[8] = {1, 0, 0, -1, 1, 1, -1, -1};
+                            if (grid.body_at(a.x + DX[k], a.y + DY[k]) != b) continue;
+                            a.x += DX[k];
+                            a.y += DY[k];
+                            break;
+                        }
+                    }
+                }
+            }
             // The wall it was in has gone -- dug, burnt, or fallen away -- so it
             // drops. Velocity is kept while stuck only so the renderer knows which
             // way it points; a freed arrow starts from rest.
             if (!is_solid(grid.get_element(a.x, a.y).type)) {
+                a.in_body = 0;
                 a.stuck = false;
                 a.vel_x = 0;
                 a.vel_y = 0;

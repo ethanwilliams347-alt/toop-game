@@ -638,5 +638,159 @@ int main() {
               r.grid.get_width() == 300 && r.grid.get_height() == 150);
     }
 
+    // =====================================================================
+    // Blows that throw, and the loose bodies, through run.step().
+    // =====================================================================
+
+    // --- a slam throws the player: up, and forward away from the body ---
+    // The player stands just in front of the body, under the blow. How far it
+    // goes and how high, from the step it was hit.
+    struct Throw {
+        int hit_at = -1, knocked = 0, forward = 0, rise = 0, hp = 0;
+    };
+    const auto thrown_by = [](const Species& kind) {
+        const auto run_owner = std::make_unique<Run>(400, 120, 31);
+        Run& run = *run_owner;
+        for (int y = 110; y < 120; ++y)
+            for (int x = 0; x < 400; ++x) run.grid.set_element(x, y, ElementType::Wall);
+        const int body_x = 150;
+        run.player = Player(body_x + kind.width + 4, 110 - Player::HEIGHT);
+        run.player.settle(run.grid);
+        run.spawn_enemy(body_x, 110 - kind.height, kind);
+        Throw t;
+        for (int i = 0; i < 300 && t.hit_at < 0; ++i) {
+            run.step(NOTHING);
+            t.knocked += run.events().count(Event::Kind::Knocked);
+            if (run.player.damage_this_step() > 0) t.hit_at = i;
+        }
+        const int x_hit = run.player.center_x(), y_hit = run.player.cell_y();
+        for (int i = 0; i < 90; ++i) {
+            run.step(NOTHING);
+            t.rise = std::max(t.rise, y_hit - run.player.cell_y());
+        }
+        t.forward = run.player.center_x() - x_hit;
+        t.hp = run.player.health();
+        return t;
+    };
+    {
+        // The fish's cast breaks no ground (crush_radius 0), so nothing is in
+        // the way of the throw.
+        const Throw fish = thrown_by(species::FISH);
+        check("a cast that lands is reported as a throw", fish.hit_at >= 0 && fish.knocked == 1,
+              "knocked " + std::to_string(fish.knocked));
+        check("and throws the player well clear, forward, away from the fish",
+              fish.forward > 15 && fish.rise >= 4,
+              "forward " + std::to_string(fish.forward) + " rise " + std::to_string(fish.rise));
+        check("landing from the throw costs nothing more",
+              fish.hp == Player::MAX_HEALTH - species::FISH.damage, "hp=" + std::to_string(fish.hp));
+
+        // The troll's club breaks the ground under the player and throws the
+        // rubble over the crater's rim, into the path of the throw, which stops
+        // its sideways part there; what is left is the lift, which a burial in
+        // the rubble no longer cancels (Player::knock).
+        const Throw troll = thrown_by(species::TROLL);
+        check("the troll's club lifts the player out of its crater",
+              troll.knocked == 1 && troll.rise >= 10 && troll.forward >= 0,
+              "rise " + std::to_string(troll.rise) + " forward " + std::to_string(troll.forward));
+        check("and costs only the club's damage",
+              troll.hp == Player::MAX_HEALTH - species::TROLL.damage, "hp=" + std::to_string(troll.hp));
+    }
+
+    // --- a ghoul's swipe shoves the player off it ---
+    {
+        const auto run_owner = std::make_unique<Run>(400, 80, 32);
+        Run& run = *run_owner;
+        for (int y = 70; y < 80; ++y)
+            for (int x = 0; x < 400; ++x) run.grid.set_element(x, y, ElementType::Wall);
+        run.player = Player(200, 70 - Player::HEIGHT);
+        run.player.settle(run.grid);
+        run.spawn_enemy(170, 70 - species::GHOUL.height, species::GHOUL);
+        int hit_at = -1;
+        for (int i = 0; i < 300 && hit_at < 0; ++i) {
+            run.step(NOTHING);
+            if (run.player.damage_this_step() > 0) hit_at = i;
+        }
+        const int ghoul_x = run.enemies[0].center_x();
+        const int x_hit = run.player.center_x();
+        for (int i = 0; i < 30; ++i) run.step(NOTHING);
+        const int away = (x_hit >= ghoul_x ? 1 : -1) * (run.player.center_x() - x_hit);
+        check("a ghoul's swipe shoves the player away from it", hit_at >= 0 && away >= 4,
+              "shoved " + std::to_string(away));
+    }
+
+    // --- an arrow knocks over a post that was only just standing ---
+    {
+        const auto shot = [](bool shoot) {
+            const auto run_owner = std::make_unique<Run>(240, 80, 33);
+            Run& run = *run_owner;
+            for (int y = 70; y < 80; ++y)
+                for (int x = 0; x < 240; ++x) run.grid.set_element(x, y, ElementType::Wall);
+            for (int y = 40; y < 70; ++y)
+                for (int x = 150; x < 153; ++x) run.grid.set_element(x, y, ElementType::Wood);
+            for (int y = 40; y < 43; ++y)
+                for (int x = 153; x < 156; ++x) run.grid.set_element(x, y, ElementType::Wood);
+            run.player = Player(100, 70 - Player::HEIGHT);
+            run.player.settle(run.grid);
+            Input aim;
+            aim.shoot = shoot;
+            aim.cursor_x = 151;
+            aim.cursor_y = 41;
+            run.step(aim);
+            for (int i = 0; i < 400; ++i) run.step(NOTHING);
+            int right = 0;
+            for (int y = 0; y < 80; ++y)
+                for (int x = 0; x < 240; ++x)
+                    if (run.grid.get_element(x, y).type == ElementType::Wood) right = std::max(right, x);
+            return right;
+        };
+        check("unshot, a post leaning on its foot stands", shot(false) == 155);
+        check("an arrow in its top knocks it over", shot(true) > 165,
+              "rightmost wood x " + std::to_string(shot(true)));
+    }
+
+    // --- entities and bodies together replay exactly ---
+    // A raft in a pool the player rides and walks off, a crate it pushes, arrows
+    // into both and into a ghoul: everything the coupling decides, twice.
+    {
+        const auto play = [](Run& run) {
+            run.reset(34);
+            Grid& g = run.grid;
+            for (int y = 110; y < 120; ++y)
+                for (int x = 0; x < 400; ++x) g.set_element(x, y, ElementType::Wall);
+            for (int y = 70; y < 110; ++y) {
+                g.set_element(200, y, ElementType::Wall);
+                for (int x = 201; x < 399; ++x) g.set_element(x, y, ElementType::Water);
+            }
+            for (int y = 60; y < 63; ++y)
+                for (int x = 230; x < 270; ++x) g.set_element(x, y, ElementType::Wood);
+            g.set_element(250, 59, ElementType::Wall);
+            g.set_element(250, 59, ElementType::Empty);
+            for (int y = 100; y < 110; ++y)
+                for (int x = 120; x < 130; ++x) g.set_element(x, y, ElementType::Wood);
+            run.player = Player(90, 110 - Player::HEIGHT);
+            run.player.settle(g);
+            run.spawn_enemy(40, 110 - species::GHOUL.height, species::GHOUL);
+            for (int i = 0; i < 600; ++i) {
+                Input in;
+                in.right = i < 300;
+                in.jump = i % 90 == 0;
+                in.shoot = i % 40 == 0;
+                in.cursor_x = i % 80 < 40 ? 250 : 30;
+                in.cursor_y = 95;
+                run.step(in);
+            }
+        };
+        const auto a_owner = std::make_unique<Run>(400, 120, 34);
+        const auto b_owner = std::make_unique<Run>(400, 120, 34);
+        play(*a_owner);
+        play(*b_owner);
+        check("entities and loose bodies together replay identically",
+              worlds_match(a_owner->grid, b_owner->grid) &&
+                  a_owner->player.cell_x() == b_owner->player.cell_x() &&
+                  a_owner->player.cell_y() == b_owner->player.cell_y() &&
+                  a_owner->player.health() == b_owner->player.health() &&
+                  input_log::fingerprint(*a_owner) == input_log::fingerprint(*b_owner));
+    }
+
     return report();
 }

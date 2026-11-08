@@ -76,6 +76,39 @@ cooldown, governed by three constants:
 
 ---
 
+## Bodies among loose bodies, and in water
+
+[src/physics/player.h](src/physics/player.h), [src/physics/box_body.h](src/physics/box_body.h),
+[src/physics/enemy.h](src/physics/enemy.h)
+
+The player and the enemies are boxes outside the grid; the loose bodies are in
+it. Where they meet -- standing on a raft, being struck by a falling slab,
+walking into a crate, being thrown by a blow -- and how a box moves in water.
+Weights are in the loose bodies' units (`Material::weight`: stone 26 a cell,
+wood 6, water 10), so a crate against the player is a comparison of two numbers
+in one unit. None of these act on a box in a dry world with nothing moving in
+it; walking, jumping and flying are unchanged there.
+
+| Knob | File | Now | What it does |
+|---|---|---|---|
+| `WEIGHT` | [player.h](src/physics/player.h) | 240 | What the player weighs: what a raft it stands on carries, what it pushes back on a body that shoves it with, its share of a blow. Forty cells of wood: a 30x3 raft still floats under it. |
+| `DENSITY` | [player.h](src/physics/player.h) | 12 | Per cell. Over water's 10, so the player sinks -- slowly, a sixth of its gravity left -- and walks a pool's bottom. Under 10 floats it, and breaks the `player_test` pool case on purpose (asserted). |
+| `PUSH_STRENGTH` | [player.h](src/physics/player.h) | 1000 | How hard walking into a body pushes it, as the weight whose pressing down it equals. Against a crate's grip times its weight: a 10x10 wooden crate (360) slides at about half a walk, a 16x12 stone (3494) does not move. Eases to nothing at walking pace. |
+| `SWIM_IMPULSE` | [player.h](src/physics/player.h) | 70 | A wing beat all the way under water. Partly under, the beat is the share of this and `FLAP_IMPULSE`, so a bird breaking the surface climbs out. |
+| `SWIM_MAX_CLIMB` | [player.h](src/physics/player.h) | 45 | The climb a beat underwater is capped at; `FLAP_MAX_CLIMB` in water. About 15 cells/s up a pool. |
+| `IMPACT_SAFE_SPEED` | [player.h](src/physics/player.h) | 60 | A loose body striking the player slower than this, cells/s, does nothing. Also what crushes enemy pixels (`Enemy::IMPACT_SAFE_SPEED`). |
+| `IMPACT_DAMAGE_DIVISOR` | [player.h](src/physics/player.h) | 4 | Damage is the speed over the safe one, times the body's share of the two weights, over this. A 12x6 stone slab dropped 2.5 body heights takes about 41. |
+| `KNOCK_STAGGER_STEPS` | [player.h](src/physics/player.h) | 15 | Steps a blow's throw takes the walk key away for, so the walk does not undo the throw. |
+| `KNOCK_GROUND_DECEL` | [box_body.h](src/physics/box_body.h) | 900 | How fast a knock skids out on the ground, cells/s². |
+| `KNOCK_AIR_DRAG` | [box_body.h](src/physics/box_body.h) | 1/64 | Share of a knock lost a step in the air: a thrown box flies an arc. |
+| `RIDE_SNAP` | [box_body.h](src/physics/box_body.h) | 2 | Cells a box standing on a body follows it down in a step. What keeps a player on a bobbing raft from flickering into the fall pose. |
+| `WADE_FORM_DRAG` | [box_body.h](src/physics/box_body.h) | 1/8 | Speed-squared drag on a box in liquid, v / (1 + k v) with v in cells/step. What slows a dive into a pool. |
+| `WADE_DRAG` | [box_body.h](src/physics/box_body.h) | 1/32 | Viscous share of a box's speed lost a step all the way under. Sets the slow sink. |
+| `WADE_SLOW` | [box_body.h](src/physics/box_body.h) | 1/2 | Share of its walking speed a box loses all the way under. |
+| `PIXEL_WEIGHT` | [enemy.h](src/physics/enemy.h) | 1 | An enemy's weight a surviving pixel: a ghoul (238) weighs what the player does, a troll (2270) ten times that. What an arrow's momentum is divided by. |
+
+---
+
 ## Animation timing
 
 [src/render/player_sprite.h](src/render/player_sprite.h) (authored via `tools/player_sheet.py`)
@@ -272,6 +305,7 @@ the art, and so which pixels can be hit, is the grid in
 | attack interval | [enemy.h](src/physics/enemy.h) | 40 | Steps between swipes. |
 | collapse percent | [enemy.h](src/physics/enemy.h) | 40 | Below this share of its pixels it collapses into sand. |
 | burn pixels per tick | [enemy.h](src/physics/enemy.h) | 2 | Pixels burned away per burn tick, lowest first. |
+| knock speed / lift | [enemy.h](src/physics/enemy.h) | 90 / 50 | The swipe's throw, cells/s, away from the ghoul and up: shoves the player off it. |
 
 ### Troll (`species::TROLL`) -- a 24x66 box, 52x70 frame
 
@@ -289,6 +323,7 @@ the art, and so which pixels can be hit, is the grid in
 | crush radius | [enemy.h](src/physics/enemy.h) | 5 | Radius of ground the slam breaks and throws. Asserted to fit inside the reach with the debris clear of its feet. |
 | burn pixels per tick | [enemy.h](src/physics/enemy.h) | 4 | Twice the ghoul's; it has ten times the pixels. |
 | wades | [enemy.h](src/physics/enemy.h) | true | Powder never stops it; it shoves sand out of its box. |
+| knock speed / lift | [enemy.h](src/physics/enemy.h) | 150 / 130 | The club's throw, forward and up. The crater's own debris stops most of the forward part when the player is in it; the lift remains. |
 
 ### Fish (`species::FISH`) -- a 30x66 box, 94x84 frame
 
@@ -307,11 +342,12 @@ the art, and so which pixels can be hit, is the grid in
 | crush radius | [enemy.h](src/physics/enemy.h) | 0 | None: a hand breaks no ground, and `Enemy::attack` skips the crater. |
 | burn pixels per tick | [enemy.h](src/physics/enemy.h) | 4 | The troll's. |
 | wades | [enemy.h](src/physics/enemy.h) | true | The troll's reason: its own arm shot off is a pile deeper than a step. |
+| knock speed / lift | [enemy.h](src/physics/enemy.h) | 110 / 80 | The cast's throw, forward and up, between the swipe and the club. Nothing in its way, so it carries the player about 26 cells. |
 
 ### Angler (`species::ANGLER`) -- the fish on tentacles (experimental)
 
 Every row of the fish's table holds for the angler too, value for value (box,
-speeds, notice, damage, wind-up, reach, wades): the body and how it hunts are
+speeds, notice, damage, wind-up, reach, wades, knock): the body and how it hunts are
 the fish's. What differs is that its legs and lure are chains of links
 ([src/physics/tentacle.h](src/physics/tentacle.h)) that bend along their length,
 moved by `ANGLER_TENTACLES` in [enemy.h](src/physics/enemy.h):
@@ -382,6 +418,7 @@ where pixels are drawn and hit, never what the body is made of.
 | `STUCK_STEPS` | [arrow.h](src/physics/arrow.h) | 240 | How long a stuck arrow stays in a wall. |
 | `BITE_RADIUS` | [arrow.h](src/physics/arrow.h) | 2 | Radius of body an arrow takes out where it lands. Asserted wider than an arm. |
 | `FLUID_DRAG_PERCENT` | [arrow.h](src/physics/arrow.h) | 80 | Speed kept per step through water or oil. |
+| `WEIGHT` | [arrow.h](src/physics/arrow.h) | 8 | An arrow's weight (`Material::weight`), for the momentum it hands on where it stops: knocks a ghoul back about a quarter of a cell a step, a troll a tenth of that, and tips a post that was only just standing. |
 
 ---
 
@@ -573,3 +610,22 @@ Record adjustments to tuning parameters and their rationale here.
   anywhere on screen shades what is under it, at about 12M texel reads a frame at
   scale 4 in 1080p -- a fraction of a millisecond on any GL 3.3 GPU. The fire
   light it adds is LightField's own field, ported, so no light constant moved.
+- **2026-11-08 -- entities meet the loose bodies, and water** (first-pass values,
+  checked in `player_test`, `enemy_test`, `run_test`, not playtested). Before,
+  a raft slid out from under the player, a falling slab passed through it, a
+  crate could not be pushed and water was air. Added the player's `WEIGHT` 240
+  and `DENSITY` 12, `PUSH_STRENGTH` 1000, `SWIM_IMPULSE` 70 / `SWIM_MAX_CLIMB` 45,
+  `IMPACT_SAFE_SPEED` 60 / `IMPACT_DAMAGE_DIVISOR` 4, `KNOCK_STAGGER_STEPS` 15;
+  the shared box knobs `KNOCK_GROUND_DECEL` 900, `KNOCK_AIR_DRAG` 1/64,
+  `RIDE_SNAP` 2, `WADE_FORM_DRAG` 1/8, `WADE_DRAG` 1/32, `WADE_SLOW` 1/2; the
+  enemies' `PIXEL_WEIGHT` 1 and each species' knock (ghoul 90/50, troll 150/130,
+  fish and angler 110/80); the arrow's `WEIGHT` 8. Why these: `WEIGHT` is what a
+  30x3 wooden raft can still float with (it carries 360); `DENSITY` has to be
+  over water's 10 or the player floats off the floor of `player_test`'s pool;
+  `PUSH_STRENGTH` puts a 10x10 crate and an 8x6 stone either side of moving
+  freely and a 16x12 stone out of reach. The wade drag started at 1/4 and 1/16
+  and halved: a stroke underwater then climbed about a cell a beat, which read
+  as stuck. The knock was first applied the step it was given; the troll's
+  rubble buries the player's feet on that step and the dig-out zeroed it, so it
+  is now held until the body is free. `IMPACT_SAFE_SPEED` 60 is a cell a step:
+  a slab dropped one body height (about 180 cells/s) hurts, a raft nudge does not.
