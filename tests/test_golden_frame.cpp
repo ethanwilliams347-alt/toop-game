@@ -32,6 +32,7 @@
 #include <SDL.h>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 #include "game/camera.h"
@@ -197,9 +198,134 @@ void stamp_world(Grid& grid) {
         for (int y = 104; y < 108; ++y) grid.set_element(x, y, ElementType::Fire);
 }
 
+// --- a whole game window ---------------------------------------------------
+//
+// The fixture world composed into a window at a size the game ships, for the
+// overlay cases that need one. The main fixture is 480x272, which keeps its
+// checksum cheap and is no window anybody plays in; the UI's placement is
+// arithmetic on the window's size -- the hotbar hangs from the right edge, the
+// menu is centred, the wash covers the whole window -- so a 21:9 window is a
+// different layout and needs a number of its own.
+//
+// Its own surface, renderer and textures, because a texture belongs to the
+// renderer that made it. The world is the same grid at a scene's scale, with
+// the two simplest backdrop layers behind it: the overlay is under test here,
+// and the world only has to be busy enough that a wash or a backing rect
+// landing in the wrong place moves the hash.
+struct WindowFrame {
+    SDL_Surface* surface = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    std::unique_ptr<gfx::SdlCanvas> canvas;
+    Camera camera;
+    LightField light{1, 1};
+    frame::Backdrop backdrop;
+    std::vector<gfx::Texture> owned;
+    frame::Params p;
+
+    gfx::Texture keep(gfx::Texture t) {
+        owned.push_back(t);
+        return t;
+    }
+
+    bool build(const Grid& grid, int window_w, int window_h, int scale) {
+        surface = SDL_CreateRGBSurfaceWithFormat(0, window_w, window_h, 32,
+                                                 SDL_PIXELFORMAT_ARGB8888);
+        if (!surface) return false;
+        renderer = SDL_CreateSoftwareRenderer(surface);
+        if (!renderer) return false;
+        canvas = std::make_unique<gfx::SdlCanvas>(renderer);
+
+        const DisplayMode m{window_w, window_h};
+        const int pw = m.padded_w(scale), ph = m.padded_h(scale);
+        camera.set_scale(scale);
+        camera.follow(CAM_X, CAM_Y, pw, ph, WORLD_W, WORLD_H);
+
+        const gfx::Texture cells =
+            keep(canvas->create_texture(pw, ph, gfx::Access::Streaming, gfx::Blend::Alpha));
+        if (!cells) return false;
+        const gfx::Rect visible{0, 0, pw, ph};
+        canvas->update_texture(
+            cells, &visible,
+            grid.get_pixels().data() + camera.view_y() * WORLD_W + camera.view_x(),
+            WORLD_W * static_cast<int>(sizeof(uint32_t)));
+
+        light = LightField(pw, ph);
+        light.update(grid, camera.view_x(), camera.view_y());
+        const gfx::Texture light_tex =
+            keep(canvas->create_texture(light.cols(), light.rows(), gfx::Access::Streaming,
+                                        gfx::Blend::Add, gfx::Filter::Linear));
+        if (!light_tex) return false;
+        canvas->update_texture(light_tex, nullptr, light.pixels().data(),
+                               light.cols() * static_cast<int>(sizeof(uint32_t)));
+
+        // Corner-anchored and vertically locked, the bg_valley model, which is
+        // what the scale-10 scenes use.
+        auto layer = [&](uint32_t (*f)(int, int), float fx) {
+            frame::ParallaxLayer l;
+            l.texture = keep(pattern_texture(*canvas, WORLD_W, WORLD_H, f));
+            l.w = WORLD_W * scale;
+            l.h = WORLD_H * scale;
+            l.tex_h = WORLD_H;
+            l.parallax_x = fx;
+            l.parallax_y = 1.0f;
+            return l;
+        };
+        backdrop.layers.push_back(layer(sky_pattern, 0.04f));
+        backdrop.layers.push_back(layer(mountain_pattern, 0.30f));
+
+        p.camera = &camera;
+        p.padded_w = pw;
+        p.padded_h = ph;
+        p.backdrop = &backdrop;
+        p.cells = cells;
+        p.has_objective = true;
+        p.objective_x = 230;
+        p.objective_y = 108;
+        p.player_tex = keep(pattern_texture(*canvas, 56, 52, player_pattern));
+        p.player_x = 181.4f;
+        p.player_y = 100.8f;
+        p.sheet_col = 2;
+        p.sheet_row = 1;
+        p.player_box_w = 8;
+        p.player_box_h = 20;
+        p.light = &light;
+        p.light_texture = light_tex;
+        for (const gfx::Texture& t : owned)
+            if (!t) return false;
+        return true;
+    }
+
+    // The world, then the overlay over it, hashed. `dump`, when not null, is a BMP
+    // path the frame is also written to, for looking at.
+    uint64_t draw(const overlay::Params& op, const char* dump = nullptr) {
+        frame::compose(*canvas, p);
+        overlay::draw(*canvas, op);
+        if (dump && SDL_SaveBMP(surface, dump) != 0)
+            std::fprintf(stderr, "could not write %s: %s\n", dump, SDL_GetError());
+        return hash_surface(surface);
+    }
+
+    ~WindowFrame() {
+        if (canvas) {
+            for (gfx::Texture& t : owned) canvas->destroy_texture(t);
+            canvas.reset();
+        }
+        if (renderer) SDL_DestroyRenderer(renderer);
+        if (surface) SDL_FreeSurface(surface);
+    }
+};
+
+// Where a frame is dumped, when the suite is run with a directory argument
+// (`golden_frame_test shots`), or null. ctest passes none, so a test run writes
+// nothing.
+std::string dump_path(const char* dir, const char* name) {
+    return dir ? std::string(dir) + "/" + name : std::string();
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
+    const char* dump_dir = argc > 1 ? argv[1] : nullptr;
     // No SDL_Init(SDL_INIT_VIDEO): a software renderer over a surface needs no
     // display, which is what lets this run headless on a build machine.
     SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(
@@ -592,6 +718,75 @@ int main() {
     overlay::draw(canvas, op);
     check("the overlay is repeatable", hash_surface(surface) == with_overlay,
           "the same inputs produced two different overlays");
+    if (dump_dir) SDL_SaveBMP(surface, dump_path(dump_dir, "overlay_480x272.bmp").c_str());
+
+    // --- the overlay in a 21:9 window -----------------------------------
+    //
+    // The widest window the game is held to (WIDEST_VIEW in game/display.h), at
+    // the scale-10 scenes' scale, so the cell counts the menu quotes are the ones
+    // a player on an ultrawide reads. Its own checksum: the fixture above is
+    // 16:9-ish and small, and everything in the overlay that is placed against
+    // the right edge or the centre is placed somewhere else here.
+    //
+    // The run is not over, so the menu stands over the world rather than over the
+    // death wash, which the fixture above already covers.
+    {
+        WindowFrame wide;
+        const bool built = wide.build(grid, 3440, 1440, 10);
+        check("the 21:9 window fixture builds", built, SDL_GetError());
+        if (built) {
+            overlay::Params wp = op;
+            wp.window_w = 3440;
+            wp.window_h = 1440;
+            wp.ui_scale = DisplayMode{3440, 1440}.ui_scale();
+            wp.view_scale = 10;
+            wp.mouse_x = 3440 / 2 + 37;
+            wp.mouse_y = 1440 / 2 - 21;
+            wp.run_over = false;
+            wp.cursor = DISPLAY_MODE_COUNT - 1;
+            wp.current_mode = DISPLAY_MODE_COUNT - 1;
+            for (int i = 0; i < DISPLAY_MODE_COUNT; ++i) available[i] = true;
+            wp.notice.clear();
+            const std::string shot = dump_path(dump_dir, "settings_3440x1440.bmp");
+            const uint64_t wide_hash = wide.draw(wp, dump_dir ? shot.c_str() : nullptr);
+
+            constexpr uint64_t WIDE_OVERLAY_GOLDEN = 0x0824feb11532b358ull;
+            char wd[128];
+            std::snprintf(wd, sizeof(wd), "got 0x%016llx, expected 0x%016llx",
+                          static_cast<unsigned long long>(wide_hash),
+                          static_cast<unsigned long long>(WIDE_OVERLAY_GOLDEN));
+            check("the 21:9 overlay matches its golden checksum",
+                  wide_hash == WIDE_OVERLAY_GOLDEN, wd);
+
+            overlay::Params closed = wp;
+            closed.settings_open = false;
+            check("the settings screen reaches the 21:9 frame", wide.draw(closed) != wide_hash,
+                  "closing the menu changed no pixel of the 21:9 frame");
+            check("the 21:9 overlay is repeatable", wide.draw(wp) == wide_hash);
+        }
+    }
+
+    // A 1920x1080 window, written only when frames are being dumped. Not a third
+    // checksum: 16:9 is the main fixture's layout already, and this exists so a
+    // person can look at the settings screen at the size most players see it.
+    if (dump_dir) {
+        WindowFrame hd;
+        if (hd.build(grid, 1920, 1080, 10)) {
+            overlay::Params hp = op;
+            hp.window_w = 1920;
+            hp.window_h = 1080;
+            hp.ui_scale = DisplayMode{1920, 1080}.ui_scale();
+            hp.view_scale = 10;
+            hp.mouse_x = 1920 / 2 + 37;
+            hp.mouse_y = 1080 / 2 - 21;
+            hp.run_over = false;
+            hp.cursor = 0;
+            hp.current_mode = 0;
+            for (int i = 0; i < DISPLAY_MODE_COUNT; ++i) available[i] = true;
+            hp.notice.clear();
+            hd.draw(hp, dump_path(dump_dir, "settings_1920x1080.bmp").c_str());
+        }
+    }
 
     canvas.destroy_texture(p.player_tex);
     canvas.destroy_texture(prop_tex);
