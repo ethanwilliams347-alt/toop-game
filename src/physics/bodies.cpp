@@ -511,9 +511,30 @@ int Grid::start_body(const std::vector<int>& cells_of, int64_t vx, int64_t vy) {
     // Nothing comes loose perfectly still: a turn too small to see, drawn from
     // where and when it came loose, so that the same piece let go in two places
     // does not go over in two identical ways.
+    //
+    // Keyed on where the piece is in a way a mirror cannot tell apart, and signed
+    // by which half of the world its centre is in, so the nudge is exactly
+    // antisymmetric: a world mirrored left to right turns every piece the mirrored
+    // way. It used to be a spread keyed on cells_of[0], the first cell in scan
+    // order, which is not the mirror of the mirrored piece's first cell -- so the
+    // mirrored slab drew a different turn and the two worlds parted on the first
+    // step (test_collapse, "a mirrored collapse"). sx is the piece's doubled
+    // horizontal moment about the world's centre line, antisymmetric under the
+    // mirror; sy is the sum of its rows, unchanged by it. A piece centred exactly
+    // on that line gets no nudge, which is what symmetry demands of it.
+    int64_t sx = 0, sy = 0;
+    for (const int idx : cells_of) {
+        const int cy = idx / width;
+        sx += 2 * (idx - cy * width) + 1 - width;
+        sy += cy;
+    }
+    const int64_t ax = sx < 0 ? -sx : sx;
+    const uint64_t key =
+        static_cast<uint64_t>(ax) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(sy);
     const int nudge =
-        sim_random::spread(8, world_seed, step_count, static_cast<uint64_t>(cells_of[0]),
-                           sim_random::Stream::BodyNudge);
+        sx == 0 ? 0
+                : (sx < 0 ? 1 : -1) * (1 + sim_random::pick(8, world_seed, step_count, key,
+                                                            sim_random::Stream::BodyNudge));
     b.vx = vx;
     b.vy = vy;
     b.omega = static_cast<int64_t>(nudge) * NUDGE_SPIN / 8;
@@ -1078,12 +1099,14 @@ void Grid::gather_contacts(int i) {
                     if (closing < -WAKE_SPEED && collect_piece(oidx, false)) {
                         // Only a piece standing on something: one with nothing
                         // under it is hanging from whatever it is welded to, and
-                        // nothing struck it loose.
+                        // nothing struck it loose. Liquid under it counts: a
+                        // piece that went to sleep afloat is floating, not hanging
+                        // (see wake_for_push, which asks the same question).
                         bool stands = false;
                         for (const int c : balance_component) {
                             const int below = c + width;
                             if (below < width * height && balance_visit[below] != balance_epoch &&
-                                is_solid(cells[below].type)) {
+                                (is_solid(cells[below].type) || is_liquid(cells[below].type))) {
                                 stands = true;
                                 break;
                             }
@@ -1755,7 +1778,7 @@ void Grid::step_tipping() {
         for (const int q : balance_component) {
             const int below = q + width;
             if (below < width * height && balance_visit[below] != balance_epoch &&
-                is_solid(cells[below].type)) {
+                (is_solid(cells[below].type) || is_liquid(cells[below].type))) {
                 stands = true;
                 break;
             }
@@ -1859,12 +1882,47 @@ void Grid::end_tipping(int i, bool requeue) {
     Body& b = tip_bodies[i];
     tag_body[b.tag] = -1;
 
-    if (requeue) {
-        if (++tip_epoch == 0) {
-            std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
-            tip_epoch = 1;
+    // Marked whether or not it is requeued: the weld check below needs to tell
+    // the body's own cells from a neighbour's.
+    if (++tip_epoch == 0) {
+        std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+        tip_epoch = 1;
+    }
+    for (const int idx : b.at) tip_visit[idx] = tip_epoch;
+
+    // piece_tag is one byte, and alloc_piece_tag only refuses tags still in the
+    // air, so after 255 allocations a body can wear the tag of a piece that came
+    // to rest long ago. While it flies that costs nothing, but the moment it
+    // stops beside that piece the two are one connected run of one tag -- welded,
+    // and judged by the support fill as a single structure, so a block set down
+    // against a resting one holds it up (or is dragged down by it). Caught here,
+    // where the body stops, rather than by refusing every tag in the world at
+    // allocation, which would be a scan of the grid: a body's neighbours are the
+    // only cells it can weld to. A fresh tag no neighbour wears is taken instead.
+    // At most 255 tries, each a walk of the body's rim; in practice one, and only
+    // on the rare landing that collides at all.
+    const auto welds = [&](uint8_t tag) {
+        for (const int idx : b.at) {
+            if (!is_structural(cells[idx].type) || cells[idx].piece_tag != b.tag) continue;
+            const int cy = idx / width;
+            const int cx = idx - cy * width;
+            for (int ny = cy - 1; ny <= cy + 1; ++ny)
+                for (int nx = cx - 1; nx <= cx + 1; ++nx) {
+                    if (!is_within_bounds(nx, ny)) continue;
+                    const int n = get_index(nx, ny);
+                    if (tip_visit[n] == tip_epoch) continue;  // the body itself
+                    if (is_structural(cells[n].type) && cells[n].piece_tag == tag) return true;
+                }
         }
-        for (const int idx : b.at) tip_visit[idx] = tip_epoch;
+        return false;
+    };
+    if (welds(b.tag)) {
+        uint8_t fresh = alloc_piece_tag();
+        for (int tries = 0; tries < 255 && welds(fresh); ++tries) fresh = alloc_piece_tag();
+        for (const int idx : b.at)
+            if (is_structural(cells[idx].type) && cells[idx].piece_tag == b.tag)
+                cells[idx].piece_tag = fresh;
+        b.tag = fresh;
     }
 
     for (const int idx : b.at) {

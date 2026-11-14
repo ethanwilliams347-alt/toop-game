@@ -1321,5 +1321,163 @@ int main() {
         check("two runs of the same pushes end pixel-identical", run() == run());
     }
 
+    // --- a raft that went to sleep afloat can still be pushed ---
+    // A floating body sleeps like any other once it stops drifting, and is then
+    // structure at rest with water under it. The wake tests asked only for solid
+    // underneath -- "one with nothing under it is hanging from a weld" -- so a
+    // sleeping raft was deaf to every push and blow, frozen on the pool for good.
+    {
+        Grid g(120, 60);
+        fill(g, 0, 50, 119, 59, ElementType::Wall);
+        fill(g, 0, 20, 0, 49, ElementType::Wall);
+        fill(g, 119, 20, 119, 49, ElementType::Wall);
+        fill(g, 1, 35, 118, 49, ElementType::Water);
+        fill(g, 40, 30, 69, 32, ElementType::Wood);
+        nudge(g, 50, 29);
+        int s = 0;
+        while (s < 3000 && g.has_pending_support_checks()) {
+            g.update();
+            ++s;
+        }
+        int left = -1;
+        for (int x = 0; x < 120 && left < 0; ++x)
+            for (int y = 0; y < 60; ++y)
+                if (g.get_element(x, y).type == ElementType::Wood) {
+                    left = x;
+                    break;
+                }
+        check("a raft let go on a pool comes to rest afloat", g.tipping_count() == 0 && left >= 0,
+              "after " + std::to_string(s) + " steps");
+        int row = -1;
+        for (int y = 0; y < 60 && row < 0; ++y)
+            if (g.get_element(left, y).type == ElementType::Wood) row = y;
+        const bool took = g.queue_impulse(left, row, strong, 0);
+        check("and a push on it wakes it", took && g.tipping_count() == 1,
+              "queued " + std::to_string(took) + " bodies " + std::to_string(g.tipping_count()));
+    }
+
+    // --- a body still moving at BODY_MAX_STEPS is not frozen where it is ---
+    // The age cap ends a body that has never come to rest. It used to hand the
+    // cells back where they stood and ask nothing, so a raft poled across a pool
+    // for thirty seconds became a fixed slab hovering on the water mid-stroke.
+    // Now a body that times out is re-judged from where it lies, and one with
+    // nothing solid under it comes loose again, fresh.
+    {
+        const int MAX_STEPS = 1800;  // Grid::BODY_MAX_STEPS, which is private
+        Grid g(400, 60);
+        fill(g, 0, 50, 399, 59, ElementType::Wall);
+        fill(g, 0, 20, 0, 49, ElementType::Wall);
+        fill(g, 399, 20, 399, 49, ElementType::Wall);
+        fill(g, 1, 35, 398, 49, ElementType::Water);
+        fill(g, 20, 30, 39, 32, ElementType::Wood);
+        nudge(g, 25, 29);
+        const auto wood_left = [&] {
+            for (int x = 0; x < 400; ++x)
+                for (int y = 0; y < 60; ++y)
+                    if (g.get_element(x, y).type == ElementType::Wood) return x;
+            return -1;
+        };
+        const int64_t pole = int64_t{60} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        int awake_at_end = 0;
+        int left_before = 0;
+        for (int s = 0; s < MAX_STEPS + 240; ++s) {
+            if (s == MAX_STEPS + 120) left_before = wood_left();
+            const int left = wood_left();
+            int row = -1;
+            for (int y = 0; y < 60 && row < 0; ++y)
+                if (g.get_element(left, y).type == ElementType::Wood) row = y;
+            if (s % 4 == 0) g.queue_impulse(left, row, pole, 0);
+            g.update();
+            if (s >= MAX_STEPS + 120) awake_at_end += g.tipping_count();
+        }
+        check("a raft poled past BODY_MAX_STEPS is still a body", awake_at_end > 100,
+              std::to_string(awake_at_end) + " of 120 steps");
+        check("and still being poled along", wood_left() > left_before,
+              std::to_string(left_before) + " -> " + std::to_string(wood_left()));
+    }
+
+    // --- a piece let go in a mirrored world turns the mirrored way ---
+    // Mirror symmetry is a stated goal of the fixed-point rules (products are
+    // truncated toward zero, so +x and -x round alike; sin is exactly odd). A slab
+    // let go over a drop, and its reflection: until either touches anything, the
+    // two bodies must be exact mirror images, spin included. The release nudge
+    // used to be keyed on the piece's first cell in scan order, which a mirror
+    // does not preserve, and the two slabs started out turning at different
+    // rates. After first contact they may still part by a few cells: the contact
+    // solve is sequential (Gauss-Seidel in gather order), and that order is not
+    // mirror-symmetric. That is accepted, not tested.
+    {
+        const int W = 100, H = 70;
+        const auto build = [&](bool flip) {
+            Grid g(W, H);
+            const auto f = [&](int x0, int y0, int x1, int y1, ElementType t) {
+                if (flip)
+                    fill(g, W - 1 - x1, y0, W - 1 - x0, y1, t);
+                else
+                    fill(g, x0, y0, x1, y1, t);
+            };
+            f(0, 65, W - 1, H - 1, ElementType::Wall);
+            f(0, 45, 30, 64, ElementType::Wall);
+            f(20, 38, 55, 42, ElementType::Wall);  // a slab two rows above the ledge
+            nudge(g, flip ? W - 1 - 20 : 20, 37);
+            return g;
+        };
+        Grid a = build(false);
+        Grid b = build(true);
+        bool same = true;
+        std::string where;
+        for (int s = 0; s < 3 && same; ++s) {
+            a.update();
+            b.update();
+            same = a.tipping_count() == 1 && b.tipping_count() == 1;
+            if (!same) break;
+            const Grid::BodyState p = a.body_state(0), q = b.body_state(0);
+            same = p.x == W * fx::ONE - q.x && p.y == q.y && p.vx == -q.vx && p.vy == q.vy &&
+                   p.theta == -q.theta && p.omega == -q.omega && p.omega != 0;
+            where = "step " + std::to_string(s) + " omega " + std::to_string(p.omega) + " / " +
+                    std::to_string(q.omega);
+        }
+        check("a slab and its mirror image fall as exact mirror images", same, where);
+    }
+
+    // --- a piece tag that comes round again does not weld two pieces ---
+    // piece_tag is one byte, so after 255 bodies the counter hands out a tag a
+    // piece at rest may still wear. alloc_piece_tag only refuses tags in flight;
+    // a body that lands touching a resting piece with its own tag would become
+    // one piece with it, and the support fill would judge them together. Here a
+    // block comes to rest, throwaway drops walk the counter round to its tag,
+    // and a second block lands against the first.
+    {
+        Grid g(120, 60);
+        fill(g, 0, 55, 119, 59, ElementType::Wall);
+        const auto settle = [&] {
+            for (int s = 0; s < 900 && g.has_pending_support_checks(); ++s) g.update();
+        };
+        const auto drop = [&](int x0, int y0, int x1, int y1) {
+            fill(g, x0, y0, x1, y1, ElementType::Wall);
+            nudge(g, x0, y0 - 1);
+            settle();
+        };
+        drop(10, 30, 13, 33);
+        const uint8_t tag_a = g.get_element(11, 53).piece_tag;
+        bool walked = tag_a != 0;
+        for (int n = 0; n < 300 && walked; ++n) {
+            drop(80, 30, 81, 31);
+            const uint8_t t = g.get_element(80, 54).piece_tag;
+            fill(g, 70, 20, 100, 54, ElementType::Empty);
+            settle();
+            // The next tag handed out is tag_a (the counter skips 0).
+            if (static_cast<uint8_t>(t + 1) == tag_a || (t == 255 && tag_a == 1)) break;
+            if (n == 299) walked = false;
+        }
+        drop(14, 40, 17, 43);
+        const uint8_t tag_b = g.get_element(15, 53).piece_tag;
+        check("the tag counter was walked round to the resting piece's tag", walked,
+              "tag_a " + std::to_string(tag_a));
+        check("a block landing against a resting one with a recycled tag stays separate",
+              g.get_element(14, 53).type == ElementType::Wall && tag_a != tag_b,
+              "tags " + std::to_string(tag_a) + " / " + std::to_string(tag_b));
+    }
+
     return report();
 }

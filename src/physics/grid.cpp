@@ -81,7 +81,7 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     // probe to reach a new high-water mark reallocates mid-step, on the step with
     // the most work in it. Each is reserved to that bound, not a guess:
     //
-    //   support_component, drop_keys -- capped by the `> MAX_SUPPORT_CELLS` check
+    //   support_component -- capped by the `> MAX_SUPPORT_CELLS` check
     //     in fall_if_unsupported, which runs after the push, so one past the cap.
     //   support_stack, balance_stack -- not capped by those checks at all. Every
     //     cell popped pushes up to eight neighbours, and pops stop pushing once the
@@ -107,7 +107,6 @@ Grid::Grid(int width, int height, uint64_t seed) : width(width), height(height),
     // that matters -- a world replaying a step it has already reached allocates
     // nothing.
     support_component.reserve(MAX_SUPPORT_CELLS + 1);
-    drop_keys.reserve(MAX_SUPPORT_CELLS + 1);
     support_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
     balance_component.reserve(MAX_SUPPORT_CELLS + 1);
     balance_stack.reserve(8 * MAX_SUPPORT_CELLS + 1);
@@ -951,61 +950,6 @@ void Grid::fracture_landing(int x, int y) {
         // overhang settled, unwoken and hanging in the air.
         queue_support_check(cx, cy);
         mark_dirty(cx, cy);
-    }
-}
-
-void Grid::drop_component() {
-    // Bottom-up within each column, so a cell is only ever moved into space its
-    // lower neighbour has already left. Doing this per column also handles a column
-    // containing two separate parts of the same piece -- an arch, say -- without
-    // needing to find the runs explicitly.
-    //
-    // Sorted as precomputed keys rather than with a comparator that splits each
-    // index into x and y: that was two divisions and two modulos per comparison,
-    // ~49k comparisons for a component at the MAX_SUPPORT_CELLS cap. Here each index
-    // is split once. The key orders by x ascending, then y descending (as H-1-y
-    // ascending), and carries the index itself in the low 32 bits -- so keys are
-    // unique, the order is exactly the old comparator's, and reading an index back
-    // needs no division. 64 bits because x << 20 in an int already overflows at
-    // x = 2048; 16 bits each for x and H-1-y hold any grid up to 65535 on a side.
-    drop_keys.clear();
-    for (const int idx : support_component) {
-        const int cy = idx / width;
-        const int cx = idx - cy * width;
-        drop_keys.push_back((static_cast<uint64_t>(cx) << 48) |
-                            (static_cast<uint64_t>(height - 1 - cy) << 32) |
-                            static_cast<uint32_t>(idx));
-    }
-    std::sort(drop_keys.begin(), drop_keys.end());
-    for (size_t k = 0; k < drop_keys.size(); ++k)
-        support_component[k] = static_cast<int>(static_cast<uint32_t>(drop_keys[k]));
-
-    for (const int idx : support_component) {
-        const int cy = idx / width;
-        const int cx = idx - cy * width;
-
-        // Always legal. Unsupported means no cell of the piece has anything solid
-        // under it, so every cell about to move is moving into Empty, into a
-        // fluid, or into space another cell of the piece just left. Structural
-        // materials are denser than every fluid, so the swap sends whatever was
-        // below up to the top of the piece rather than deleting it -- which is
-        // also why a slab sinks through water instead of resting on it.
-        swap_elements(cx, cy, cx, cy + 1);
-
-        // Mark and re-queue the cell's new home, so the piece is recognised as
-        // already-moved for the rest of this pass and gets another look on the
-        // next one. This is the only thing that makes it keep falling: the queue
-        // it leaves behind is the input to whichever pass comes next.
-        //
-        // The vacated cell is marked too. Anything of this piece still above it
-        // is about to move into it, and until this pass is over no other fill
-        // should treat that space as a fresh question.
-        const int moved = get_index(cx, cy + 1);
-        support_visit[moved] = support_epoch;
-        support_state[moved] = static_cast<uint8_t>(SupportState::Moved);
-        support_visit[idx] = support_epoch;
-        support_state[idx] = static_cast<uint8_t>(SupportState::Moved);
-        pending_support.push_back(moved);
     }
 }
 

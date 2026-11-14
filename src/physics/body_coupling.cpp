@@ -133,13 +133,19 @@ bool Grid::wake_for_push(int idx, int64_t jx, int64_t jy) {
     // gather_contacts' test, word for word: only a piece standing on something.
     // One with nothing under it is hanging from whatever it is welded to, and
     // nothing pushed it loose.
+    // Liquid underneath counts as standing on something. A body that comes to
+    // rest afloat is put to sleep like any other (FLOAT_SLEEP_DRIFT), and is
+    // then a piece at rest with water under it, not one hanging from a weld; it
+    // was the solid-only test that left a sleeping raft frozen on the pool for
+    // good, deaf to every push (test_player, "the raft drifts", once a raft
+    // happened to sleep inside the test's window).
     bool stands = false;
     int64_t mass = 0;
     for (const int c : balance_component) {
         mass += material_of(cells[c].type).weight;
         const int below = c + width;
         if (!stands && below < width * height && balance_visit[below] != balance_epoch &&
-            is_solid(cells[below].type))
+            (is_solid(cells[below].type) || is_liquid(cells[below].type)))
             stands = true;
     }
     if (!stands || mass <= 0) return false;
@@ -237,6 +243,15 @@ void Grid::apply_queued_impulses() {
         // And the turn it gives about the centre, r x j over the moment of
         // inertia per unit mass -- solve_contacts' own expression for it.
         b.omega += (rx * dvy - ry * dvx) / ONE * ONE / b.k2;
+
+        // Pushed while afloat, it is not at rest, however little it drifts. A
+        // raft with the player standing on it is pressed every step by the
+        // player's weight and hardly moves under it, so it read as still and went
+        // to sleep under the player's feet, a static piece of floor on the pool
+        // that nobody was riding any more. On solid ground the opposite holds --
+        // something standing on a crate must not keep it awake for ever -- so
+        // only a body with no contact, held by liquid alone, is kept awake.
+        if (!b.contact) b.still = 0;
     }
     impulses.clear();
 }
