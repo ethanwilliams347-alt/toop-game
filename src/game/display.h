@@ -122,11 +122,13 @@ enum class WindowMode { Windowed, Borderless, Fullscreen };
 // effect on the next launch, because switching backends means remaking every
 // texture the game holds -- or overridden for one run with --renderer=gl|sdl.
 //
-// SDL stays the default while the GL backend is a parity backend: it draws the
-// same frame, so there is nothing yet to choose it for, and an untested driver is
-// a reason to opt in rather than out. GL falls back to SDL at startup on any
-// failure (no 3.3 context, a missing entry point, a shader that will not
-// compile), so asking for it never costs a session.
+// GL is the default: it draws the same frame as SDL, and the debug keys, the
+// shader reload and the GPU light pass exist only there, so a player who never
+// opens the menu should get it. That is safe to default to because GL falls back
+// to SDL at startup on any failure (no 3.3 context, a missing entry point, a
+// shader that will not compile), saying so on stderr, so an unsupported driver
+// costs a console line rather than a session. SDL stays as that fallback and as
+// a menu choice, and the tests pin it explicitly rather than lean on this.
 enum class RendererChoice { Sdl, Gl };
 
 namespace display_detail {
@@ -187,7 +189,7 @@ struct DisplaySettings {
     // On by default, as it was before it could be turned off: an unpaced frame
     // loop spends a whole core and the GPU on frames the display never shows.
     bool vsync = true;
-    RendererChoice renderer = RendererChoice::Sdl;
+    RendererChoice renderer = RendererChoice::Gl;
 
     bool operator==(const DisplaySettings&) const = default;
 };
