@@ -7,6 +7,8 @@
 // target nothing has written yet fails the build, not the frame.
 //
 //   backdrop  -> albedo                     frame::compose, the backdrop layers
+//   behind    albedo -> behind              a copy of it, for water to show
+//                                           through and reflect (R4b)
 //   world     -> albedo, emissive           frame::compose, cells to foreground
 //   light     pack -> blocks, sun           GPU port of LightField + sun march
 //   resolve   albedo, emissive, blocks, sun -> hdr   albedo x light + emissive
@@ -15,9 +17,10 @@
 //                                           tonemap, bloom, grade, fog, grain
 //   ui        frame -> frame                overlay::draw, after the world
 //
-// The first two and the last are drawn by the CPU-side frame code through
+// The first three and the last are drawn by the CPU-side frame code through
 // gfx::Canvas (GlCanvas routes those draws to the albedo/emissive pair while
-// a lit frame is open); gpu::Pipeline runs the four in between, in this
+// a lit frame is open; "behind" is GlCanvas::blit_cells copying the albedo
+// aside just before the cells draw, and only when a cell look is on); gpu::Pipeline runs the four in between, in this
 // table's order (pipeline.cpp walks it). The legacy light model never opens a
 // lit frame and draws exactly what the SDL path does, so none of this exists
 // for it.
@@ -41,11 +44,12 @@ enum Target : uint32_t {
     SUN = 1u << 4,       // sun visibility, one texel per cell
     HDR = 1u << 5,       // the lit frame, linear, RGBA16F
     FRAME = 1u << 6,     // what is presented (shares the albedo texture)
+    BEHIND = 1u << 7,    // the albedo before the world draws: the backdrop alone
 };
 
 enum class Kind : uint8_t { Canvas, Gpu, Resolve, Post, Ui };
 
-enum class Id : uint8_t { Backdrop, World, Light, Resolve, Weather, Post, Ui };
+enum class Id : uint8_t { Backdrop, Behind, World, Light, Resolve, Weather, Post, Ui };
 
 // Pointer and masks first, the two bytes last: no padding between them.
 struct Pass {
@@ -59,7 +63,8 @@ struct Pass {
 inline constexpr Pass PASSES[] = {
     // name       reads                                writes              id            kind
     {"backdrop", 0, ALBEDO, Id::Backdrop, Kind::Canvas},
-    {"world", PACK, ALBEDO | EMISSIVE, Id::World, Kind::Canvas},
+    {"behind", ALBEDO, BEHIND, Id::Behind, Kind::Canvas},
+    {"world", PACK | BEHIND, ALBEDO | EMISSIVE, Id::World, Kind::Canvas},
     {"light", PACK, BLOCKS | SUN, Id::Light, Kind::Gpu},
     {"resolve", ALBEDO | EMISSIVE | BLOCKS | SUN, HDR, Id::Resolve, Kind::Resolve},
     {"weather", HDR, HDR, Id::Weather, Kind::Gpu},

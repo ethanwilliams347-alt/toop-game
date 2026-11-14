@@ -247,7 +247,17 @@ int main(int argc, char** argv) {
         fp.cells = cells;
         fp.light = lit_frame ? nullptr : &light;
         fp.light_texture = light_tex;
-        if (lit_frame) gl->begin_lit_frame();
+        if (lit_frame) {
+            // The cells' look (R4a/R4b), anchored where the pack's window sits,
+            // timed by the steps taken.
+            lit::CellLook look;
+            mood::fill_cell_look(m, look);
+            look.origin_x = camera.view_x();
+            look.origin_y = camera.view_y();
+            look.step = static_cast<uint32_t>(steps);
+            gl->set_cell_look(look);
+            gl->begin_lit_frame();
+        }
         frame::compose(*gl, fp);
         if (lit_frame) {
             lit::LitFrame lf;

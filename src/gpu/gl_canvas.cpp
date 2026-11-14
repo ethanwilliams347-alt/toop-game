@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include "gpu/gl.h"
 #include "gpu/program.h"
 
@@ -160,6 +161,9 @@ GlCanvas::~GlCanvas() {
             if (fbo_) gl::DeleteFramebuffers(1, &fbo_);
             if (fbo_tex_) gl::DeleteTextures(1, &fbo_tex_);
             if (emissive_tex_) gl::DeleteTextures(1, &emissive_tex_);
+            if (tiles_tex_) gl::DeleteTextures(1, &tiles_tex_);
+            if (behind_fbo_) gl::DeleteFramebuffers(1, &behind_fbo_);
+            if (behind_tex_) gl::DeleteTextures(1, &behind_tex_);
             pipeline_.release();
         }
         SDL_GL_DeleteContext(context_);
@@ -194,6 +198,9 @@ void GlCanvas::bind_cell_uniforms() {
     cu_mode_ = gl::GetUniformLocation(cells_program_, "u_mode");
     cu_emissive_ = gl::GetUniformLocation(cells_program_, "u_emissive");
     gl::Uniform1fv(cu_emissive_, lit::MAX_TYPES, constants_.emissive);
+    gl::Uniform1i(gl::GetUniformLocation(cells_program_, "u_tiles"), 2);
+    gl::Uniform1i(gl::GetUniformLocation(cells_program_, "u_behind"), 3);
+    cu_look_ = gl::GetUniformLocation(cells_program_, "u_look");
     gl::UseProgram(program_);
 }
 
@@ -482,6 +489,9 @@ void GlCanvas::blit_cells(const gfx::Texture& colour, const gfx::FRect& dst) {
     if (d.w <= 0 || d.h <= 0) return;
     begin_frame();
     flush();  // whatever is batched was drawn with the sprite program
+    const bool look = lit_ && look_.on && cell_view_ == CellView::Legacy;
+    // Before anything is bound for the cells: the copy binds its own texture.
+    if (look) copy_behind();
 
     gl::UseProgram(cells_program_);
     gl::Uniform2f(cu_scale_, 2.0f / static_cast<float>(target_w_),
@@ -489,6 +499,31 @@ void GlCanvas::blit_cells(const gfx::Texture& colour, const gfx::FRect& dst) {
     gl::Uniform1i(cu_mode_, static_cast<int>(cell_view_));
     gl::ActiveTexture(GL_TEXTURE1);
     gl::BindTexture(GL_TEXTURE_2D, cell_tex_);
+    // The look only inside a lit frame and only in the player's view: a legacy
+    // frame, the SDL-equal path gl_frame_test holds to a plain blit, never sees
+    // it, and the debug views stay what they say they are.
+    gl::Uniform1i(cu_look_, look ? 1 : 0);
+    if (look) {
+        const auto loc = [&](const char* n) { return gl::GetUniformLocation(cells_program_, n); };
+        gl::Uniform3fv(loc("u_tint"), lit::MAX_TYPES, &look_.tint[0][0]);
+        gl::Uniform1fv(loc("u_strength"), lit::MAX_TYPES, look_.strength);
+        gl::Uniform1fv(loc("u_rim"), lit::MAX_TYPES, look_.rim);
+        gl::Uniform1fv(loc("u_reflect"), lit::MAX_TYPES, look_.reflect);
+        gl::Uniform1fv(loc("u_spec"), lit::MAX_TYPES, look_.spec);
+        gl::Uniform1fv(loc("u_depth"), lit::MAX_TYPES, look_.depth);
+        // Untextured materials have a mean of -1, which the shader reads as "no
+        // tile" (Uniform1iv is not loaded, and a float array says it as well).
+        float mean[lit::MAX_TYPES];
+        for (int i = 0; i < lit::MAX_TYPES; ++i) mean[i] = tile_on_[i] ? tile_mean_[i] : -1.0f;
+        gl::Uniform1fv(loc("u_tile_mean"), lit::MAX_TYPES, mean);
+        gl::Uniform2f(loc("u_sun_dir"), look_.sun_dir[0], look_.sun_dir[1]);
+        gl::Uniform2i(loc("u_origin"), look_.origin_x, look_.origin_y);
+        gl::Uniform1i(loc("u_step"), static_cast<int>(look_.step & 0x3FFFFFFFu));
+        gl::ActiveTexture(GL_TEXTURE2);
+        gl::BindTexture(GL_TEXTURE_2D, tiles_tex_ ? tiles_tex_ : white_);
+        gl::ActiveTexture(GL_TEXTURE3);
+        gl::BindTexture(GL_TEXTURE_2D, behind_tex_ ? behind_tex_ : white_);
+    }
     gl::ActiveTexture(GL_TEXTURE0);
 
     // One quad, drawn now through the ordinary batch so the blend and the colour
@@ -527,6 +562,100 @@ void GlCanvas::upload_cell_pack(const uint32_t* texels, int w, int h) {
     } else {
         gl::TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, texels);
     }
+}
+
+void GlCanvas::set_cell_look(const lit::CellLook& look) {
+    look_ = look;
+    bool same = tiles_tex_ != 0;
+    for (int i = 0; i < lit::MAX_TYPES; ++i) same = same && look_.texture[i] == tile_stems_[i];
+    if (!same) load_material_tiles();
+}
+
+// One 64x64 tile per material, side by side, loaded only when the stems change
+// (a scene or mood switch), never per frame. Stored as grey: the tile is a
+// luminance detail and the albedo keeps every hue, so the shader reads red only.
+// Each tile's mean is kept beside it so the shader can centre the detail on
+// the tile's own average rather than on 0.5 -- a tile painted a little dark
+// would otherwise darken the whole material, and albedo is the authority.
+bool GlCanvas::load_material_tiles() {
+    constexpr int TILE = 64;
+    constexpr size_t ROW = static_cast<size_t>(TILE) * lit::MAX_TYPES;
+    std::vector<uint32_t> atlas(ROW * TILE, 0xFF808080u);
+    bool ok = true;
+    for (int t = 0; t < lit::MAX_TYPES; ++t) {
+        tile_stems_[t] = look_.texture[t];
+        tile_on_[t] = false;
+        tile_mean_[t] = 0.5f;
+        if (look_.texture[t].empty()) continue;
+        // The shader folder's sibling: assets/shaders/ -> assets/materials/.
+        const std::string path = shader_dir_ + "/../materials/" + look_.texture[t] + ".bmp";
+        SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+        SDL_Surface* s = raw ? SDL_ConvertSurfaceFormat(raw, SDL_PIXELFORMAT_ARGB8888, 0) : nullptr;
+        if (raw) SDL_FreeSurface(raw);
+        if (!s || s->w != TILE || s->h != TILE) {
+            error_ = "material tile " + path + " is missing or not 64x64";
+            if (s) SDL_FreeSurface(s);
+            ok = false;
+            continue;
+        }
+        double sum = 0.0;
+        for (int y = 0; y < TILE; ++y) {
+            const auto* row = reinterpret_cast<const uint32_t*>(
+                static_cast<const uint8_t*>(s->pixels) + static_cast<ptrdiff_t>(y) * s->pitch);
+            for (int x = 0; x < TILE; ++x) {
+                const uint32_t p = row[x];
+                const uint32_t grey = (((p >> 16) & 0xFFu) + ((p >> 8) & 0xFFu) + (p & 0xFFu)) / 3u;
+                sum += grey;
+                atlas[static_cast<size_t>(y) * ROW + static_cast<size_t>(t) * TILE +
+                      static_cast<size_t>(x)] = 0xFF000000u | (grey << 16) | (grey << 8) | grey;
+            }
+        }
+        SDL_FreeSurface(s);
+        tile_mean_[t] = static_cast<float>(sum / (TILE * TILE * 255.0));
+        tile_on_[t] = true;
+    }
+    flush();
+    if (!tiles_tex_) gl::GenTextures(1, &tiles_tex_);
+    gl::ActiveTexture(GL_TEXTURE2);
+    gl::BindTexture(GL_TEXTURE_2D, tiles_tex_);
+    gl::PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl::PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    gl::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TILE * lit::MAX_TYPES, TILE, 0, GL_BGRA,
+                   GL_UNSIGNED_INT_8_8_8_8_REV, atlas.data());
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl::ActiveTexture(GL_TEXTURE0);
+    return ok;
+}
+
+// pass_graph's "behind": the albedo as it stands when the cells are about to
+// draw -- the backdrop layers and nothing of the world -- copied aside, because
+// a shader cannot read the target it is drawing into. One framebuffer blit; the
+// copy is (re)allocated only when the target's size changes.
+void GlCanvas::copy_behind() {
+    flush();
+    if (behind_w_ != target_w_ || behind_h_ != target_h_ || !behind_fbo_) {
+        if (!behind_tex_) gl::GenTextures(1, &behind_tex_);
+        if (!behind_fbo_) gl::GenFramebuffers(1, &behind_fbo_);
+        gl::BindTexture(GL_TEXTURE_2D, behind_tex_);
+        gl::TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, target_w_, target_h_, 0, GL_BGRA,
+                       GL_UNSIGNED_INT_8_8_8_8_REV, nullptr);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl::BindFramebuffer(GL_FRAMEBUFFER, behind_fbo_);
+        gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, behind_tex_,
+                                 0);
+        behind_w_ = target_w_;
+        behind_h_ = target_h_;
+    }
+    gl::BindFramebuffer(GL_READ_FRAMEBUFFER, fbo_);
+    gl::BindFramebuffer(GL_DRAW_FRAMEBUFFER, behind_fbo_);
+    gl::BlitFramebuffer(0, 0, target_w_, target_h_, 0, 0, target_w_, target_h_, GL_COLOR_BUFFER_BIT,
+                        GL_NEAREST);
+    gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    apply_draw_buffers();
 }
 
 void GlCanvas::present() {

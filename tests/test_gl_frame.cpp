@@ -622,6 +622,149 @@ int main() {
             gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
         }
 
+        // --- the cells' look (R4a/R4b: lit::CellLook, cells.frag u_look) ---
+        //
+        // A world of its own: a wall slab in the open and a pond with air above
+        // it, drawn over a flat red "backdrop" -- red because neither wall nor
+        // water has much of it, so red showing in the water is the backdrop
+        // showing through. Each claim compares the same cells with the look off
+        // and on, under a neutral light, so the per-cell colour jitter cancels.
+        {
+            Grid g(WORLD_W, WORLD_H, 7u);
+            const int vx = camera.view_x(), vy = camera.view_y();
+            // slab: 66 x 24 cells, so its interior is a whole tile (64) wide
+            const int wx = vx + 1, wy = vy + 30;
+            for (int x = wx; x < wx + 66; ++x)
+                for (int y = wy; y < wy + 24; ++y) g.set_element(x, y, ElementType::Wall);
+            const int px0 = vx + 75, py0 = vy + 30;  // pond: 30 x 10 cells, air above
+            for (int x = px0; x < px0 + 30; ++x)
+                for (int y = py0; y < py0 + 10; ++y) g.set_element(x, y, ElementType::Water);
+            // A puff of steam and a pool of oil, apart from the rest.
+            for (int x = vx + 80; x < vx + 90; ++x)
+                for (int y = vy + 5; y < vy + 11; ++y) g.set_element(x, y, ElementType::Steam);
+            for (int x = vx + 100; x < vx + 115; ++x)
+                for (int y = vy + 50; y < vy + 56; ++y) g.set_element(x, y, ElementType::Oil);
+            cell_pack::CellPack look_pack;
+            look_pack.pack(g, vx, vy, PADDED_W, PADDED_H, {});
+            gl->upload_cell_pack(look_pack.texels().data(), look_pack.width(), look_pack.height());
+            gfx::Texture colour =
+                gl->create_texture(PADDED_W, PADDED_H, gfx::Access::Streaming, gfx::Blend::Alpha);
+            const gfx::Rect visible{0, 0, PADDED_W, PADDED_H};
+            gl->update_texture(colour, &visible, g.get_pixels().data() + vy * WORLD_W + vx,
+                               WORLD_W * static_cast<int>(sizeof(uint32_t)));
+            gl->set_light_constants(dark_cells);
+
+            const auto draw_look = [&](const lit::CellLook& look, std::vector<uint32_t>& out) {
+                gl->set_cell_look(look);
+                gl->begin_lit_frame();
+                gl->set_blend(gfx::Blend::None);
+                gl->set_draw_color(220, 40, 40, 255);
+                gl->fill_rect(gfx::Rect{0, 0, W, H});
+                const float s = static_cast<float>(Camera::DEFAULT_SCALE);
+                gl->blit_cells(colour, gfx::FRect{0.0f, 0.0f, PADDED_W * s, PADDED_H * s});
+                const bool ok = gl->resolve_lit(neutral_frame(camera));
+                gl->read_pixels(out);
+                return ok;
+            };
+            const auto red = [&](const std::vector<uint32_t>& px, int cx, int cy, int cw, int ch) {
+                double sum = 0.0;
+                const int s = Camera::DEFAULT_SCALE;
+                for (int y = cy * s; y < (cy + ch) * s; ++y)
+                    for (int x = cx * s; x < (cx + cw) * s; ++x)
+                        sum += (px[static_cast<size_t>(y) * W + x] >> 16) & 0xFFu;
+                return sum / (static_cast<double>(cw) * ch * s * s);
+            };
+            const auto cell_luma = [&](const std::vector<uint32_t>& px, int cx, int cy, int cw,
+                                       int ch) {
+                const int s = Camera::DEFAULT_SCALE;
+                return luma(px, W, cx * s, cy * s, cw * s, ch * s);
+            };
+
+            lit::CellLook off;  // on = false: the plain blit
+            lit::CellLook on;
+            on.on = true;
+            for (auto& t : on.tint) t[0] = t[1] = t[2] = 1.0f;
+            on.origin_x = vx;
+            on.origin_y = vy;
+            const size_t WATER = static_cast<size_t>(ElementType::Water);
+            const size_t WALL = static_cast<size_t>(ElementType::Wall);
+            on.reflect[WATER] = 0.0f;  // the plain see-through, no mirror
+            on.depth[WATER] = 0.7f;
+            on.rim[WALL] = 0.5f;
+
+            std::vector<uint32_t> off_px, on_px;
+            check("a lit frame with the look off resolves", draw_look(off, off_px), gl->error());
+            check("a lit frame with the look on resolves", draw_look(on, on_px), gl->error());
+
+            // Water, two to four cells under its surface, away from the banks.
+            const double water_off = red(off_px, 80, 32, 20, 3);
+            const double water_on = red(on_px, 80, 32, 20, 3);
+            std::printf("  water: red %.1f opaque, %.1f translucent (backdrop 220)\n", water_off,
+                        water_on);
+            check("water lets the backdrop through", water_on > water_off + 40.0);
+            check("water still reads as water, not as the backdrop", water_on < 180.0);
+
+            // Steam thins into soft puffs; oil stays an opaque dark film.
+            const double steam_off = red(off_px, 82, 7, 6, 2), steam_on = red(on_px, 82, 7, 6, 2);
+            const double oil_off = red(off_px, 102, 52, 10, 3), oil_on = red(on_px, 102, 52, 10, 3);
+            std::printf("  steam: red %.1f off, %.1f on; oil: red %.1f off, %.1f on\n", steam_off,
+                        steam_on, oil_off, oil_on);
+            check("steam is translucent under the look",
+                  std::abs(steam_on - 220.0) < std::abs(steam_off - 220.0) * 0.7);
+            check("oil stays opaque under the look", oil_on < oil_off + 15.0);
+            {
+                lit::CellLook sheen = on;
+                sheen.spec[static_cast<size_t>(ElementType::Oil)] = 0.8f;
+                std::vector<uint32_t> sheen_px;
+                draw_look(sheen, sheen_px);
+                const double before = cell_luma(on_px, 100, 50, 15, 1);
+                const double after = cell_luma(sheen_px, 100, 50, 15, 1);
+                std::printf("  oil surface: luma %.1f plain, %.1f with sheen\n", before, after);
+                check("oil's spec puts a sheen on its surface", after > before + 4.0);
+            }
+
+            // The slab's left edge (open to the air on its side) against its
+            // interior, each relative to the same cells without the look.
+            const double edge_gain = cell_luma(on_px, 1, 33, 1, 6) / cell_luma(off_px, 1, 33, 1, 6);
+            const double inner_gain =
+                cell_luma(on_px, 20, 35, 20, 10) / cell_luma(off_px, 20, 35, 20, 10);
+            std::printf("  rim: edge x%.3f, interior x%.3f\n", edge_gain, inner_gain);
+            check("a rim brightens an exposed edge", edge_gain > 1.05);
+            check("a rim leaves the interior alone", std::abs(inner_gain - 1.0) < 0.01);
+
+            // A tile on the wall moves single cells but not the material's mean.
+            // The slab's interior is 64 x 22 cells; three draws with the
+            // anchor moved 22 rows each time cover the tile's every row, which
+            // also shows the tile follows the world origin it is given.
+            lit::CellLook tex = on;
+            tex.rim[WALL] = 0.0f;
+            tex.strength[WALL] = 0.6f;
+            tex.texture[WALL] = "materials_rock";
+            std::vector<uint32_t> tex_px;
+            double mean_off = 0.0, mean_tex = 0.0, worst = 0.0;
+            for (int shift = 0; shift < 66; shift += 22) {
+                tex.origin_y = vy + shift;
+                check("a lit frame with a tile resolves", draw_look(tex, tex_px), gl->error());
+                mean_off += cell_luma(off_px, 2, 31, 64, 22) / 3.0;
+                mean_tex += cell_luma(tex_px, 2, 31, 64, 22) / 3.0;
+                for (int cy = 31; cy < 53; ++cy)
+                    for (int cx = 2; cx < 66; ++cx)
+                        worst = std::max(worst, std::abs(cell_luma(tex_px, cx, cy, 1, 1) -
+                                                         cell_luma(off_px, cx, cy, 1, 1)));
+            }
+            std::printf("  tile: mean luma %.2f untextured, %.2f textured, cells move up to %.1f\n",
+                        mean_off, mean_tex, worst);
+            check("a tile keeps the material's mean luminance",
+                  std::abs(mean_tex - mean_off) < mean_off * 0.02);
+            check("a tile changes single cells", worst > 3.0);
+
+            // Left on: the legacy frame below must not see it (the look applies
+            // only inside a lit frame), and that check proves it.
+            gl->set_cell_look(on);
+            gl->destroy_texture(colour);
+            gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
+        }
+
         // And a legacy frame after all that is still the SDL frame.
         gl->set_light_constants(real);
         on_sdl.draw(sdl, true);
