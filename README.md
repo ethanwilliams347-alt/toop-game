@@ -155,11 +155,12 @@ The choices are saved to `settings.txt` next to the exe:
 display=borderless
 resolution=3440x1440
 vsync=on
-renderer=sdl
+renderer=gl
 ```
 
 Any key left out keeps its default (windowed, the largest window that fits,
-VSync on, the SDL renderer), and lines the game doesn't recognise are kept when
+VSync on, the OpenGL renderer, which falls back to SDL if
+the driver can't run it), and lines the game doesn't recognise are kept when
 it rewrites the file. An older file holding only `resolution=` still loads, as
 a window of that size. A stored window that no longer fits opens at the largest
 one that does, and one exactly the size of the desktop opens borderless. A
