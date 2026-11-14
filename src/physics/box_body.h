@@ -121,6 +121,14 @@ inline constexpr fx::v KNOCK_GROUND_DECEL = fx::from_int(900);
 // flies an arc rather than stopping in mid-air, and lands still going.
 inline constexpr fx::v KNOCK_AIR_DRAG = fx::from_ratio(1, 64);
 
+// The fastest a loose body can throw a box by shoving it or carrying it off, in
+// cells per second, either axis. A body's speed at its edge is its centre's
+// plus its spin times its reach, which on a long post or a spinning plank comes
+// to several hundred cells a second, and handing that over whole flung the
+// player across the level (playtest 4.3). The troll's club, the hardest throw
+// meant to land, is 150; a body hits no harder than that.
+inline constexpr fx::v MAX_SHOVE_SPEED = fx::from_int(150);
+
 // How far a box standing on a loose body follows it down in a step, in cells.
 // A raft bobbing, a plank rocking, a slab sliding down a slope all drop their
 // cells a whole cell at a time while their motion is smooth, and a box left a
@@ -386,8 +394,11 @@ struct BoxBody {
     // but the footing read.
     void ride(const Grid& grid, const BoxRule& rule) {
         const bool was = riding;
-        const fx::v was_x = carry_x;
-        const fx::v was_y = carry_y;
+        // Held to MAX_SHOVE_SPEED for what it carries on with on leaving: the
+        // point it stood on can be the far end of a spinning plank, moving far
+        // faster than anything should throw it, and stepping off one is a throw.
+        const fx::v was_x = std::clamp(carry_x, -MAX_SHOVE_SPEED, MAX_SHOVE_SPEED);
+        const fx::v was_y = std::clamp(carry_y, -MAX_SHOVE_SPEED, MAX_SHOVE_SPEED);
         carry_x = 0;
         carry_y = 0;
         riding = false;
@@ -489,6 +500,13 @@ struct BoxBody {
         s.y = near_y[best];
         s.mass = grid.body_mass(s.body);
         const Grid::BodyMotion m = grid.body_velocity_at(s.body, s.x, s.y);
+        // The speed it strikes and throws with, each axis held to
+        // MAX_SHOVE_SPEED: one number for the damage, the throw and the momentum
+        // the body gives up for it, so a hit that hurts as if at 150 does not
+        // fling the box at 900. The way out below still reads the raw motion,
+        // which only orders the directions tried and is right as it is.
+        const fx::v hit_vx = std::clamp(m.vx, -MAX_SHOVE_SPEED, MAX_SHOVE_SPEED);
+        const fx::v hit_vy = std::clamp(m.vy, -MAX_SHOVE_SPEED, MAX_SHOVE_SPEED);
 
         // Which way to try, in order: the body's main direction of travel, its
         // other one, and -- for a body coming down -- out to either side,
@@ -550,7 +568,7 @@ struct BoxBody {
         // a slab landing on it and squeezing it out sideways is a way the slab
         // was not going at all. Only closing counts; a body the box was already
         // moving away from faster did not strike it.
-        const fx::v closing = down_first ? sy * (m.vy - vel_y) : sx * (m.vx - own_vx);
+        const fx::v closing = down_first ? sy * (hit_vy - vel_y) : sx * (hit_vx - own_vx);
         s.speed = std::max<fx::v>(0, closing);
 
         if (!s.moved) return s;
@@ -565,16 +583,16 @@ struct BoxBody {
         // is the box's momentum gained, which the body lost.
         if (moved_dx != 0) {
             const int ax = moved_dx > 0 ? 1 : -1;
-            if (ax * (m.vx - own_vx) > 0) {
-                s.dvx = m.vx - own_vx;
-                push_x = m.vx - carry_x;
+            if (ax * (hit_vx - own_vx) > 0) {
+                s.dvx = hit_vx - own_vx;
+                push_x = hit_vx - carry_x;
             }
             rem_x = 0;
         } else {
             const int ay = moved_dy > 0 ? 1 : -1;
-            if (ay * (m.vy - vel_y) > 0) {
-                s.dvy = m.vy - vel_y;
-                vel_y = m.vy;
+            if (ay * (hit_vy - vel_y) > 0) {
+                s.dvy = hit_vy - vel_y;
+                vel_y = hit_vy;
             }
             rem_y = 0;
         }
