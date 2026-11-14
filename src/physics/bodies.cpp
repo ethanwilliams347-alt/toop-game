@@ -529,11 +529,12 @@ int Grid::start_body(const std::vector<int>& cells_of, int64_t vx, int64_t vy) {
         sy += cy;
     }
     const int64_t ax = sx < 0 ? -sx : sx;
-    const uint64_t key = static_cast<uint64_t>(ax) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(sy);
-    const int nudge = sx == 0 ? 0
-                              : (sx < 0 ? 1 : -1) *
-                                    (1 + sim_random::pick(8, world_seed, step_count, key,
-                                                          sim_random::Stream::BodyNudge));
+    const uint64_t key =
+        static_cast<uint64_t>(ax) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(sy);
+    const int nudge =
+        sx == 0 ? 0
+                : (sx < 0 ? 1 : -1) * (1 + sim_random::pick(8, world_seed, step_count, key,
+                                                            sim_random::Stream::BodyNudge));
     b.vx = vx;
     b.vy = vy;
     b.omega = static_cast<int64_t>(nudge) * NUDGE_SPIN / 8;

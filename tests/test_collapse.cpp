@@ -1411,8 +1411,10 @@ int main() {
         const auto build = [&](bool flip) {
             Grid g(W, H);
             const auto f = [&](int x0, int y0, int x1, int y1, ElementType t) {
-                if (flip) fill(g, W - 1 - x1, y0, W - 1 - x0, y1, t);
-                else fill(g, x0, y0, x1, y1, t);
+                if (flip)
+                    fill(g, W - 1 - x1, y0, W - 1 - x0, y1, t);
+                else
+                    fill(g, x0, y0, x1, y1, t);
             };
             f(0, 65, W - 1, H - 1, ElementType::Wall);
             f(0, 45, 30, 64, ElementType::Wall);

@@ -241,8 +241,7 @@ void current(int every) {
     const int start = left();
     fill(g, 41, 15, 41, 54, ElementType::Empty);
     for (int s = 0; s <= 600; ++s) {
-        if (s % every == 0)
-        {
+        if (s % every == 0) {
             // The liquid's sideways flow (raw Element::flow units) summed over
             // the rows the raft floats in, from 20 cells behind it to its far end.
             int flow = 0;
