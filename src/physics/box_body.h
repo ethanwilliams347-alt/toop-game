@@ -559,13 +559,15 @@ struct BoxBody {
         // And given the body's speed the way it pushed the box, where that is
         // faster than the box's: a body that pushed it out carries on pushing, or
         // throws it. Horizontally into push_x, the box's own velocity that is not
-        // its legs', which decays as a knock does once the body stops pushing.
-        // The change is the box's momentum gained, which the body lost.
+        // its legs', which decays as a knock does once the body stops pushing --
+        // less what the box already rides with (carry_x), or a box shoved along
+        // by the raft it stands on would go at the raft's speed twice. The change
+        // is the box's momentum gained, which the body lost.
         if (moved_dx != 0) {
             const int ax = moved_dx > 0 ? 1 : -1;
             if (ax * (m.vx - own_vx) > 0) {
                 s.dvx = m.vx - own_vx;
-                push_x = m.vx;
+                push_x = m.vx - carry_x;
             }
             rem_x = 0;
         } else {
