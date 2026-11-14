@@ -101,6 +101,7 @@ it; walking, jumping and flying are unchanged there.
 | `KNOCK_STAGGER_STEPS` | [player.h](src/physics/player.h) | 15 | Steps a blow's throw takes the walk key away for, so the walk does not undo the throw. |
 | `KNOCK_GROUND_DECEL` | [box_body.h](src/physics/box_body.h) | 900 | How fast a knock skids out on the ground, cells/s². |
 | `KNOCK_AIR_DRAG` | [box_body.h](src/physics/box_body.h) | 1/64 | Share of a knock lost a step in the air: a thrown box flies an arc. |
+| `MAX_SHOVE_SPEED` | [box_body.h](src/physics/box_body.h) | 150 | Fastest a loose body throws, carries off or strikes a box, cells/s per axis: the troll club's throw. |
 | `RIDE_SNAP` | [box_body.h](src/physics/box_body.h) | 2 | Cells a box standing on a body follows it down in a step. What keeps a player on a bobbing raft from flickering into the fall pose. |
 | `WADE_FORM_DRAG` | [box_body.h](src/physics/box_body.h) | 1/8 | Speed-squared drag on a box in liquid, v / (1 + k v) with v in cells/step. What slows a dive into a pool. |
 | `WADE_DRAG` | [box_body.h](src/physics/box_body.h) | 1/32 | Viscous share of a box's speed lost a step all the way under. Sets the slow sink. |
@@ -639,3 +640,10 @@ Record adjustments to tuning parameters and their rationale here.
   1, 2 against `collapse_test` and `player_test`: only 3/4 passed both (see the
   comment in grid.h for what each other value broke), so this sits in a narrow
   band and is worth re-checking when buoyancy or the rider coupling changes.
+- **2026-11-14 — `MAX_SHOVE_SPEED` 150 (new).** Playtest 4.3: the player was
+  sometimes flung far too hard. A body shoving the box handed over its edge
+  speed whole (centre plus spin times reach), and stepping off a spinning body
+  kept that point's speed; `player_test` measured 252 cells/s sideways off a
+  spinning plank and 187 up off a plank flipped by a crate. Both, and the strike
+  speed that sets the damage, are now held to 150, the troll club's throw, the
+  hardest knock meant to land. Blows (troll, ghoul, angler, arrows) are unchanged.
