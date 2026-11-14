@@ -40,6 +40,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -620,6 +621,165 @@ int main() {
                 check("the slab shades what is under it", at(55, 40) < 0.05f);
             }
             gl->upload_cell_pack(pack.texels().data(), pack.width(), pack.height());
+        }
+
+        // --- the atmosphere (R5 post, R6 weather) ---
+        //
+        // Each against a frame with the same post path on, so what differs is
+        // the one effect under test. A vignette of 1e-6 turns the final pass's
+        // post branch on (tonemap included) while changing nothing visible.
+        gl->set_light_constants(dark_cells);
+        lit::LitFrame post_on = neutral_frame(camera);
+        post_on.vignette = 1e-6f;
+        std::vector<uint32_t> post_px;
+        check("a frame with post on resolves", lit_draw(post_on, post_px), gl->error());
+        const auto channel = [](uint32_t c, int k) {
+            return static_cast<int>((c >> (8 * k)) & 0xFF);
+        };
+
+        // An identity LUT strip (tools/make_lut.py's layout) grades to identity.
+        {
+            std::vector<unsigned char> strip(1024 * 32 * 4);
+            for (int y = 0; y < 32; ++y)
+                for (int x = 0; x < 1024; ++x) {
+                    unsigned char* t = &strip[(static_cast<size_t>(y) * 1024 + x) * 4];
+                    t[0] = static_cast<unsigned char>(((x % 32) * 255 + 15) / 31);
+                    t[1] = static_cast<unsigned char>((y * 255 + 15) / 31);
+                    t[2] = static_cast<unsigned char>(((x / 32) * 255 + 15) / 31);
+                    t[3] = 255;
+                }
+            gl->set_lut_pixels(strip.data(), 1024, 32);
+            lit::LitFrame graded = post_on;
+            graded.grade = "identity";
+            std::vector<uint32_t> graded_px;
+            lit_draw(graded, graded_px);
+            gl->set_lut_pixels(nullptr, 0, 0);
+            int worst = 0;
+            for (size_t i = 0; i < graded_px.size(); ++i)
+                for (int k = 0; k < 3; ++k)
+                    worst = std::max(worst,
+                                     std::abs(channel(graded_px[i], k) - channel(post_px[i], k)));
+            std::printf("  identity grade: worst channel difference %d\n", worst);
+            check("an identity LUT grades to identity", worst <= 2, std::to_string(worst));
+        }
+
+        // Fog grows with depth: three swatches of one paint at depths 0, 0.3 and
+        // 0.9 under a magenta fog. The world plane's is the paint; the deeper,
+        // the nearer the fog.
+        {
+            lit::LitFrame fogged = neutral_frame(camera);
+            fogged.fog_on = true;
+            fogged.fog[0] = 1.0f;
+            fogged.fog[1] = 0.0f;
+            fogged.fog[2] = 1.0f;
+            fogged.fog_near = 0.0f;
+            fogged.fog_far = 1.0f;
+            fogged.fog_amount = 0.8f;
+            gl->begin_lit_frame();
+            gl->set_fog(fogged);
+            gl->set_blend(gfx::Blend::None);
+            gl->set_draw_color(40, 160, 60, 255);
+            const float depths[3] = {0.0f, 0.3f, 0.9f};
+            for (int i = 0; i < 3; ++i) {
+                gl->set_depth(depths[i]);
+                gl->fill_rect(gfx::Rect{20 + 100 * i, 20, 64, 64});
+            }
+            gl->set_depth(0.0f);
+            const bool ok = gl->resolve_lit(fogged);
+            std::vector<uint32_t> fog_px;
+            gl->read_pixels(fog_px);
+            int red[3], green[3];
+            for (int i = 0; i < 3; ++i) {
+                const uint32_t c = fog_px[static_cast<size_t>(50) * W + 52 + 100 * i];
+                red[i] = channel(c, 2);
+                green[i] = channel(c, 1);
+            }
+            std::printf("  fog: red %d %d %d, green %d %d %d at depths 0, 0.3, 0.9\n", red[0],
+                        red[1], red[2], green[0], green[1], green[2]);
+            check("a fogged frame resolves", ok, gl->error());
+            check("fog leaves the world plane as painted",
+                  std::abs(red[0] - 40) <= 2 && std::abs(green[0] - 160) <= 2);
+            check("fog grows with depth",
+                  red[2] > red[1] && red[1] > red[0] && green[2] < green[1] && green[1] < green[0]);
+        }
+
+        // Bloom only adds light: no pixel darker than without it, and the frame
+        // brighter overall (a low threshold, so the fixture's sky blooms).
+        {
+            lit::LitFrame bloom = post_on;
+            bloom.bloom_on = true;
+            bloom.bloom_threshold = 0.2f;
+            bloom.bloom_strength = 0.5f;
+            std::vector<uint32_t> bloom_px;
+            lit_draw(bloom, bloom_px);
+            int darker = 0;
+            for (size_t i = 0; i < bloom_px.size(); ++i)
+                for (int k = 0; k < 3; ++k)
+                    darker += channel(bloom_px[i], k) < channel(post_px[i], k) - 1 ? 1 : 0;
+            const double with = luma(bloom_px, W, 0, 0, W, H);
+            const double without = luma(post_px, W, 0, 0, W, H);
+            std::printf("  bloom: luma %.2f (%.2f without), %d channels darker\n", with, without,
+                        darker);
+            check("bloom only adds light", darker == 0, std::to_string(darker));
+            check("bloom adds some light", with > without + 0.5);
+        }
+
+        // Weather stops at solids: every pixel rain changes is above the first
+        // cell in its column that rain cannot fall through (a solid, a powder
+        // or a liquid's surface; weather_top.frag numbers the liquids by value).
+        {
+            static_assert(static_cast<int>(ElementType::Water) == 2 &&
+                              static_cast<int>(ElementType::Oil) == 5,
+                          "weather_top.frag stops rain at Water (2) and Oil (5) by value");
+            lit::LitFrame rain = neutral_frame(camera);
+            rain.weather = 1;
+            rain.weather_density = 1.0f;
+            rain.weather_speed = 200.0f;
+            rain.weather_angle_deg = 10.0f;
+            rain.step = 1234;
+            lit::LitFrame dry = neutral_frame(camera);
+            std::vector<uint32_t> rain_px, dry_px;
+            lit_draw(dry, dry_px);
+            check("a rainy frame resolves", lit_draw(rain, rain_px), gl->error());
+            std::vector<int> top(PADDED_W, PADDED_H);
+            for (int x = 0; x < PADDED_W; ++x)
+                for (int y = 0; y < PADDED_H; ++y) {
+                    const Element e = grid.get_element(camera.view_x() + x, camera.view_y() + y);
+                    if (e.type == ElementType::Sand || e.type == ElementType::Wall ||
+                        e.type == ElementType::Water || e.type == ElementType::Oil) {
+                        top[static_cast<size_t>(x)] = y;
+                        break;
+                    }
+                }
+            const float s = static_cast<float>(camera.scale());
+            const float ox = -camera.frac_x() * s, oy = -camera.frac_y() * s;
+            int wet = 0, below = 0;
+            std::string where;
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x) {
+                    const size_t i = static_cast<size_t>(y) * W + x;
+                    if (rain_px[i] == dry_px[i]) continue;
+                    ++wet;
+                    const int cx =
+                        static_cast<int>(std::floor((static_cast<float>(x) + 0.5f - ox) / s));
+                    const float cy = (static_cast<float>(y) + 0.5f - oy) / s;
+                    // A column with nothing solid in the pack's window is open as
+                    // far as the frame knows (only the window is packed), so the
+                    // rain may run on past the window's last row there.
+                    if (cx >= 0 && cx < PADDED_W && top[static_cast<size_t>(cx)] < PADDED_H &&
+                        cy >= static_cast<float>(top[static_cast<size_t>(cx)])) {
+                        if (below++ == 0)
+                            where = "first at pixel (" + std::to_string(x) + ", " +
+                                    std::to_string(y) + "), cell column " + std::to_string(cx) +
+                                    " row " + std::to_string(cy) + ", top " +
+                                    std::to_string(top[static_cast<size_t>(cx)]) + ", dry " +
+                                    std::to_string(dry_px[i] & 0xFFFFFFu) + " wet " +
+                                    std::to_string(rain_px[i] & 0xFFFFFFu);
+                    }
+                }
+            std::printf("  rain: %d pixels changed, %d of them below the ground\n", wet, below);
+            check("rain is drawn", wet > 500, std::to_string(wet));
+            check("weather stops at solids", below == 0, std::to_string(below) + "; " + where);
         }
 
         // And a legacy frame after all that is still the SDL frame.

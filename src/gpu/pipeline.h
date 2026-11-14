@@ -39,9 +39,23 @@
 // `light` lines plus any dynamic ones a caller appends, unshadowed, with a
 // smooth (1 - d/r)^2 falloff and a flicker.
 //
-// --- weather ---  nothing yet (R6).
-// --- post ---     linear back to the display encoding, clamped (R5 adds
-//                  tonemap, bloom, grade, fog, vignette and grain).
+// --- weather (R6) ---
+// The mood's rain, fog wisps or dust, instanced and stateless (weather.vert):
+// each particle's position is a function of its index and the simulation time,
+// so nothing is stored between frames. Added onto the HDR frame lit by the same
+// ambient, sun and point lights as the world, and stopped per pixel at the
+// first row in its column that it cannot fall through (weather_top.frag, one
+// texel per pack column, rebuilt from the pack each frame).
+//
+// --- post (R5) ---
+// Bloom first: the HDR frame over the mood's threshold, down a chain of
+// half-resolution targets to 1/16 and back up, each level added to the one
+// above. Then one final pass (post.frag): bloom added, a shoulder tonemap,
+// the mood's LUT grade, vignette and grain, and the display encode. With all
+// four off the final pass is the display encode alone, clamped, as before.
+//
+// Fog is not here: it is applied as the backdrop is drawn, the one time each
+// layer's depth is known (GlCanvas::set_fog, gfx::Canvas::set_depth).
 //
 // A mood whose light is neutral -- ambient 1, no sun, no lights, nothing hot --
 // resolves to its albedo within rounding: gl_frame_test checks that too, so
@@ -84,6 +98,25 @@ public:
     // The last run's sun visibility, one value per cell, top row first.
     void read_sun(std::vector<float>& vis, int& w, int& h) const;
 
+    // A LUT strip for the grade (tools/make_lut.py's layout: 1024 x 32, RGBA
+    // bytes, top row first), or null to drop it. The frame grades only while
+    // one is set and the frame names a grade.
+    void set_lut(const unsigned char* rgba, int w, int h);
+    bool has_lut() const { return lut_ != 0; }
+
+    // --- GPU timing ---
+    // GL_TIME_ELAPSED per pass, double-buffered: frame N reads the queries of
+    // frame N-2, which the GPU finished long ago, so the timers never stall the
+    // CPU. `canvas` is the frame code's backdrop and world draws (from
+    // GlCanvas::begin_lit_frame to the resolve); the UI is not timed.
+    enum Timer : int { T_CANVAS, T_LIGHT, T_RESOLVE, T_WEATHER, T_BLOOM, T_POST, TIMER_COUNT };
+    static const char* timer_name(int t);
+    void begin_canvas_timer();
+    // Milliseconds per Timer, the latest results that are in. With `wait`, the
+    // frame just drawn is waited for and read (preview_frame's single frame);
+    // otherwise only what is already available, never stalling.
+    void gpu_ms(float out[TIMER_COUNT], bool wait);
+
     // How far the sun's shadow march looks, in cells. A cell with no occluder
     // within this many cells toward the sun is in full sun.
     static constexpr int SUN_MARCH_CELLS = 96;
@@ -91,7 +124,14 @@ public:
 private:
     struct Programs {
         unsigned gather = 0, propagate = 0, smooth = 0, sun = 0, resolve = 0, post = 0;
+        unsigned bloom_down = 0, bloom_up = 0, weather_top = 0, weather = 0;
     };
+    static void set_point_lights(unsigned program, const lit::LitFrame& f);
+    void run_bloom(const lit::LitFrame& f);
+    void run_weather(const Inputs& in, const lit::LitFrame& f);
+    void begin_timer(int t);
+    void end_timer();
+    void collect(int set, bool wait);
     static void release(Programs& p);
 
     Programs prog_;
@@ -101,6 +141,18 @@ private:
     int front_ = 0;            // which of blocks_ holds the result
     RenderTarget sun_;
     RenderTarget hdr_;
+    // Bloom: 1/2, 1/4, 1/8 and 1/16 of the target, linear filtered.
+    static constexpr int BLOOM_LEVELS = 4;
+    RenderTarget bloom_[BLOOM_LEVELS];
+    RenderTarget top_;  // weather's stop row per pack column
+    unsigned lut_ = 0;  // the grade strip, RGBA8, linear
+    bool bloom_ran_ = false;  // this frame's bloom chain holds this frame's glow
+
+    unsigned queries_[2][TIMER_COUNT] = {};
+    bool issued_[2][TIMER_COUNT] = {};
+    float ms_[TIMER_COUNT] = {};
+    int set_ = 0;  // which half of queries_ this frame writes
+    int open_timer_ = -1;  // the query running now, or -1
 };
 
 }  // namespace gpu

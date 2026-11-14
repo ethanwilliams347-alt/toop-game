@@ -474,6 +474,28 @@ void fill_lit(const Mood& m, lit::LitFrame& out) {
                                         l.radius,
                                         l.flicker};
     }
+    // The atmosphere (R5, R6).
+    out.fog_on = m.fog.on;
+    out.fog[0] = m.fog.color.r;
+    out.fog[1] = m.fog.color.g;
+    out.fog[2] = m.fog.color.b;
+    out.fog_near = m.fog.near_depth;
+    out.fog_far = m.fog.far_depth;
+    out.fog_amount = m.fog.amount;
+    out.bloom_on = m.bloom.on;
+    out.bloom_threshold = m.bloom.threshold;
+    out.bloom_strength = m.bloom.strength;
+    out.grade = m.grade.empty() ? nullptr : m.grade.c_str();
+    out.vignette = m.vignette;
+    out.grain = m.grain;
+    out.weather = static_cast<int>(m.weather.kind);
+    out.weather_density = m.weather.density;
+    out.weather_angle_deg = m.weather.angle;
+    out.weather_speed = m.weather.speed;
+    static_assert(static_cast<int>(WeatherKind::Rain) == 1 &&
+                      static_cast<int>(WeatherKind::Fog) == 2 &&
+                      static_cast<int>(WeatherKind::Dust) == 3,
+                  "lit::LitFrame::weather numbers the kinds as WeatherKind does");
 }
 
 }  // namespace mood

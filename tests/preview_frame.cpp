@@ -78,6 +78,9 @@ bool parse_pair(const char* text, char sep, long& a, long& b) {
 
 }  // namespace
 
+// Frames drawn for a lit shot; see where it is used.
+constexpr int TIMED_FRAMES = 4;
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::fprintf(stderr,
@@ -247,20 +250,44 @@ int main(int argc, char** argv) {
         fp.cells = cells;
         fp.light = lit_frame ? nullptr : &light;
         fp.light_texture = light_tex;
-        if (lit_frame) gl->begin_lit_frame();
-        frame::compose(*gl, fp);
+        // As main.cpp does: the frame's numbers first, since the backdrop's fog
+        // is applied as it is drawn. The step is the grid's, so weather and grain
+        // are those of the step shot, as in the game.
+        lit::LitFrame lf;
         if (lit_frame) {
-            lit::LitFrame lf;
             mood::fill_lit(m, lf);
             lf.origin_x = camera.view_x();
             lf.origin_y = camera.view_y();
             lf.screen_x = -camera.frac_x() * static_cast<float>(scale);
             lf.screen_y = -camera.frac_y() * static_cast<float>(scale);
             lf.scale = scale;
-            if (!gl->resolve_lit(lf)) {
+            lf.step = grid->steps();
+        }
+        // Drawn TIMED_FRAMES times when lit, so the GPU timings printed below are
+        // a warm frame's -- the first pays for target allocation and shader
+        // warm-up -- and the image saved is the last, identical to the first.
+        const int frames = lit_frame ? TIMED_FRAMES : 1;
+        for (int k = 0; k < frames; ++k) {
+            if (lit_frame) {
+                gl->begin_lit_frame();
+                gl->set_fog(lf);
+            }
+            frame::compose(*gl, fp);
+            if (lit_frame && !gl->resolve_lit(lf)) {
                 std::fprintf(stderr, "the lit frame failed: %s\n", gl->error());
                 code = 1;
             }
+        }
+        if (lit_frame) {
+            float ms[gpu::Pipeline::TIMER_COUNT];
+            gl->gpu_ms(ms, true);
+            float total = 0.0f;
+            std::printf("gpu ms at %dx%d:", gl->target_w(), gl->target_h());
+            for (int t = 0; t < gpu::Pipeline::TIMER_COUNT; ++t) {
+                std::printf(" %s %.3f", gpu::Pipeline::timer_name(t), static_cast<double>(ms[t]));
+                total += ms[t];
+            }
+            std::printf("  total %.3f\n", static_cast<double>(total));
         }
 
         std::vector<uint32_t> out;

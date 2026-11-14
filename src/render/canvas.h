@@ -102,6 +102,12 @@ public:
     // rather than a flag on blit because the cells are the one draw a shader looks
     // through to what is there, and every later material pass hangs off it.
     virtual void blit_cells(const Texture& colour, const FRect& dst) { blit(colour, nullptr, dst); }
+    // How far behind the world plane what is drawn next stands: 0 the world, 1
+    // the sky (1 - a parallax layer's factor; frame.cpp's draw_layer sets it per
+    // layer and puts it back to 0 after the backdrop). It is what aerial fog
+    // reads (gpu::GlCanvas::set_fog, mood `fog`). A no-op by default, so the SDL
+    // path and every legacy frame draw exactly what they did without it.
+    virtual void set_depth(float /*depth*/) {}
     // Shows the finished frame.
     virtual void present() = 0;
 

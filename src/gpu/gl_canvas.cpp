@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include "gpu/gl.h"
 #include "gpu/program.h"
 
@@ -214,6 +215,7 @@ void GlCanvas::apply_draw_buffers() {
 void GlCanvas::begin_lit_frame() {
     flush();
     lit_ = true;
+    pipeline_.begin_canvas_timer();
     if (frame_open_) {
         gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
         apply_draw_buffers();
@@ -223,6 +225,10 @@ void GlCanvas::begin_lit_frame() {
 bool GlCanvas::resolve_lit(const lit::LitFrame& f) {
     begin_frame();
     flush();
+    apply_fog(0.0f);
+    fog_on_ = false;
+    if (f.grade && std::string(f.grade) != lut_path_ && lut_path_ != "<memory>")
+        ensure_lut(f.grade);
     Pipeline::Inputs in;
     in.albedo_tex = fbo_tex_;
     in.emissive_tex = emissive_tex_;
@@ -248,6 +254,62 @@ bool GlCanvas::resolve_lit(const lit::LitFrame& f) {
     return ok;
 }
 
+void GlCanvas::set_fog(const lit::LitFrame& f) {
+    fog_on_ = lit_ && f.fog_on && f.fog_amount > 0.0f && f.fog_far > f.fog_near;
+    for (int k = 0; k < 3; ++k) fog_lin_[k] = f.fog[k];
+    fog_near_ = f.fog_near;
+    fog_far_ = f.fog_far;
+    fog_amount_ = f.fog_amount;
+    apply_fog(0.0f);
+}
+
+void GlCanvas::set_depth(float depth) {
+    if (!fog_on_) return;
+    // Smoothstep from near to far: no visible seam where the fog starts, and
+    // the far layers settle into it rather than flattening at a hard limit.
+    float t = std::clamp((depth - fog_near_) / (fog_far_ - fog_near_), 0.0f, 1.0f);
+    t = t * t * (3.0f - 2.0f * t);
+    apply_fog(fog_amount_ * t);
+}
+
+// A uniform on the sprite program, so a change ends the batch drawn under the
+// old one. Layers change it a handful of times a frame; the ground plane, once
+// per row, which it already draws one row at a time.
+void GlCanvas::apply_fog(float amount) {
+    if (amount == fog_now_) return;
+    flush();
+    fog_now_ = amount;
+    gl::UseProgram(program_);
+    gl::Uniform4f(gl::GetUniformLocation(program_, "u_fog"), fog_lin_[0], fog_lin_[1], fog_lin_[2],
+                  amount);
+}
+
+void GlCanvas::ensure_lut(const char* path) {
+    lut_path_ = path;
+    SDL_Surface* raw = SDL_LoadBMP(path);
+    SDL_Surface* rgba = raw ? SDL_ConvertSurfaceFormat(raw, SDL_PIXELFORMAT_ABGR8888, 0) : nullptr;
+    if (raw) SDL_FreeSurface(raw);
+    // make_lut.py's strip is 1024 x 32; anything else is not one, and grading
+    // through it would sample garbage.
+    if (!rgba || rgba->w != 1024 || rgba->h != 32) {
+        std::fprintf(stderr,
+                     "WARNING: grade %s is not a 1024x32 LUT strip (%s); drawing ungraded.\n", path,
+                     rgba ? "wrong size" : SDL_GetError());
+        pipeline_.set_lut(nullptr, 0, 0);
+        if (rgba) SDL_FreeSurface(rgba);
+        return;
+    }
+    // ABGR8888 is R, G, B, A in memory on a little-endian machine: GL's RGBA bytes.
+    std::vector<unsigned char> bytes(static_cast<size_t>(rgba->w) * rgba->h * 4);
+    for (int y = 0; y < rgba->h; ++y)
+        std::memcpy(bytes.data() + static_cast<size_t>(y) * rgba->w * 4,
+                    static_cast<const unsigned char*>(rgba->pixels) +
+                        static_cast<size_t>(y) * rgba->pitch,
+                    static_cast<size_t>(rgba->w) * 4);
+    pipeline_.set_lut(bytes.data(), rgba->w, rgba->h);
+    SDL_FreeSurface(rgba);
+}
+
 bool GlCanvas::reload_shaders() {
     flush();
     // The light passes first: they keep their old programs on a failure, so a
@@ -260,6 +322,7 @@ bool GlCanvas::reload_shaders() {
     program_ = sprite;
     cells_program_ = cells;
     u_scale_ = -1;  // looked up again against the new program
+    fog_now_ = 0.0f;  // a new program starts with u_fog at zero
     bind_cell_uniforms();
     // A reload between frames is the usual case; one mid-frame (a test) needs the
     // new program's scale now, which begin_frame only sets when it opens a frame.

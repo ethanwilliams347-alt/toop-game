@@ -111,6 +111,27 @@ public:
     }
     void read_sun(std::vector<float>& vis, int& w, int& h) { pipeline_.read_sun(vis, w, h); }
 
+    // --- atmosphere (R5) ---
+    // Aerial fog for the backdrop about to be drawn: call after begin_lit_frame
+    // and before the frame code draws, with the frame's mood half filled
+    // (mood::fill_lit). Each layer then fades toward the fog by its depth
+    // (set_depth) -- its paint scaled down and the fog's colour put in the
+    // emissive attachment, so the haze is light in the air, not paint the
+    // night's ambient would darken to black. Off again at resolve_lit.
+    void set_fog(const lit::LitFrame& f);
+    void set_depth(float depth) override;
+    // The grade strip a frame names (LitFrame::grade) is loaded on first use and
+    // kept while frames keep naming it; a strip that will not load is reported
+    // once to stderr and the frame is drawn ungraded.
+    // Per-pass GPU milliseconds (Pipeline::Timer order); see Pipeline::gpu_ms.
+    void gpu_ms(float out[Pipeline::TIMER_COUNT], bool wait) { pipeline_.gpu_ms(out, wait); }
+    // For tests: the grade strip from memory instead of a file, used while a
+    // frame names any grade. Null drops it.
+    void set_lut_pixels(const unsigned char* rgba, int w, int h) {
+        pipeline_.set_lut(rgba, w, h);
+        lut_path_ = rgba ? "<memory>" : "";
+    }
+
     gfx::Texture create_texture(int w, int h, gfx::Access access, gfx::Blend blend,
                                 gfx::Filter filter = gfx::Filter::Nearest) override;
     void destroy_texture(gfx::Texture& tex) override;
@@ -177,6 +198,14 @@ private:
     unsigned fbo_ = 0, fbo_tex_ = 0;
     unsigned emissive_tex_ = 0;  // attachment 1 of fbo_, RGBA16F; drawn only in a lit frame
     bool lit_ = false;
+    // Fog (set_fog): the mood's, and the strength the sprite program has now.
+    bool fog_on_ = false;
+    float fog_lin_[3] = {0.0f, 0.0f, 0.0f};
+    float fog_near_ = 0.0f, fog_far_ = 1.0f, fog_amount_ = 0.0f;
+    float fog_now_ = 0.0f;
+    void apply_fog(float amount);
+    std::string lut_path_;  // the strip the pipeline holds, or "" / "<memory>"
+    void ensure_lut(const char* path);
     lit::LightConstants constants_;
     Pipeline pipeline_;
     int target_w_ = 0, target_h_ = 0;

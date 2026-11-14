@@ -10,14 +10,16 @@
 //   world     -> albedo, emissive           frame::compose, cells to foreground
 //   light     pack -> blocks, sun           GPU port of LightField + sun march
 //   resolve   albedo, emissive, blocks, sun -> hdr   albedo x light + emissive
-//   weather   hdr -> hdr                    R6; draws nothing yet
-//   post      hdr -> frame                  linear back to display; R5 adds
-//                                           tonemap, bloom, grade, fog, grain
+//   weather   pack, hdr -> hdr              R6: rain, wisps, dust, lit, stopped
+//                                           at the first solid in each column
+//   bloom     hdr -> bloom                  R5: over-threshold light, 1/2 to 1/16
+//   post      hdr, bloom -> frame           R5: bloom, tonemap, grade, vignette,
+//                                           grain, then the display encode
 //   ui        frame -> frame                overlay::draw, after the world
 //
 // The first two and the last are drawn by the CPU-side frame code through
 // gfx::Canvas (GlCanvas routes those draws to the albedo/emissive pair while
-// a lit frame is open); gpu::Pipeline runs the four in between, in this
+// a lit frame is open); gpu::Pipeline runs the five in between, in this
 // table's order (pipeline.cpp walks it). The legacy light model never opens a
 // lit frame and draws exactly what the SDL path does, so none of this exists
 // for it.
@@ -41,11 +43,12 @@ enum Target : uint32_t {
     SUN = 1u << 4,       // sun visibility, one texel per cell
     HDR = 1u << 5,       // the lit frame, linear, RGBA16F
     FRAME = 1u << 6,     // what is presented (shares the albedo texture)
+    BLOOM = 1u << 7,     // the bloom chain's top level, half resolution, linear
 };
 
 enum class Kind : uint8_t { Canvas, Gpu, Resolve, Post, Ui };
 
-enum class Id : uint8_t { Backdrop, World, Light, Resolve, Weather, Post, Ui };
+enum class Id : uint8_t { Backdrop, World, Light, Resolve, Weather, Bloom, Post, Ui };
 
 // Pointer and masks first, the two bytes last: no padding between them.
 struct Pass {
@@ -62,8 +65,9 @@ inline constexpr Pass PASSES[] = {
     {"world", PACK, ALBEDO | EMISSIVE, Id::World, Kind::Canvas},
     {"light", PACK, BLOCKS | SUN, Id::Light, Kind::Gpu},
     {"resolve", ALBEDO | EMISSIVE | BLOCKS | SUN, HDR, Id::Resolve, Kind::Resolve},
-    {"weather", HDR, HDR, Id::Weather, Kind::Gpu},
-    {"post", HDR, FRAME, Id::Post, Kind::Post},
+    {"weather", PACK | HDR, HDR, Id::Weather, Kind::Gpu},
+    {"bloom", HDR, BLOOM, Id::Bloom, Kind::Gpu},
+    {"post", HDR | BLOOM, FRAME, Id::Post, Kind::Post},
     {"ui", FRAME, FRAME, Id::Ui, Kind::Ui},
 };
 inline constexpr int PASS_COUNT = static_cast<int>(sizeof(PASSES) / sizeof(PASSES[0]));
@@ -98,6 +102,12 @@ constexpr bool every_pass_writes() {
     return true;
 }
 
+constexpr int index_of_id(Id id) {
+    for (int i = 0; i < PASS_COUNT; ++i)
+        if (PASSES[i].id == id) return i;
+    return -1;
+}
+
 // The table's position is the pass's identity, so Id can be used as an index.
 constexpr bool ids_in_order() {
     for (int i = 0; i < PASS_COUNT; ++i)
@@ -112,6 +122,12 @@ static_assert(count_of(Kind::Post) == 1 && count_of(Kind::Ui) == 1,
 static_assert(index_of(Kind::Ui) > index_of(Kind::Post), "UI is drawn after Post, unlit");
 static_assert(index_of(Kind::Post) > index_of(Kind::Resolve), "Post reads the resolved frame");
 static_assert(every_pass_writes(), "a pass that writes nothing is not a pass");
+// Weather is drawn into the lit frame before bloom reads it, so a raindrop
+// crossing a lamp's pool blooms with it -- and after the resolve, so the rain
+// is light added in front of the world, not paint the light multiplies.
+static_assert(index_of_id(Id::Weather) > index_of_id(Id::Resolve) &&
+                  index_of_id(Id::Weather) < index_of_id(Id::Bloom),
+              "weather sits between the resolve and bloom");
 static_assert(ids_in_order(), "PASSES is indexed by Id; keep them in the same order");
 
 }  // namespace gpu::pass_graph
