@@ -210,6 +210,7 @@ what each scene does in numbers and pictures; run it after turning any of these.
 | `LIQUID_SPIN_DRAG` | [grid.h](src/physics/grid.h) | 40 | The same for spin, /256. Higher stops a piece turning in water sooner. |
 | `LIQUID_FORM_DRAG` | [grid.h](src/physics/grid.h) | 5 | Speed-squared drag in liquid, applied as v / (1 + k v). Sets terminal speed: an 8x6 stone sinks at about 0.6 cells/step. Higher sinks slower and slaps harder into a pool. |
 | `LIQUID_ADDED_MASS` | [grid.h](src/physics/grid.h) | 1 | Share of the displaced liquid's weight a body must move along with itself. Why stone gathers speed instead of starting at it, and wood held under rises gently instead of popping. |
+| `WATERLINE_SLACK` | [grid.h](src/physics/grid.h) | 3/4 cell | How far above the liquid on a floating body's lower side the waterline it is lifted by may stand. Higher believes more of the side-to-side bob (rafts with a rider buck); lower sinks a raft by the bob and leaves a splashed block bobbing longer. |
 | `FLOAT_SLEEP_DRIFT` | [grid.h](src/physics/grid.h) | 1/8 cell | `BODY_SLEEP_DRIFT` for a body held only by liquid. At 1/2 a floater was stopped mid-bob, found floating and relaunched -- the pop. |
 | `REST_SQUARE_ANGLE` | [grid.h](src/physics/grid.h) | 1/10 rad | A body coming to rest within about six degrees of a quarter turn is set down exactly square, so its cells match its sprite and the hand-back does not jump. 0 leaves every rest at its own angle. |
 | `SETTLE_STEPS` | [present.h](src/present/present.h) | 10 | Steps over which a body's sprite eases onto the pose its cells will take. Shorter snaps; longer looks like sliding into place. Presentation only. |
@@ -629,3 +630,12 @@ Record adjustments to tuning parameters and their rationale here.
   rubble buries the player's feet on that step and the dig-out zeroed it, so it
   is now held until the body is free. `IMPACT_SAFE_SPEED` 60 is a cell a step:
   a slab dropped one body height (about 180 cells/s) hurts, a raft nudge does not.
+- **`WATERLINE_SLACK` 3/4 added (playtest 4.1).** A body's waterline was the
+  highest liquid beside any of its cells, so a film down one side of a slab set it
+  at the slab's top and lifted the slab out of the pond, and splash kept dropped
+  slabs bobbing for up to twenty seconds. The waterline is now taken per side,
+  from liquid that rests on something rather than drops in the air, and the
+  higher side may stand at most this far above the lower. Swept 0, 1/4, 1/2, 3/4,
+  1, 2 against `collapse_test` and `player_test`: only 3/4 passed both (see the
+  comment in grid.h for what each other value broke), so this sits in a narrow
+  band and is worth re-checking when buoyancy or the rider coupling changes.

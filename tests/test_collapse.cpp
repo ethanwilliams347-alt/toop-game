@@ -1033,6 +1033,72 @@ int main() {
         check("and both come to rest", !g.has_pending_support_checks());
     }
 
+    // --- a wooden slab dropped in a pond settles in it, never above it ---
+    // Playtest 4.1: the waterline was the highest liquid beside any of the
+    // slab's cells, so a splash drop or a film down one side counted the whole
+    // slab as under water. Dropped in, it bobbed on that noise for up to twenty
+    // seconds before it came to rest; with water kept running down one side of
+    // it, it rose out of the pond to the top of the world. body_probe's `raft`
+    // scene logs the same drops, and narrower ponds.
+    {
+        const auto wood_rows = [](const Grid& g, int& top, int& bottom) {
+            top = 99;
+            bottom = -1;
+            for (int y = 0; y < g.get_height(); ++y)
+                for (int x = 0; x < g.get_width(); ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) {
+                        top = std::min(top, y);
+                        bottom = std::max(bottom, y);
+                    }
+        };
+        for (const int drop : {2, 10, 30}) {
+            Grid g(240, 100);
+            fill(g, 0, 90, 239, 99, ElementType::Wall);
+            fill(g, 0, 40, 0, 89, ElementType::Wall);
+            fill(g, 239, 40, 239, 89, ElementType::Wall);
+            fill(g, 1, 60, 238, 89, ElementType::Water);
+            fill(g, 97, 56 - drop, 126, 59 - drop, ElementType::Wood);
+            nudge(g, 107, 55 - drop);
+            int rest = -1;
+            for (int s = 1; s <= 900 && rest < 0; ++s) {
+                g.update();
+                if (s > 30 && g.tipping_count() == 0) rest = s;
+            }
+            int top = 0, bottom = 0;
+            wood_rows(g, top, bottom);
+            const std::string at = "dropped from " + std::to_string(drop) + ": ";
+            check((at + "a slab in a pond comes to rest within 15 s").c_str(), rest > 0,
+                  "at rest at step " + std::to_string(rest));
+            check((at + "and rests in the water, not on top of it").c_str(),
+                  top < 60 && bottom >= 60,
+                  "wood rows " + std::to_string(top) + ".." + std::to_string(bottom) +
+                      ", surface 60");
+        }
+
+        Grid g(240, 100);
+        fill(g, 0, 90, 239, 99, ElementType::Wall);
+        fill(g, 0, 40, 0, 89, ElementType::Wall);
+        fill(g, 239, 40, 239, 89, ElementType::Wall);
+        fill(g, 1, 60, 238, 89, ElementType::Water);
+        fill(g, 60, 48, 89, 57, ElementType::Wood);
+        nudge(g, 70, 47);
+        step(g, 600);
+        int top = 0, bottom = 0;
+        wood_rows(g, top, bottom);
+        int highest = bottom;
+        for (int s = 0; s < 300; ++s) {
+            int l = 0;
+            while (l < 239 && g.get_element(l, top).type != ElementType::Wood) ++l;
+            if (l > 1 && g.get_element(l - 1, top).type == ElementType::Empty)
+                g.set_element(l - 1, top, ElementType::Water);
+            g.update();
+            wood_rows(g, top, bottom);
+            highest = std::min(highest, bottom);
+        }
+        check("water running down one side of a floating slab does not lift it out of the pond",
+              highest >= 60, "bottom rose to row " + std::to_string(highest) + ", surface 60");
+    }
+
     // --- a plunge splashes, and the splash is water like any other ---
     // The same drop, watched every step. A body pushes the water it enters out
     // beside itself with its own momentum, and water thrown up fast enough

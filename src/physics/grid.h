@@ -1177,6 +1177,16 @@ private:
     // two thirds of it -- it was the pop a playtest saw.
     static constexpr fx::v LIQUID_ADDED_MASS = fx::from_ratio(1, 1);
 
+    // How far, in cells, the waterline a floating body is lifted by may stand
+    // above the liquid on its other side (apply_body_forces). A raft bobbing in
+    // a pond sees its two sides up to a cell or so apart, and the slack is how
+    // much of that is believed. At 2 a slab with a player on it bucked under
+    // the current and threw them off; at 1 the same, less; at 1/2 and below a
+    // splashed block took more than fifteen seconds to come to rest, and at 0
+    // a raft no longer sat any deeper with the player on it. Anything finite
+    // stops a film down one side lifting a slab out of the water.
+    static constexpr fx::v WATERLINE_SLACK = fx::from_ratio(3, 4);
+
     // BODY_SLEEP_DRIFT for a body held only by liquid. A body afloat drifts in
     // a gentle bob that half a cell would take for stopped, and stopping it there
     // freezes it mid-bob; the support logic then finds it floating and launches
