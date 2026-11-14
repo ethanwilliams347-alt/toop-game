@@ -1321,6 +1321,83 @@ int main() {
         check("two runs of the same pushes end pixel-identical", run() == run());
     }
 
+    // --- a raft that went to sleep afloat can still be pushed ---
+    // A floating body sleeps like any other once it stops drifting, and is then
+    // structure at rest with water under it. The wake tests asked only for solid
+    // underneath -- "one with nothing under it is hanging from a weld" -- so a
+    // sleeping raft was deaf to every push and blow, frozen on the pool for good.
+    {
+        Grid g(120, 60);
+        fill(g, 0, 50, 119, 59, ElementType::Wall);
+        fill(g, 0, 20, 0, 49, ElementType::Wall);
+        fill(g, 119, 20, 119, 49, ElementType::Wall);
+        fill(g, 1, 35, 118, 49, ElementType::Water);
+        fill(g, 40, 30, 69, 32, ElementType::Wood);
+        nudge(g, 50, 29);
+        int s = 0;
+        while (s < 3000 && g.has_pending_support_checks()) {
+            g.update();
+            ++s;
+        }
+        int left = -1;
+        for (int x = 0; x < 120 && left < 0; ++x)
+            for (int y = 0; y < 60; ++y)
+                if (g.get_element(x, y).type == ElementType::Wood) {
+                    left = x;
+                    break;
+                }
+        check("a raft let go on a pool comes to rest afloat", g.tipping_count() == 0 && left >= 0,
+              "after " + std::to_string(s) + " steps");
+        int row = -1;
+        for (int y = 0; y < 60 && row < 0; ++y)
+            if (g.get_element(left, y).type == ElementType::Wood) row = y;
+        const bool took = g.queue_impulse(left, row, strong, 0);
+        check("and a push on it wakes it", took && g.tipping_count() == 1,
+              "queued " + std::to_string(took) + " bodies " + std::to_string(g.tipping_count()));
+    }
+
+    // --- a piece let go in a mirrored world turns the mirrored way ---
+    // Mirror symmetry is a stated goal of the fixed-point rules (products are
+    // truncated toward zero, so +x and -x round alike; sin is exactly odd). A slab
+    // let go over a drop, and its reflection: until either touches anything, the
+    // two bodies must be exact mirror images, spin included. The release nudge
+    // used to be keyed on the piece's first cell in scan order, which a mirror
+    // does not preserve, and the two slabs started out turning at different
+    // rates. After first contact they may still part by a few cells: the contact
+    // solve is sequential (Gauss-Seidel in gather order), and that order is not
+    // mirror-symmetric. That is accepted, not tested.
+    {
+        const int W = 100, H = 70;
+        const auto build = [&](bool flip) {
+            Grid g(W, H);
+            const auto f = [&](int x0, int y0, int x1, int y1, ElementType t) {
+                if (flip) fill(g, W - 1 - x1, y0, W - 1 - x0, y1, t);
+                else fill(g, x0, y0, x1, y1, t);
+            };
+            f(0, 65, W - 1, H - 1, ElementType::Wall);
+            f(0, 45, 30, 64, ElementType::Wall);
+            f(20, 38, 55, 42, ElementType::Wall);  // a slab two rows above the ledge
+            nudge(g, flip ? W - 1 - 20 : 20, 37);
+            return g;
+        };
+        Grid a = build(false);
+        Grid b = build(true);
+        bool same = true;
+        std::string where;
+        for (int s = 0; s < 3 && same; ++s) {
+            a.update();
+            b.update();
+            same = a.tipping_count() == 1 && b.tipping_count() == 1;
+            if (!same) break;
+            const Grid::BodyState p = a.body_state(0), q = b.body_state(0);
+            same = p.x == W * fx::ONE - q.x && p.y == q.y && p.vx == -q.vx && p.vy == q.vy &&
+                   p.theta == -q.theta && p.omega == -q.omega && p.omega != 0;
+            where = "step " + std::to_string(s) + " omega " + std::to_string(p.omega) + " / " +
+                    std::to_string(q.omega);
+        }
+        check("a slab and its mirror image fall as exact mirror images", same, where);
+    }
+
     // --- a piece tag that comes round again does not weld two pieces ---
     // piece_tag is one byte, so after 255 bodies the counter hands out a tag a
     // piece at rest may still wear. alloc_piece_tag only refuses tags in flight;

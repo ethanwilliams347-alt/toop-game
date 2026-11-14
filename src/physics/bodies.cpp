@@ -511,9 +511,29 @@ int Grid::start_body(const std::vector<int>& cells_of, int64_t vx, int64_t vy) {
     // Nothing comes loose perfectly still: a turn too small to see, drawn from
     // where and when it came loose, so that the same piece let go in two places
     // does not go over in two identical ways.
-    const int nudge =
-        sim_random::spread(8, world_seed, step_count, static_cast<uint64_t>(cells_of[0]),
-                           sim_random::Stream::BodyNudge);
+    //
+    // Keyed on where the piece is in a way a mirror cannot tell apart, and signed
+    // by which half of the world its centre is in, so the nudge is exactly
+    // antisymmetric: a world mirrored left to right turns every piece the mirrored
+    // way. It used to be a spread keyed on cells_of[0], the first cell in scan
+    // order, which is not the mirror of the mirrored piece's first cell -- so the
+    // mirrored slab drew a different turn and the two worlds parted on the first
+    // step (test_collapse, "a mirrored collapse"). sx is the piece's doubled
+    // horizontal moment about the world's centre line, antisymmetric under the
+    // mirror; sy is the sum of its rows, unchanged by it. A piece centred exactly
+    // on that line gets no nudge, which is what symmetry demands of it.
+    int64_t sx = 0, sy = 0;
+    for (const int idx : cells_of) {
+        const int cy = idx / width;
+        sx += 2 * (idx - cy * width) + 1 - width;
+        sy += cy;
+    }
+    const int64_t ax = sx < 0 ? -sx : sx;
+    const uint64_t key = static_cast<uint64_t>(ax) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(sy);
+    const int nudge = sx == 0 ? 0
+                              : (sx < 0 ? 1 : -1) *
+                                    (1 + sim_random::pick(8, world_seed, step_count, key,
+                                                          sim_random::Stream::BodyNudge));
     b.vx = vx;
     b.vy = vy;
     b.omega = static_cast<int64_t>(nudge) * NUDGE_SPIN / 8;
@@ -1078,12 +1098,14 @@ void Grid::gather_contacts(int i) {
                     if (closing < -WAKE_SPEED && collect_piece(oidx, false)) {
                         // Only a piece standing on something: one with nothing
                         // under it is hanging from whatever it is welded to, and
-                        // nothing struck it loose.
+                        // nothing struck it loose. Liquid under it counts: a
+                        // piece that went to sleep afloat is floating, not hanging
+                        // (see wake_for_push, which asks the same question).
                         bool stands = false;
                         for (const int c : balance_component) {
                             const int below = c + width;
                             if (below < width * height && balance_visit[below] != balance_epoch &&
-                                is_solid(cells[below].type)) {
+                                (is_solid(cells[below].type) || is_liquid(cells[below].type))) {
                                 stands = true;
                                 break;
                             }
@@ -1755,7 +1777,7 @@ void Grid::step_tipping() {
         for (const int q : balance_component) {
             const int below = q + width;
             if (below < width * height && balance_visit[below] != balance_epoch &&
-                is_solid(cells[below].type)) {
+                (is_solid(cells[below].type) || is_liquid(cells[below].type))) {
                 stands = true;
                 break;
             }

@@ -97,7 +97,12 @@ namespace input_log {
 //    version-11 log was recorded against entities that passed through bodies and
 //    fell through water as air, so it replays into a different world from the
 //    first step either is touched.
-constexpr uint32_t FORMAT_VERSION = 12;
+// 13: loose bodies (bodies.cpp). The spin a piece is given as it comes loose
+//    is drawn from a mirror-invariant key and signed by side, so a mirrored
+//    world tips the mirrored way; and a body that stops against a resting
+//    piece wearing its own recycled tag takes a fresh one instead of welding to
+//    it. Layout unchanged; a version-12 log loosens pieces with different spins.
+constexpr uint32_t FORMAT_VERSION = 13;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt
