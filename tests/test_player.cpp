@@ -546,7 +546,7 @@ int main() {
         // gentle landing is free.
         Player p(10, PLATFORM_Y - Player::HEIGHT - 3);
         step(g, p, NOTHING, 30);
-        check("S0: a gentle first landing costs nothing",
+        check("a gentle first landing costs nothing",
               p.health() == Player::MAX_HEALTH && feet(p) == PLATFORM_Y,
               "hp=" + std::to_string(p.health()) + " " + feet_detail(p));
 
@@ -557,7 +557,7 @@ int main() {
 
         const int expected = fx::trunc(Player::MAX_FALL_SPEED - Player::SAFE_FALL_SPEED) /
                              Player::FALL_DAMAGE_DIVISOR;
-        check("S0: a terminal-velocity landing costs the full fall-damage price",
+        check("a terminal-velocity landing costs the full fall-damage price",
               feet(p) == TALL_FLOOR && p.health() == Player::MAX_HEALTH - expected,
               "hp=" + std::to_string(p.health()) + " expected " +
                   std::to_string(Player::MAX_HEALTH - expected) + "; " + feet_detail(p));
@@ -565,7 +565,7 @@ int main() {
         // And the same again kills, which is the design stated at SAFE_FALL_SPEED:
         // one free terminal-velocity mistake, not two. This is also the clamp --
         // health stops at zero rather than going negative.
-        check("S0: two terminal-velocity landings are more than a full bar",
+        check("two terminal-velocity landings are more than a full bar",
               2 * expected >= Player::MAX_HEALTH,
               std::to_string(expected) + " each of " + std::to_string(Player::MAX_HEALTH));
     }
@@ -579,7 +579,7 @@ int main() {
         Player p(10, AIR_Y);
         step(g, p, NOTHING, 4 * TALL_H);
 
-        check("S0: the spawn drop is free at any height",
+        check("the spawn drop is free at any height",
               p.is_on_ground() && p.health() == Player::MAX_HEALTH,
               "hp=" + std::to_string(p.health()) + "; " + feet_detail(p));
     }
@@ -601,7 +601,7 @@ int main() {
             step(g, p, NOTHING, 90);  // up, over and back down
             if (!p.is_on_ground()) break;
         }
-        check("S0: a standing jump lands for free, every time",
+        check("a standing jump lands for free, every time",
               p.is_on_ground() && p.health() == Player::MAX_HEALTH,
               "hp=" + std::to_string(p.health()) + "; " + feet_detail(p));
     }
@@ -614,7 +614,7 @@ int main() {
         Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
         Player p(10, STAND_Y);
         step(g, p, NOTHING, 60);
-        check("S0: the body starts a run at full health", p.health() == Player::MAX_HEALTH);
+        check("the body starts a run at full health", p.health() == Player::MAX_HEALTH);
 
         const int seconds_worth = 60;
         for (int i = 0; i < seconds_worth; ++i) {
@@ -628,7 +628,7 @@ int main() {
         // A tick on the step the body first touches heat, then one every
         // BURN_INTERVAL_STEPS after it.
         const int ticks = 1 + (seconds_worth - 1) / Player::BURN_INTERVAL_STEPS;
-        check("S0: standing in fire costs health at the burn rate",
+        check("standing in fire costs health at the burn rate",
               p.health() == Player::MAX_HEALTH - ticks * Player::BURN_DAMAGE,
               "hp=" + std::to_string(p.health()) + " expected " +
                   std::to_string(Player::MAX_HEALTH - ticks * Player::BURN_DAMAGE));
@@ -650,7 +650,7 @@ int main() {
             g.update();
             p.update(g, NOTHING);
         }
-        check("S0: standing in steam costs nothing", p.health() == Player::MAX_HEALTH,
+        check("standing in steam costs nothing", p.health() == Player::MAX_HEALTH,
               "hp=" + std::to_string(p.health()) + ", steam spawns at " +
                   std::to_string(material_of(ElementType::Steam).spawn_temperature) +
                   " against a threshold of " + std::to_string(Player::BURN_TEMPERATURE));
@@ -675,7 +675,7 @@ int main() {
             g.update();
             p.update(g, NOTHING);
         }
-        check("S0: a body left in fire dies, and stops at zero rather than below it",
+        check("a body left in fire dies, and stops at zero rather than below it",
               p.health() == 0 && !p.is_alive(), "hp=" + std::to_string(p.health()));
     }
 

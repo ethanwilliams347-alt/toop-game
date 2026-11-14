@@ -576,4 +576,4 @@ static_assert(Player::BURN_TEMPERATURE > material_of(ElementType::Steam).spawn_t
 static_assert(Player::BURN_TEMPERATURE < material_of(ElementType::Fire).spawn_temperature &&
                   Player::BURN_TEMPERATURE < material_of(ElementType::Charred).heat_source,
               "fire or burning wood is no longer hot enough to hurt the player, which is "
-              "the one thing S0's burn rule exists to do");
+              "the one thing the burn rule exists to do");

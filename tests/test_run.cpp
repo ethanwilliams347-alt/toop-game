@@ -453,11 +453,11 @@ int main() {
         const auto run_owner = std::make_unique<Run>(200, 120, 5150);
         Run& run = *run_owner;
         build_floor(run, 100);
-        check("S0: a fresh run is Playing", run.outcome() == Run::Outcome::Playing);
-        check("S0: ...and has no objective until one is placed", !run.has_objective());
+        check("a fresh run is Playing", run.outcome() == Run::Outcome::Playing);
+        check("...and has no objective until one is placed", !run.has_objective());
 
         step(run, NOTHING, 200);
-        check("S0: a run with no objective and no hazard stays Playing",
+        check("a run with no objective and no hazard stays Playing",
               run.outcome() == Run::Outcome::Playing && run.player.is_alive(),
               "hp=" + std::to_string(run.player.health()));
     }
@@ -478,11 +478,10 @@ int main() {
         // cannot be overlapping it at placement time.
         const int goal = start_x + Player::WIDTH + 4 * Run::OBJECTIVE_REACH + 40;
         run.set_objective(goal, run.player.center_y());
-        check("S0: an objective can be placed", run.has_objective() &&
-              run.objective_x() == goal);
+        check("an objective can be placed", run.has_objective() && run.objective_x() == goal);
 
         run.step(NOTHING);
-        check("S0: an objective out of reach does not end the run",
+        check("an objective out of reach does not end the run",
               run.outcome() == Run::Outcome::Playing,
               "player x=" + std::to_string(run.player.cell_x()) +
                   " goal x=" + std::to_string(goal));
@@ -492,8 +491,7 @@ int main() {
         for (int i = 0; i < 300 && run.outcome() == Run::Outcome::Playing; ++i)
             run.step(held_right());
 
-        check("S0: walking onto the objective wins the run",
-              run.outcome() == Run::Outcome::Won,
+        check("walking onto the objective wins the run", run.outcome() == Run::Outcome::Won,
               "player x=" + std::to_string(run.player.cell_x()) +
                   " goal x=" + std::to_string(goal));
     }
@@ -519,7 +517,7 @@ int main() {
             run.step(burn);
         }
 
-        check("S0: a body burnt to zero health loses the run",
+        check("a body burnt to zero health loses the run",
               run.outcome() == Run::Outcome::Lost && !run.player.is_alive(),
               "hp=" + std::to_string(run.player.health()));
 
@@ -528,7 +526,7 @@ int main() {
         // drives straight past the ending, and a run that reported Playing again
         // once the flames went out would be worse than useless.
         step(run, NOTHING, 300);
-        check("S0: ...and the outcome does not un-latch when the hazard clears",
+        check("...and the outcome does not un-latch when the hazard clears",
               run.outcome() == Run::Outcome::Lost);
     }
 
@@ -544,16 +542,14 @@ int main() {
         step(run, NOTHING, 120);
         run.set_objective(run.player.center_x(), run.player.center_y());
         run.step(NOTHING);
-        check("S0: the run is Won before the reset", run.outcome() == Run::Outcome::Won);
+        check("the run is Won before the reset", run.outcome() == Run::Outcome::Won);
 
         run.reset(5153);
-        check("S0: reset puts the run back to Playing",
-              run.outcome() == Run::Outcome::Playing);
-        check("S0: ...with the body back at full health",
-              run.player.health() == Player::MAX_HEALTH);
-        check("S0: ...and the objective still placed",
-              run.has_objective(), "an objective cleared by reset leaves an "
-                                   "unwinnable run that says nothing");
+        check("reset puts the run back to Playing", run.outcome() == Run::Outcome::Playing);
+        check("...with the body back at full health", run.player.health() == Player::MAX_HEALTH);
+        check("...and the objective still placed", run.has_objective(),
+              "an objective cleared by reset leaves an "
+              "unwinnable run that says nothing");
 
         // And the one thing that may clear it, which is a level change. The
         // exception above is right while the caller re-stamps the same scene;
@@ -561,10 +557,9 @@ int main() {
         // hanging in empty space, claiming a run is winnable when nothing can be
         // reached.
         run.clear_objective();
-        check("S0: clear_objective removes it, for a caller changing the level",
-              !run.has_objective());
+        check("clear_objective removes it, for a caller changing the level", !run.has_objective());
         run.reset(5153);
-        check("S0: ...and it stays cleared through a reset", !run.has_objective());
+        check("...and it stays cleared through a reset", !run.has_objective());
     }
 
     // --- the recorder's guarantee survives a restart ---
@@ -594,7 +589,7 @@ int main() {
 
         a.reset(5154);
         build_floor(a, 60);  // what main.cpp's re-stamp of the scene stands in for
-        check("S0: reset plus a re-stamp reproduces the world a recording starts from",
+        check("reset plus a re-stamp reproduces the world a recording starts from",
               input_log::fingerprint(a.grid) == before,
               "a mismatch here means a restarted session's log replays into a "
               "different world than it was recorded in");
