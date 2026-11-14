@@ -339,6 +339,9 @@ int main() {
         lit::CellLook off;
         mood::fill_cell_look(legacy.m, off);
         check("cell look: a legacy mood leaves it off", legacy.ok && !off.on, legacy.error);
+        // parse() writes TMP again, after the cleanup above; without this the
+        // test leaves it in the working directory -- the repo root under ctest.
+        std::remove(TMP);
     }
     std::printf("       (%d mood file%s under assets/)\n", found, found == 1 ? "" : "s");
 
