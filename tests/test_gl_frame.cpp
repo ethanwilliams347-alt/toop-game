@@ -135,7 +135,6 @@ struct Scene {
     std::vector<frame::SprayDrop> spray;
     frame::Params p;
     overlay::Params op;
-    bool available[DISPLAY_MODE_COUNT] = {};
 
     gfx::Texture keep(gfx::Texture t) {
         owned.push_back(t);
@@ -228,14 +227,18 @@ struct Scene {
         op.hud_lines.push_back({"PAUSED  STEP", 0xFF80D0FF});
         op.hotbar_selected = 1;
         op.run_over = true;
-        for (bool& a : available) a = true;
-        available[DISPLAY_MODE_COUNT - 1] = false;
         op.settings_open = true;
-        op.cursor = 1;
-        op.mode_count = DISPLAY_MODE_COUNT;
-        op.current_mode = 0;
-        op.modes = DISPLAY_MODES;
-        op.available = available;
+        {
+            // A pending change on the selected row, so the value arrows and the
+            // changed-value colour are both drawn.
+            menu::State ms;
+            ms.applied.size = DisplayMode{1920, 1080};
+            ms.pending = ms.applied;
+            ms.pending.window = WindowMode::Fullscreen;
+            ScreenOptions so;
+            so.desktop = DisplayMode{1920, 1080};
+            op.settings = menu::view(ms, so, RendererChoice::Sdl, Camera::DEFAULT_SCALE);
+        }
         op.notice = "MODE CHANGED";
 
         for (const gfx::Texture& t : owned)

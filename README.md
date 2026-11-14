@@ -21,7 +21,10 @@ ctest --test-dir build -C Release --output-on-failure
 .\build\Release\grid_bench.exe
 ```
 
-- The 25 test suites are headless, one per concern (`tests/test_*.cpp`).
+- There are 28 test suites, one per concern: one per `tests/test_*.cpp`, plus
+  `sdl_boundary_test`, which checks that the simulation never sees SDL
+  (`ctest -N` lists them). All are headless except `gl_frame_test`, which needs
+  an OpenGL 3.3 context and reports itself skipped without one.
   `golden_frame_test` checksums a rendered frame, so a changed checksum means
   the visible output changed.
 - The benchmark is run by hand, not in CI. Only compare timings taken back to
@@ -37,7 +40,7 @@ together.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | Launch | Terrain is visible at once, and the console's `Scene: …, N cells placed` line shows a large `N`. |
+| 1 | Launch | The game opens on the `empty` scene. `F7` moves to the next scene, whose terrain is visible at once, and the console's `Scene: …, N cells placed` line shows a large `N`. |
 | 2 | Movement | Walking, jumping and landing are flush with the ground, walls block, and one-cell steps need no jump. |
 | 3 | Flight | Holding jump in the air beats the wings in countable, laboured strokes, not a hover. |
 | 4 | Digging | Left-click carves a hole, and undercutting sand makes the pile above it fall in. |
@@ -46,9 +49,10 @@ together.
 | 7 | Settling | Left alone, the HUD's awake-chunk count returns to 0. |
 | 8 | Structures | An unsupported wall or wood shape falls as one piece, and a supported one never drifts. |
 | 9 | Depth | Background layers scroll at different rates with no seams. |
-| 10 | The run | Falls and fire hurt, death shows `YOU DIED`, `R` restarts, and flying east over the channel reaches the goal. |
+| 10 | The run | Falls and fire hurt, death shows `YOU DIED`, `R` restarts, and reaching the marker at the east end of a terrain scene shows `OBJECTIVE REACHED`. |
 | 11 | Enemies | Shot limbs fall off as sand, and a head shot collapses the body. |
 | 12 | Stability | Minutes of all of the above together run with no crash or slowdown. |
+| 13 | Display | Each display mode in the settings menu applies, `Enter` keeps it, and a change left alone goes back after 10 seconds. |
 
 ## Controls
 
@@ -62,12 +66,14 @@ together.
 | `R` | Start a new run once the current one is over. |
 | `ESC` | Open the settings menu (quit is inside it). |
 
-**Settings menu**
+**Settings menu** (see [Settings](#settings) below)
 | Key | Action |
 |---|---|
-| `↑` / `↓`, `W` / `S` | Move the cursor. |
-| `Enter`, `Space` | Choose the highlighted item. |
-| `ESC` | Close the menu and resume. |
+| `↑` / `↓`, `W` / `S` | Move between rows. |
+| `←` / `→`, `A` / `D` | Change the row's value. Nothing changes until you apply it. |
+| `Enter`, `Space` | Apply every changed value. With nothing changed, close the menu. On `QUIT`, quit. |
+| `ESC` | Close the menu and resume, dropping changes not yet applied. |
+| `Enter` / `ESC` after a display change | Keep the new mode, or go back to the old one at once. |
 
 **Dev tools: world**
 | Key | Action |
@@ -92,14 +98,68 @@ together.
 | `F8` | Toggle the cell inspector for the cell under the cursor. |
 | `F9` | Save the session so far to `session.rec` (later saves go to `session_N.rec`). |
 
+**Dev tools: OpenGL renderer only** (`renderer=gl`; with the SDL renderer these keys do nothing)
+| Key | Action |
+|---|---|
+| `F5` | Recompile the shaders from the `assets/shaders/` copy next to the exe. A shader that doesn't compile keeps the old one running and prints why. |
+| `F10` | Switch the cells between the normal look and the material view, where each cell is flat-coloured by what it is. |
+| `F11` | Turn the scene's mood lighting off and on, to compare with the plain look. |
+| `F12` | Save the current frame next to the exe as `frame_NNN.bmp`. |
+
+Holding a key down doesn't repeat it, except for the keys that are meant to be
+held (movement, `E`, the mouse buttons), `.` (which steps once per repeat, to
+scrub) and the settings menu's arrow keys. A held `F7` changes scene once, and a
+held `F9` writes one recording.
+
 **Recordings are not actively maintained.** No change is checked against
 replaying a saved session. Before relying on recordings again, record a session,
 replay it, and confirm the replay matches.
 
-The settings menu offers 1920x1080, 2560x1440 and 3440x1440 at a fixed 4 screen
-pixels per cell, so a wider window shows more of the world. The choice is saved
-to `settings.txt` next to the exe, and a saved mode the display can't fit falls
-back to the largest one that fits.
+## Settings
+
+`ESC` opens the settings menu over the frozen game. Its rows are:
+
+- **Display:** `WINDOWED`, `BORDERLESS` (a borderless window covering the
+  screen at the desktop's own resolution; the usual choice for playing
+  fullscreen, including on an ultrawide), or `FULLSCREEN` (exclusive, at the
+  chosen resolution and that resolution's highest refresh rate).
+- **Resolution:** windowed, a common size that fits on the screen with the
+  window's title bar and the taskbar: 1280x720, 1366x768, 1600x900, 1920x1080,
+  2560x1080, 2560x1440, 3440x1440 or 3840x2160. Fullscreen, the resolutions the
+  monitor reports, from 1280x720 up. Borderless, always the desktop's size. The
+  row also shows how many cells the size shows in the current scene.
+- **VSync:** on or off.
+- **Renderer:** `SDL` or `OPENGL`. This one takes effect the next time the game
+  starts (the row says `ON RESTART` until then).
+- **Apply** and **Quit.**
+
+A cell is always the scene's scale in screen pixels (4 by default, 8 or 10 in
+the painted scenes), so a bigger window shows more of the world rather than
+bigger cells. Sizes are physical pixels: a 3440x1440 window is 3440x1440 pixels
+even when Windows is scaled to 125% or 150%.
+
+After a change of display mode or resolution the menu asks you to keep it. Press
+`Enter` to keep it, or `ESC` to go back. If you do nothing, it goes back after 10
+seconds, so a mode the monitor can't show undoes itself. Other changes are saved
+as soon as they are applied.
+
+The choices are saved to `settings.txt` next to the exe:
+
+```
+display=borderless
+resolution=3440x1440
+vsync=on
+renderer=sdl
+```
+
+Any key left out keeps its default (windowed, the largest window that fits,
+VSync on, the SDL renderer), and lines the game doesn't recognise are kept when
+it rewrites the file. An older file holding only `resolution=` still loads, as
+a window of that size. A stored window that no longer fits opens at the largest
+one that does, and one exactly the size of the desktop opens borderless. A
+fullscreen resolution the monitor no longer has opens at the desktop's. For one
+run, `--renderer=gl` or `--renderer=sdl` on the command line overrides
+`renderer=` without saving.
 
 ## Gameplay
 
@@ -107,9 +167,11 @@ back to the largest one that fits.
   too fast: a drop of about three body heights is free, and a landing at
   terminal velocity costs 80. Flapping slows a fall, and the drop at spawn is
   free.
-- **Objective:** the gold-and-white marker about 740 cells east, across a water
-  channel you have to fly over. The HUD's `GOAL:` shows the distance and
-  direction.
+- **Objective:** the gold-and-white marker near the east end of each terrain
+  scene, at the column its level file names (`objective`), or an eighth of the
+  world in from the east edge if it names none. You reach it by getting within
+  6 cells of it (`Run::OBJECTIVE_REACH`). The HUD's `GOAL:` shows the distance
+  and direction. The `empty` scene has no objective.
 - **End of a run:** you win by reaching the marker and lose at 0 health. The
   world freezes either way, and `R` restarts.
 - **HUD:** health, goal, FPS, material, brush size, and awake chunks (`+FALLING`
@@ -123,16 +185,19 @@ where it touches. An enemy dies when it loses both eyes, its chest, both legs, o
 more than 60% of its body. The limbs bend at their joints rather than switching
 between drawn frames, so arrows hit the limb wherever it is drawn.
 
-- **Ghoul:** placed around each scene. It wanders, chases you when it sees you,
-  and swipes for 8 damage.
-- **Troll:** one at the far end of each scene. Its eyes glow before it slams its
-  club for 30 damage and leaves a crater. Its arms take two or three arrows to
-  sever, and it needs an arrow in each eye.
-- **Fish:** a bass on legs with a lure-arm on its head that whips down for 20
-  damage. Two shots sever the arm, and the eye takes two. It isn't placed in any
-  scene yet.
-- **Angler** (experimental): the fish on tentacles. Shooting a tentacle drops
-  everything past the hole. It isn't placed in any scene.
+No scene places enemies at the moment (`PLANT_ENEMIES` is off in
+`src/game/level.h`, so the `enemy` lines in level files are read but not used).
+Spawn them at the cursor with `T`, `Y`, `U` and `I`.
+
+- **Ghoul** (`T`): wanders, chases you when it sees you, and swipes for 8
+  damage.
+- **Troll** (`Y`): its eyes glow before it slams its club for 30 damage and
+  leaves a crater. Its arms take two or three arrows to sever, and it needs an
+  arrow in each eye.
+- **Fish** (`U`): a bass on legs with a lure-arm on its head that whips down for
+  20 damage. Two shots sever the arm, and the eye takes two.
+- **Angler** (`I`, experimental): the fish on tentacles. Shooting a tentacle
+  drops everything past the hole.
 
 ## Assets
 
@@ -145,7 +210,8 @@ up until you rebuild or run `python tools/load_sprite.py --stage`.
 - **Backdrops:** a folder of layer BMPs plus a `backdrop.txt`, chosen with
   `backdrop=<folder>` in `assets/scenes.txt`. The format is documented in
   `src/render/backdrop_set.h`.
-- **Levels:** player column, objective and enemies, chosen with `level=<file>`.
+- **Levels:** player column, objective and enemies (not placed for now; see
+  [Enemies](#enemies)), chosen with `level=<file>`.
 - **Player sheet:** the frame grid and animation table are in
   `tools/player_sheet.py`, which generates `src/render/player_sprite.h`.
 

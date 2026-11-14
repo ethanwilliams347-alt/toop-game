@@ -21,6 +21,9 @@ const Glyph& blank() {
 // the pattern is already being typed out. The next screen that needs a character
 // not here adds one row, the same way a new material adds one row to MATERIALS.
 const Glyph* glyph_for(char c) {
+    // One row per glyph, so each reads as the picture it is. The formatter would
+    // split every row into four lines.
+    // clang-format off
     switch (std::toupper(static_cast<unsigned char>(c))) {
         case '0': { static const Glyph g{{"###", "#.#", "#.#", "#.#", "###"}}; return &g; }
         case '1': { static const Glyph g{{".#.", "##.", ".#.", ".#.", "###"}}; return &g; }
@@ -66,9 +69,15 @@ const Glyph* glyph_for(char c) {
         case '.': { static const Glyph g{{"...", "...", "...", "...", ".#."}}; return &g; }
         case '-': { static const Glyph g{{"...", "...", "###", "...", "..."}}; return &g; }
         case '/': { static const Glyph g{{"..#", "..#", ".#.", "#..", "#.."}}; return &g; }
+        // The settings menu's cursor and value arrows, and the HUD's +FALLING,
+        // all of which drew as gaps before these existed.
+        case '<': { static const Glyph g{{"..#", ".#.", "#..", ".#.", "..#"}}; return &g; }
+        case '>': { static const Glyph g{{"#..", ".#.", "..#", ".#.", "#.."}}; return &g; }
+        case '+': { static const Glyph g{{"...", ".#.", "###", ".#.", "..."}}; return &g; }
 
         default: return nullptr;
     }
+    // clang-format on
 }
 
 // Cell width in screen pixels for one glyph at `scale`: the 3-column glyph plus

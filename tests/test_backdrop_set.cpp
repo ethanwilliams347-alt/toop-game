@@ -196,9 +196,7 @@ std::vector<Shipped> shipped_sets() {
         // and so repeats at any width; its art has to be sparse enough not to
         // be caught doing it.
         if (s.set.anchor == backdrop_set::Anchor::Standing && def.scale > 0) {
-            int widest = 0;
-            for (const DisplayMode& m : DISPLAY_MODES)
-                widest = std::max(widest, m.padded_w(def.scale));
+            const int widest = WIDEST_VIEW.padded_w(def.scale);
             const int world_w = def.custom_width > 0 ? def.custom_width : s.set.native_w;
             for (const backdrop_set::Layer& l : s.set.layers) {
                 if (l.width <= 0 || l.plane || l.drift != 0.0f || !l.bands.empty()) continue;
@@ -424,6 +422,53 @@ void test_rig_set(const Shipped& sh) {
           ladder);
 }
 
+// --- the widest view --------------------------------------------------------
+//
+// Every shipped scene's backdrop covers the widest window the game is held to
+// (WIDEST_VIEW in game/display.h, 3440x1440) at that scene's scale: 344x144
+// cells at scale 10, 430x180 at scale 8. A backdrop smaller than the view shows
+// the clear colour past its edge on an ultrawide and nowhere else, so it is
+// exactly the defect nobody at 1920x1080 would ever see; it is checked here
+// rather than found by the one player with the monitor.
+//
+// And every layer's own tile is at least as wide as that view, drifting clouds
+// included: a tile narrower than the window shows twice side by side even with
+// the camera standing still, which the never-repeats check in shipped_sets,
+// being about a walk across the world, does not cover.
+//
+// Per scene rather than per set, because the scale is the scene row's: two
+// scenes sharing a set at different scales are two different views of it.
+void test_covers_widest_view() {
+    std::string err;
+    const std::vector<scene_list::SceneDef> scenes =
+        scene_list::load_scene_list("assets/scenes.txt", &err);
+    int checked = 0;
+    for (const scene_list::SceneDef& def : scenes) {
+        if (def.backdrop.empty()) continue;
+        const int scale = def.scale > 0 ? def.scale : Camera::DEFAULT_SCALE;
+        const int view_w = WIDEST_VIEW.viewport_w(scale);
+        const int view_h = WIDEST_VIEW.viewport_h(scale);
+        const std::string dir = "assets/" + def.backdrop + "/";
+        err.clear();
+        const backdrop_set::Set set = backdrop_set::load(dir + "backdrop.txt", dir, &err);
+        if (!err.empty()) continue;  // shipped_sets has already reported it
+        ++checked;
+        const std::string tag = "widest view: scene '" + def.name + "' at " +
+                                std::to_string(scale) + "x (" + std::to_string(view_w) + "x" +
+                                std::to_string(view_h) + " cells): ";
+        check((tag + "the backdrop covers it").c_str(),
+              set.native_w >= view_w && set.native_h >= view_h,
+              "backdrop is " + std::to_string(set.native_w) + "x" + std::to_string(set.native_h));
+        std::string narrow;
+        for (const backdrop_set::Layer& l : set.layers)
+            if (backdrop_set::width_of(set, l) < view_w)
+                narrow +=
+                    l.file + " is " + std::to_string(backdrop_set::width_of(set, l)) + " wide; ";
+        check((tag + "every layer's tile is at least as wide").c_str(), narrow.empty(), narrow);
+    }
+    check("widest view: at least one shipped scene has a backdrop to hold to it", checked > 0);
+}
+
 // An extended set is the same nine depths of the same place: the one claim its
 // file makes that is not about its own art. A factor that drifts makes it a
 // different landscape in the same palette, and nothing about a wrong ladder
@@ -502,5 +547,6 @@ int main() {
         if (s.set.has_rig) test_rig_set(s);
     }
     test_bg_valley_wide_is_bg_valley(sets);
+    test_covers_widest_view();
     return report();
 }

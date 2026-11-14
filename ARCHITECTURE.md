@@ -72,8 +72,8 @@ textures, draw calls.
 | Per-step order, commands, win/loss | `src/game/run.cpp` (`Run::step`) | `src/game/events.h`; `run_test`, `alloc_test` |
 | Scene start-up | `src/game/level.cpp` (`level::start`), `src/game/boot.h`, `scene_activation.h` | `level_test`, `boot_test` |
 | Recording / replay | `src/game/input_log.*` | `grid_bench` replays `session.rec` |
-| Camera, window modes | `src/game/camera.h`, `src/game/display.h` | `camera_test` |
-| Debug keys, settings menu | `src/game/debug_view.h`, `src/game/settings_menu.h`, `src/main.cpp` (event switch) | `debug_test` |
+| Camera, window modes, `settings.txt` | `src/game/camera.h`, `src/game/display.h` (decisions), `src/shell/shell.*` (SDL calls) | `camera_test`, `boot_test` (start-up choice, size lists, the file) |
+| Debug keys, settings menu | `src/game/debug_view.h`, `src/game/settings_menu.h`, `src/main.cpp` (event switch) | `debug_test`, `shell_test` (the menu) |
 | Asset file format | the parser in `src/scene/` (or `src/render/backdrop_set.*`, `src/render/mood.*`), `src/util/text_record.h` | the file's own header in `assets/`; `*_list_test`, `props_test`, `sprites_test`, `backdrop_set_test`, `mood_test` |
 | New scene | `assets/scenes.txt`, a level file, BMPs | `scene_test`, `scene_list_test` |
 | Bind a sprite | `python tools/load_sprite.py <key> <file.bmp>` | never hardcode asset paths |
@@ -117,7 +117,7 @@ Arrows point from includer to included.
 | `src/game/` | `physics/`, `scene/` | `render/` record types, `present/`, `shell/` | no |
 | `src/present/` | `game/`, `physics/`, `render/frame.h` record types | `shell/` | headers only (via `frame.h`), no calls |
 | `src/render/` light, player_anim, cell_pack, hidden_cell, backdrop_set, backdrop_wrap, depth_rig, mood, lit_frame | `physics/` (read const), `util/`, each other | `game/run.h`, `present/`, `shell/` | never |
-| `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
+| `src/render/` frame, overlay; `src/ui/` | the above, `game/camera.h`, `game/display.h`, `game/settings_menu.h` (the menu's rows as text), `physics/material.h` (hotbar) | `game/run.h`, `present/`, `shell/` | yes |
 | `src/gpu/` | `render/canvas.h`, `render/lit_frame.h` (both std-only), std | everything else in `src/` | yes (SDL's GL context and `SDL_opengl.h`; only `gl.h` includes the latter) |
 | `src/shell/`, `src/main.cpp` | anything | | yes |
 
@@ -185,9 +185,10 @@ Arrows point from includer to included.
   frame and on scene switch, extracted for testing.
 - `pacer.h` -- fixed-step pacer: steps per wall-clock frame and interpolation
   alpha. Told the elapsed time; never reads a clock.
-- `camera.h` (cell -> screen pixel), `display.h` (window modes).
+- `camera.h` (cell -> screen pixel), `display.h` (window sizes and modes,
+  `settings.txt`, the start-up choice).
 - `debug_view.h` (pause, single-step, free camera, cell inspector),
-  `settings_menu.h` (state machine).
+  `settings_menu.h` (state machine: values, apply, confirm-or-revert).
 - `input_log.h` / `.cpp` -- `SLOPREC` recording: seed, starting world, one
   `Input` per step. F9 writes `session.rec`.
 
@@ -261,7 +262,7 @@ Arrows point from includer to included.
   the window and swaps on `present()`. For now a parity backend: same blend
   equations as SDL, and destination rects truncated field by field the way
   SDL's software renderer does, so the frame matches `SdlCanvas`'s. Reads the
-  window size at the first draw of each frame, so `shell::apply_mode` resizing
+  drawable size at the first draw of each frame, so `shell::apply_window` resizing
   the window is all a mode change needs. `reload_shaders()` (F5) keeps the old
   program on a failed compile; `read_pixels()` feeds `gl_frame_test` and F12.
 - The cells (R1): `blit_cells` draws the cell texture with
@@ -298,7 +299,8 @@ Arrows point from includer to included.
   entry point used, as `gpu::gl::Name` pointers filled by
   `SDL_GL_GetProcAddress`. No GLAD/GLEW, nothing links opengl32.lib. A function
   must be listed before it is called; a driver missing one fails creation.
-- Selected by `renderer=gl|sdl` in `settings.txt` (default `sdl`) or
+- Selected by `renderer=gl|sdl` in `settings.txt` (default `sdl`; the settings
+  menu writes it, applied on restart) or
   `--renderer=gl|sdl`; `shell::open_display` falls back to SDL on any GL
   failure (no context, missing entry point, shader compile, incomplete FBO).
 
