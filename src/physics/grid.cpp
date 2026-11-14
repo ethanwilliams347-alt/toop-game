@@ -162,6 +162,9 @@ void Grid::reset(uint64_t seed) {
     fracture_lowest.clear();
     next_piece_tag = 1;
     std::fill(std::begin(tag_worn), std::end(tag_worn), false);
+    worn_count = 0;
+    tags_since_census = 0;
+    census_count = 0;
 
     // The pool keeps its entries, and each entry its capacity -- the same "cleared,
     // not freed" rule as every other scratch vector here. tip_count is what says
@@ -796,6 +799,10 @@ void Grid::tag_census() {
     std::fill(std::begin(tag_worn), std::end(tag_worn), false);
     for (const Element& e : cells)
         if (is_structural(e.type)) tag_worn[e.piece_tag] = true;
+    worn_count = 0;
+    for (int t = 1; t < 256; ++t) worn_count += tag_worn[t] ? 1 : 0;
+    tags_since_census = 0;
+    ++census_count;
 }
 
 uint8_t Grid::alloc_piece_tag() {
@@ -810,16 +817,34 @@ uint8_t Grid::alloc_piece_tag() {
     // standing on the piece rides the body, a push on the piece shoves it, and
     // the support fill passes the piece over as step_tipping's, so it can be left
     // hanging when what holds it up is dug out. Which tags the world wears is
-    // tag_worn, refreshed by a census of the grid each time the counter wraps;
-    // only when every tag is worn does this fall back to refusing the in-flight
-    // ones alone, as it always did.
+    // tag_worn, refreshed by a census of the grid; only when every tag is worn
+    // does this fall back to refusing the in-flight ones alone, as it always did.
+    //
+    // The census is a scan of every cell, so it is bounded: taken when the
+    // counter wraps, but at most once per 255 tags handed out. Taken on every
+    // wrap, a world whose every tag is worn -- reached once 255 pieces have come
+    // to rest anywhere, which a long destructive run does -- paid a census per
+    // body started, since a search that finds nothing always goes round the
+    // counter, and up to 255 in end_tipping's weld check, which asks for tags in
+    // a loop. Between censuses tag_worn only gains tags (a tag reaches a cell only
+    // from here or by being copied with the cell), so a stale entry can refuse a
+    // tag nobody wears any more -- a missed reuse -- but never offer one a piece
+    // wears.
+    // And once before a world's first tag: a world loaded with pieces already
+    // broken wears tags no allocation here handed out. And before believing that
+    // every tag is worn: tag_worn counts every tag handed out since the census,
+    // including those of pieces burnt, dug or cleared since, so "all worn" may be
+    // stale -- and acting on it hands out the tag of a piece at rest.
+    if (census_count == 0 || (worn_count >= 255 && tags_since_census >= 255)) tag_census();
     for (int pass = 0; pass < 2; ++pass) {
+        // Every tag worn: pass 0 could only go round the counter and find nothing.
+        if (pass == 0 && worn_count >= 255) continue;
         for (int attempt = 0; attempt < 255; ++attempt) {
             const uint8_t candidate = next_piece_tag;
             next_piece_tag = static_cast<uint8_t>(next_piece_tag + 1);
             if (next_piece_tag == 0) {
                 next_piece_tag = 1;  // 0 means "never broken"
-                tag_census();
+                if (tags_since_census >= 255) tag_census();
             }
             if (pass == 0 && tag_worn[candidate]) continue;
 
@@ -833,7 +858,11 @@ uint8_t Grid::alloc_piece_tag() {
                 }
             }
             if (!in_use) {
-                tag_worn[candidate] = true;
+                if (!tag_worn[candidate]) {
+                    tag_worn[candidate] = true;
+                    ++worn_count;
+                }
+                ++tags_since_census;
                 return candidate;
             }
         }

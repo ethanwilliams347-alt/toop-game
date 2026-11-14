@@ -1609,5 +1609,36 @@ int main() {
                   std::to_string(shared_at));
     }
 
+    // --- a world wearing every tag does not scan itself for each new body ---
+    // The census behind the rule above reads every cell, so it is held to once
+    // per 255 tags handed out. Once 255 pieces rest anywhere, every tag is worn;
+    // a census taken on every wrap of the counter then ran once per body started,
+    // because a search that finds nothing always goes round it. Blocks are left
+    // where they land, each wearing its own tag, until all are worn; the ones
+    // dropped after that may take at most a census per 255 tags.
+    {
+        Grid g(1600, 40);
+        fill(g, 0, 36, 1599, 39, ElementType::Wall);
+        const auto drop = [&](int x) {
+            fill(g, x, 30, x + 1, 31, ElementType::Wall);
+            nudge(g, x, 29);
+            for (int s = 0; s < 900 && (g.has_pending_support_checks() || g.tipping_count() > 0);
+                 ++s)
+                g.update();
+        };
+        for (int n = 0; n < 300; ++n) drop(2 + 3 * n);
+        bool worn[256] = {};
+        for (int n = 0; n < 300; ++n) worn[g.get_element(2 + 3 * n, 35).piece_tag] = true;
+        int distinct = 0;
+        for (int t = 1; t < 256; ++t) distinct += worn[t] ? 1 : 0;
+        check("every tag is worn by a resting block", distinct == 255,
+              std::to_string(distinct) + " tags worn");
+        const int before = g.tag_census_count();
+        for (int n = 300; n < 520; ++n) drop(2 + 3 * n);
+        const int taken = g.tag_census_count() - before;
+        check("220 more bodies in that world take at most one census per 255 tags", taken <= 2,
+              std::to_string(taken) + " censuses");
+    }
+
     return report();
 }

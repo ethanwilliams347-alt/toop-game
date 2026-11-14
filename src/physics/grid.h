@@ -156,6 +156,9 @@ public:
     // sliding, floating. Exposed for tests and the diagnostic for the same reason
     // active_chunk_count() is.
     int tipping_count() const { return tip_count; }
+    // How many grid-wide tag censuses alloc_piece_tag has taken (see tag_worn).
+    // Read by tests holding the census to its bound; nothing in play needs it.
+    int tag_census_count() const { return census_count; }
 
     // One of those bodies, i in [0, tipping_count()), as numbers: where its centre
     // of mass is and how it is moving. For tests, probes and the diagnostic; the
@@ -882,11 +885,24 @@ private:
 
     // Tags some cell in the world may wear: every tag handed out since the last
     // census, and every tag a structural cell wore at it. A census is a scan of
-    // the grid, taken each time the counter comes back round to 1 -- once per 255
-    // tags handed out -- and it is what lets a tag no resting piece wears any more
-    // be handed out again. See alloc_piece_tag for why a resting piece's tag must
+    // the grid, taken before a world's first tag and then when the counter comes
+    // back round to 1, at most once per 255 tags handed out -- and it is what lets
+    // a tag no resting piece wears any more be handed out again. See alloc_piece_tag for why a resting piece's tag must
     // not be.
     bool tag_worn[256] = {};
+    // How many of tags 1..255 tag_worn marks. 255 is a world where every tag is
+    // worn, in which looking for an unworn one can only go round the counter and
+    // find nothing; alloc_piece_tag skips that search until a census says
+    // otherwise.
+    int worn_count = 0;
+    // Tags handed out since the last census. A census is a scan of the whole grid,
+    // so it is taken at most once per 255 of these, however often the counter
+    // wraps -- see alloc_piece_tag.
+    int tags_since_census = 0;
+    // Censuses taken in this world (reset() zeroes it). Zero also means the world
+    // has had none yet, which alloc_piece_tag takes before its first tag; and
+    // tag_census_count() lets a test hold the census to its bound.
+    int census_count = 0;
 
     // Hands out the next tag, skipping any that a piece still in the air is
     // wearing. A bare counter suffices only while 255 landings cannot happen inside
