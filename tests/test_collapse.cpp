@@ -1321,5 +1321,44 @@ int main() {
         check("two runs of the same pushes end pixel-identical", run() == run());
     }
 
+    // --- a piece tag that comes round again does not weld two pieces ---
+    // piece_tag is one byte, so after 255 bodies the counter hands out a tag a
+    // piece at rest may still wear. alloc_piece_tag only refuses tags in flight;
+    // a body that lands touching a resting piece with its own tag would become
+    // one piece with it, and the support fill would judge them together. Here a
+    // block comes to rest, throwaway drops walk the counter round to its tag,
+    // and a second block lands against the first.
+    {
+        Grid g(120, 60);
+        fill(g, 0, 55, 119, 59, ElementType::Wall);
+        const auto settle = [&] {
+            for (int s = 0; s < 900 && g.has_pending_support_checks(); ++s) g.update();
+        };
+        const auto drop = [&](int x0, int y0, int x1, int y1) {
+            fill(g, x0, y0, x1, y1, ElementType::Wall);
+            nudge(g, x0, y0 - 1);
+            settle();
+        };
+        drop(10, 30, 13, 33);
+        const uint8_t tag_a = g.get_element(11, 53).piece_tag;
+        bool walked = tag_a != 0;
+        for (int n = 0; n < 300 && walked; ++n) {
+            drop(80, 30, 81, 31);
+            const uint8_t t = g.get_element(80, 54).piece_tag;
+            fill(g, 70, 20, 100, 54, ElementType::Empty);
+            settle();
+            // The next tag handed out is tag_a (the counter skips 0).
+            if (static_cast<uint8_t>(t + 1) == tag_a || (t == 255 && tag_a == 1)) break;
+            if (n == 299) walked = false;
+        }
+        drop(14, 40, 17, 43);
+        const uint8_t tag_b = g.get_element(15, 53).piece_tag;
+        check("the tag counter was walked round to the resting piece's tag", walked,
+              "tag_a " + std::to_string(tag_a));
+        check("a block landing against a resting one with a recycled tag stays separate",
+              g.get_element(14, 53).type == ElementType::Wall && tag_a != tag_b,
+              "tags " + std::to_string(tag_a) + " / " + std::to_string(tag_b));
+    }
+
     return report();
 }

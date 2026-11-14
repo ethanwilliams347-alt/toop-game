@@ -1859,12 +1859,47 @@ void Grid::end_tipping(int i, bool requeue) {
     Body& b = tip_bodies[i];
     tag_body[b.tag] = -1;
 
-    if (requeue) {
-        if (++tip_epoch == 0) {
-            std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
-            tip_epoch = 1;
+    // Marked whether or not it is requeued: the weld check below needs to tell
+    // the body's own cells from a neighbour's.
+    if (++tip_epoch == 0) {
+        std::fill(tip_visit.begin(), tip_visit.end(), uint8_t{0});
+        tip_epoch = 1;
+    }
+    for (const int idx : b.at) tip_visit[idx] = tip_epoch;
+
+    // piece_tag is one byte, and alloc_piece_tag only refuses tags still in the
+    // air, so after 255 allocations a body can wear the tag of a piece that came
+    // to rest long ago. While it flies that costs nothing, but the moment it
+    // stops beside that piece the two are one connected run of one tag -- welded,
+    // and judged by the support fill as a single structure, so a block set down
+    // against a resting one holds it up (or is dragged down by it). Caught here,
+    // where the body stops, rather than by refusing every tag in the world at
+    // allocation, which would be a scan of the grid: a body's neighbours are the
+    // only cells it can weld to. A fresh tag no neighbour wears is taken instead.
+    // At most 255 tries, each a walk of the body's rim; in practice one, and only
+    // on the rare landing that collides at all.
+    const auto welds = [&](uint8_t tag) {
+        for (const int idx : b.at) {
+            if (!is_structural(cells[idx].type) || cells[idx].piece_tag != b.tag) continue;
+            const int cy = idx / width;
+            const int cx = idx - cy * width;
+            for (int ny = cy - 1; ny <= cy + 1; ++ny)
+                for (int nx = cx - 1; nx <= cx + 1; ++nx) {
+                    if (!is_within_bounds(nx, ny)) continue;
+                    const int n = get_index(nx, ny);
+                    if (tip_visit[n] == tip_epoch) continue;  // the body itself
+                    if (is_structural(cells[n].type) && cells[n].piece_tag == tag) return true;
+                }
         }
-        for (const int idx : b.at) tip_visit[idx] = tip_epoch;
+        return false;
+    };
+    if (welds(b.tag)) {
+        uint8_t fresh = alloc_piece_tag();
+        for (int tries = 0; tries < 255 && welds(fresh); ++tries) fresh = alloc_piece_tag();
+        for (const int idx : b.at)
+            if (is_structural(cells[idx].type) && cells[idx].piece_tag == b.tag)
+                cells[idx].piece_tag = fresh;
+        b.tag = fresh;
     }
 
     for (const int idx : b.at) {
