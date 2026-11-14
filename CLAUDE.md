@@ -5,6 +5,8 @@ fetched and built statically by `FetchContent`; don't vendor or system-install i
 
 **Read [ARCHITECTURE.md](ARCHITECTURE.md) before starting large code task. It can be wrong though, so use it as just a starting point.**
 
+**Never read [src/physics/enemy.h](src/physics/enemy.h) whole** (about 1,270 lines). Search it with Grep, or read only the lines you need with an offset and limit.
+
 ## Commands
 
 ```bash
