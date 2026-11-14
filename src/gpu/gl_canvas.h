@@ -86,6 +86,16 @@ public:
     // 1x1 pad texel, which the shader reads as an Empty cell everywhere.
     void upload_cell_pack(const uint32_t* texels, int w, int h);
 
+    // The cells' look under the multiply model (R4a/R4b; lit::CellLook): set
+    // before frame::compose, every frame, since it carries the frame's origin
+    // and step. It applies only to cells drawn inside a lit frame in the Legacy
+    // cell view; with `on` false, outside a lit frame, or in a debug view the
+    // cells are drawn exactly as before. Material tiles named by the look are
+    // loaded from assets/materials/ (beside the shader folder) the first time
+    // they are named; one that cannot be read is dropped with error() set, and
+    // that material is drawn untextured.
+    void set_cell_look(const lit::CellLook& look);
+
     // --- the multiply light model (R3; gpu/pass_graph.h, gpu/pipeline.h) ---
     //
     // A lit frame: begin_lit_frame() before frame::compose, resolve_lit() after it
@@ -181,6 +191,23 @@ private:
     Pipeline pipeline_;
     int target_w_ = 0, target_h_ = 0;
     bool frame_open_ = false;
+
+    // --- the cells' look (set_cell_look) ---
+    bool load_material_tiles();
+    void copy_behind();
+    lit::CellLook look_;
+    int cu_look_ = -1;
+    // The tiles, one 64x64 slot per ElementType side by side in one RGBA8
+    // texture (luminance in red), and which stems fill them now.
+    unsigned tiles_tex_ = 0;
+    std::string tile_stems_[lit::MAX_TYPES];
+    float tile_mean_[lit::MAX_TYPES] = {};
+    bool tile_on_[lit::MAX_TYPES] = {};
+    // The frame behind the world: the albedo as the backdrop left it, copied
+    // just before the cells draw (pass_graph's "behind"), for water to show
+    // through and reflect. Its own framebuffer so the copy is one blit.
+    unsigned behind_fbo_ = 0, behind_tex_ = 0;
+    int behind_w_ = 0, behind_h_ = 0;
 
     uint8_t color_[4] = {0, 0, 0, 255};
     gfx::Blend draw_blend_ = gfx::Blend::None;

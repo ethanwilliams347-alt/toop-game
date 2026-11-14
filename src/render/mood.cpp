@@ -476,4 +476,26 @@ void fill_lit(const Mood& m, lit::LitFrame& out) {
     }
 }
 
+void fill_cell_look(const Mood& m, lit::CellLook& out) {
+    out.on = m.light_model == LightModel::Multiply;
+    static_assert(MATERIAL_COUNT <= static_cast<size_t>(lit::MAX_TYPES),
+                  "lit::CellLook holds fewer materials than ElementType has");
+    for (size_t t = 0; t < MATERIAL_COUNT; ++t) {
+        const MaterialLook& l = m.materials[t];
+        out.tint[t][0] = l.tint.r;
+        out.tint[t][1] = l.tint.g;
+        out.tint[t][2] = l.tint.b;
+        out.strength[t] = l.strength;
+        out.rim[t] = l.rim;
+        out.reflect[t] = l.reflect;
+        out.spec[t] = l.spec;
+        out.depth[t] = l.depth;
+        out.texture[t] = l.texture;
+    }
+    // The sun's way, or straight down without one: an unlit mood's rims still
+    // catch the sky above them rather than nothing.
+    out.sun_dir[0] = m.sun.on ? m.sun.dir_x : 0.0f;
+    out.sun_dir[1] = m.sun.on ? m.sun.dir_y : 1.0f;
+}
+
 }  // namespace mood

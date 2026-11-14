@@ -240,4 +240,10 @@ Mood load_for_scene(const std::string& field, const std::string& assets_dir, std
 // is drawn by the CPU light pass and never gets here.
 void fill_lit(const Mood& m, lit::LitFrame& out);
 
+// The cells' look under this mood: the `material` lines, and the sun's
+// direction for the rim. `on` is true only for a Multiply mood -- a Legacy
+// mood's cells are drawn exactly as the SDL path draws them, whatever material
+// lines it carries. Leaves the frame half (origin, step) as it found it.
+void fill_cell_look(const Mood& m, lit::CellLook& out);
+
 }  // namespace mood

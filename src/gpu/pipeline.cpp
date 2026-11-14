@@ -85,6 +85,7 @@ bool Pipeline::run(const Inputs& in, std::string& why) {
     for (const pass_graph::Pass& pass : pass_graph::PASSES) {
         switch (pass.id) {
             case pass_graph::Id::Backdrop:
+            case pass_graph::Id::Behind:
             case pass_graph::Id::World:
             case pass_graph::Id::Ui:       break;
 

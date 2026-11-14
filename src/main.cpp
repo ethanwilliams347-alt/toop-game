@@ -817,6 +817,11 @@ int main(int argc, char* argv[]) {
         reset_presentation(false);
     };
 
+    // Steps taken since launch, for the cells' look only (water's caustics and
+    // wobble, lit::CellLook::step). Counted here, never read by the simulation,
+    // and free to wrap.
+    uint32_t render_steps = 0;
+
     // Exactly one fixed step, and the only place one happens.
     //
     // Extracted so that the pause's single-step and the frame pacer run the same
@@ -828,6 +833,7 @@ int main(int argc, char* argv[]) {
     // The accumulator is deliberately not touched here. Time is the pacer's
     // business, and a single-step is a step that no time was spent on.
     auto advance_one_step = [&](const Input& step_input) {
+        ++render_steps;
         prev_player_x = present::player_visual(run.player).x;
         prev_player_y = present::player_visual(run.player).y;
 
@@ -1421,7 +1427,18 @@ int main(int argc, char* argv[]) {
         // cloud tiles makes the clouds jump at the wrap, and a float second count
         // still resolves a millisecond after a day of play.
         fp.time_s = static_cast<float>(static_cast<double>(SDL_GetTicks64()) / 1000.0);
-        if (lit_frame) display.gl->begin_lit_frame();
+        if (lit_frame) {
+            // The cells' look (R4a/R4b): the mood's material lines, anchored to
+            // the pack's window, animated by the steps taken -- not the wall
+            // clock, so a paused world's water stands still.
+            lit::CellLook look;
+            mood::fill_cell_look(scene_mood, look);
+            look.origin_x = camera.view_x();
+            look.origin_y = camera.view_y();
+            look.step = render_steps;
+            display.gl->set_cell_look(look);
+            display.gl->begin_lit_frame();
+        }
         frame::compose(canvas, fp);
         if (lit_frame) {
             // The cell pack's window is the camera's view, placed on screen where
