@@ -36,6 +36,13 @@ struct Event {
         PlayerDied,      // x, y: the body's centre
         Dug,             // x, y: the cursor the dig was aimed at
         ObjectiveReached,// x, y: the objective
+        // A loose body struck something hard enough to hurt it -- a slab landing
+        // on the player, a block crushing part of an enemy.
+        Struck,          // x, y: the cell that struck; a: -1 for the player, else the
+                         //       enemy slot; b: how fast it closed, whole cells/second
+        // A blow threw the player (Player::knock).
+        Knocked,         // x, y: the body's centre; a: the throw's sideways speed,
+                         //       whole cells/second, signed; b: species index
     };
     Kind kind;
     int x = 0;

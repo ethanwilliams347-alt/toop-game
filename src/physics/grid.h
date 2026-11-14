@@ -1443,4 +1443,131 @@ private:
     // Nothing carries state between draws, so a save file that records these two
     // numbers records everything.
     uint64_t world_seed;
+
+    // =======================================================================
+    // Coupling: loose bodies and the things that live outside the grid
+    // (src/physics/body_coupling.cpp). One block, so that it reads -- and merges
+    // -- as a whole.
+    // =======================================================================
+    //
+    // The player, the enemies and the arrows are not cells. The grid does not
+    // know they are there, and the loose bodies above are solved against the grid
+    // alone, so until this block a raft drifted out from under whoever stood on
+    // it, a falling slab passed through the player as if through air, and nothing
+    // a body outside the grid did could move one. These are the only verbs that
+    // cross that line, and they are deliberately few: two questions a box asks
+    // about a body (which one is here, how is it moving here), and one thing it
+    // can do to one (push it).
+    //
+    // Units are the entities' own, not the solver's. A velocity is fx cells per
+    // second, like Player::MOVE_SPEED, rather than the cells per step a Body holds;
+    // a mass is a sum of Material::weight, like Body::mass; and an impulse is the
+    // two multiplied -- Material::weight units times cells per second, 16.16 in an
+    // int64_t -- so the speed a body gains from one is the impulse over its mass.
+    //
+    // When: a push is queued during step N, after Grid::update, by an entity
+    // reacting to where the bodies have just moved; and applied in step N+1's
+    // update, inside step_tipping, after every body's contacts are gathered and
+    // its gravity, load and buoyancy applied, and immediately before the contact
+    // solve. Before the solve so that friction and the contacts answer it on the
+    // same step -- a crate pushed along a floor is held back by the floor's grip on
+    // it rather than by nothing for a step -- and after the forces so that it is
+    // one more force among them rather than something gravity is then added on
+    // top of. The step of lag is the price of the order Run::step has always had
+    // (grid, then the bodies that read it) and it is invisible: a push is never
+    // more than a sixtieth of a second late.
+public:
+    // Which loose body covers cell (x, y): an index in [0, tipping_count()), or
+    // -1 for a cell that is not part of one -- empty, fluid, or structure at
+    // rest. Valid until the next update, which may end bodies and reorder the
+    // pool.
+    int body_at(int x, int y) const;
+
+    // How the material of body `body` at the centre of cell (x, y) moved over the
+    // last step, in fx cells per second: the motion the body actually made (its
+    // centre's displacement and its turn), not the velocity it ended on. That is
+    // what something standing on the body has to move by to stay on it, and what
+    // a body that has just struck something hit it with -- the velocity it ended
+    // on is what the contact that stopped it left, which is often nothing. The
+    // field is the rigid body's, so the cell need not still be covered by it.
+    struct BodyMotion {
+        fx::v vx = 0;
+        fx::v vy = 0;
+    };
+    BodyMotion body_velocity_at(int body, int x, int y) const;
+
+    // The body's mass, in Material::weight units (the sum over its cells).
+    int64_t body_mass(int body) const;
+
+    // A name for a body that survives the pool reordering under it: the same
+    // number for as long as it moves. body_with_id gives its index now, or -1 once
+    // it has stopped. For a thing that has to follow one body from step to step
+    // -- an arrow stuck in a tumbling plank.
+    int body_id(int body) const;
+    int body_with_id(int id) const;
+
+    // Whether any loose body could have a cell in the rectangle [x0, x1] x
+    // [y0, y1], judged from each body's centre and reach rather than its cells:
+    // true is a maybe, false is a no. The cheap question a box asks before the
+    // dear one -- scanning itself cell by cell for a body that is nowhere near it.
+    bool body_near(int x0, int y0, int x1, int y1) const;
+
+    // Pushes the structure at cell (x, y), at that cell's centre, with impulse
+    // (jx, jy) in Material::weight units times fx cells per second. Applied next
+    // update, as above. Returns whether it took: a cell of a loose body does; a
+    // piece at rest does only if the push wakes it, which is gather_contacts' rule
+    // for a body striking one -- a piece light enough to judge (collect_piece),
+    // standing on something, and pushed hard enough: here, an impulse that would
+    // give it at least PUSH_WAKE of speed in a step, and not mostly downward, since
+    // a floor pressed on has nowhere to go. Anything else -- terrain on the world's
+    // floor, a piece hanging from what it is welded to, a fluid, empty space, a
+    // full queue -- is refused, and the push is simply not there.
+    bool queue_impulse(int x, int y, int64_t jx, int64_t jy);
+
+    // Pushes queued and not yet applied. For tests.
+    int queued_impulses() const { return static_cast<int>(impulses.size()); }
+
+    // Gravity on a loose body (BODY_GRAVITY) in fx cells per second squared: what
+    // turns a weight into the force it presses with, for an entity standing on a
+    // body or pushing one. About 810: bodies fall faster than the player does, and
+    // a thing resting on one has to press with the bodies' gravity, not its own,
+    // or a raft would carry it as though it weighed less than it does. The raw
+    // per-step number times the steps a second squared, not 810 written out, so
+    // that a weight pressing on a body and the same weight of cells resting on it
+    // are exactly one force.
+    static constexpr fx::v BODY_WEIGHT_ACCEL =
+        BODY_GRAVITY * fx::STEPS_PER_SECOND * fx::STEPS_PER_SECOND;
+
+    // The most pushes one step can queue. Fixed, and reserved in the constructor,
+    // because entities queue them on the step path. The player makes at most a
+    // few a step, each enemy one or two, and an arrow one when it lands; 64 is
+    // twice the busiest of those added up, and a push past it is dropped rather
+    // than grown into.
+    static constexpr int IMPULSE_CAPACITY = 64;
+
+private:
+    struct QueuedImpulse {
+        int cell = 0;  // grid index
+        uint8_t tag = 0;  // the piece tag that cell wore when it was pushed
+        int64_t jx = 0;  // Material::weight units times fx cells per second
+        int64_t jy = 0;
+    };
+    std::vector<QueuedImpulse> impulses;
+    // The step the queue holds pushes from. A push applies only on the step after
+    // it was queued: step_tipping returns early when no body moves, so the queue
+    // is not drained every step, and this is what stops a push queued while
+    // nothing was moving being applied, much later, to whatever moves next.
+    uint64_t impulse_step = 0;
+
+    // The hook in step_tipping, immediately before solve_contacts.
+    void apply_queued_impulses();
+
+    // The weight of liquid body `b` drags along with it (LIQUID_ADDED_MASS of
+    // what it displaces), reckoned from its waterline the way apply_body_forces
+    // reckons it: what a push on a floating body has to move besides the body.
+    int64_t carried_liquid(const Body& b) const;
+
+    // queue_impulse's wake: makes the piece at rest containing `idx` a body if the
+    // push (jx, jy) is enough to, by the rule queue_impulse states.
+    bool wake_for_push(int idx, int64_t jx, int64_t jy);
 };

@@ -47,6 +47,11 @@ struct Arrow {
     // Steps left before a stuck arrow is cleared away.
     int life = 0;
 
+    // The loose body a stuck arrow is in (Grid::body_id), or 0 for terrain. An
+    // arrow in a plank goes where the plank goes rather than being left hanging
+    // in the air the step the plank moves -- which, before, freed it to fall.
+    int in_body = 0;
+
     // When it was loosed, as a count of arrows the quiver has loosed: lower is
     // older. What picks the flying arrow to recycle when the pool is full.
     uint32_t serial = 0;
@@ -101,6 +106,15 @@ public:
     // percent. Without it a shot into a pond crosses the pond at full speed, which
     // is the one thing everyone knows an arrow does not do.
     static constexpr int FLUID_DRAG_PERCENT = 80;
+
+    // What an arrow weighs, in Material::weight units, for the momentum it hands
+    // to what it hits: its weight times its velocity, all of it, since it stops
+    // there. Eight -- a little over a cell of wood -- so a shot knocks a ghoul
+    // back about a quarter of a cell a step (a ghoul weighs what the player does,
+    // Enemy::PIXEL_WEIGHT) and a troll not visibly at all, slides a crate by
+    // nothing the floor's grip does not take back, and tips a post that was only
+    // just standing, or a tall thin one hit high.
+    static constexpr int WEIGHT = 8;
 
     // Advances the draw and, if the key is held and the bow is drawn, looses an
     // arrow from (from_x, from_y) toward (aim_x, aim_y). Returns true on the step an

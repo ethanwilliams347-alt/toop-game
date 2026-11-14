@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include "fixed.h"
 #include "box_body.h"
 #include "grid.h"
@@ -164,6 +165,72 @@ public:
     static constexpr fx::v SAFE_FALL_SPEED = fx::from_int(240);
     static constexpr int FALL_DAMAGE_DIVISOR = 2;
 
+    // --- the body among loose bodies, and in water ---------------------------
+    //
+    // What the player weighs and how hard it pushes, in the loose bodies' own
+    // units (Material::weight: stone 26 a cell, wood 6, water 10), because what
+    // these numbers are for is the player against a raft or a crate.
+    //
+    // WEIGHT is what a body the player stands on carries, what it pushes back on
+    // a body that shoves it with, and what decides how much of a blow it takes
+    // (IMPACT_DAMAGE_DIVISOR). 240 is forty cells of wood: a 30x3 plank raft,
+    // which floats with a fifth of itself clear, still floats with the player on
+    // it, a little lower and tipped toward where it stands.
+    static constexpr int WEIGHT = 240;
+
+    // How dense the body is, in the same units per cell: what it floats or sinks
+    // by. A little over water, so the player sinks -- slowly, a sixth of its
+    // gravity left once it is under -- and walks the bottom of a pool, and swims
+    // up out of one by beating its wings (SWIM_IMPULSE). The bird is not a duck;
+    // a pool is a place it can drown in time rather than a floor it stands on.
+    // The volume this implies, WEIGHT / DENSITY, is twenty cells: the bird, not
+    // the collision box around it.
+    static constexpr int DENSITY = 12;
+
+    // How hard the player pushes, as the weight whose pressing down it equals
+    // (Grid::BODY_WEIGHT_ACCEL turns it into a force). A crate is held back by
+    // its grip on the floor times its weight, so whether a push moves one is
+    // this against that: a 10x10 wooden crate (600 weight, 60% grip, 360) slides
+    // at about half a walk, an 8x6 stone block (1248 at 70%, 874) creeps,
+    // and a 16x12 stone (4992) does not move at all. The push eases off as what
+    // it pushes nears walking pace, so the player never shoves a thing ahead of
+    // itself faster than it walks.
+    static constexpr int PUSH_STRENGTH = 1000;
+
+    // A wing beat underwater: the impulse and the climb it is capped at, for a
+    // body all the way under; a body partly under beats with the share of each
+    // that is, so a bird breaking the surface gets its full flap back as its
+    // wings come clear, and climbs out. Under the flap by enough that swimming
+    // up a pool is visibly work -- about twenty cells a second against water's
+    // drag and the sixth of gravity left -- and over what that sixth costs a
+    // beat, so it is a climb at all.
+    static constexpr fx::v SWIM_IMPULSE = fx::from_int(70);
+    static constexpr fx::v SWIM_MAX_CLIMB = fx::from_int(45);
+
+    // Being struck by a loose body: a slab landing on the player, a log rolling
+    // into it, a raft rising under it. A body closing on it slower than
+    // IMPACT_SAFE_SPEED does nothing -- a raft nudging the player, a plank
+    // settling against it -- and over it the damage is the excess, in whole
+    // cells a second, times the share of the two masses that is the body's
+    // (a stone slab many times the player's weight hits with nearly all of it,
+    // a plank its own weight with half), over IMPACT_DAMAGE_DIVISOR. A stone
+    // slab dropped from a body height lands at about 180 cells a second and
+    // takes a quarter of the bar; from two and a half, two fifths; one at a
+    // body's terminal speed, near 450, most of it.
+    static constexpr fx::v IMPACT_SAFE_SPEED = fx::from_int(60);
+    static constexpr int IMPACT_DAMAGE_DIVISOR = 4;
+
+    // Steps a knock (knock()) takes the walk key away for. Without it the walk
+    // undoes the throw in a step: knocked away at 120 cells a second while
+    // holding toward the troll at 112, the player stands where it was hit. A
+    // quarter of a second -- the throw reads, and control is back before it lands.
+    static constexpr int KNOCK_STAGGER_STEPS = 15;
+
+    // The most pushes the player makes in a step: pushing back on a body that
+    // shoved it, its weight on what it stands on, the kick of a jump off it, and
+    // the push of walking into one.
+    static constexpr int MAX_PUSHES = 4;
+
     Player(int start_x, int start_y);
 
     // Asks the grid whether the body, where it now stands, is on the ground, and
@@ -246,9 +313,12 @@ public:
     // false, and a walk cycle that plays on the input walks on the spot against
     // every wall in the game. No new state: this is the same field move_x keeps.
     //
-    // fx cells per second, like velocity_y(). It is exactly zero or exactly
-    // +/-MOVE_SPEED, so a caller asking whether the body is travelling compares
-    // against 0 rather than against an epsilon.
+    // fx cells per second, like velocity_y(). Out of water it is exactly zero or
+    // exactly +/-MOVE_SPEED (in water, slowed by BoxBody::wade), so a caller
+    // asking whether the body is travelling compares against 0 rather than
+    // against an epsilon. It is the legs' speed only: a knock, a shove and a
+    // ride move the body without it, and a body sliding from a knock with no key
+    // held is not walking.
     fx::v velocity_x() const { return body.vel_x; }
 
     // Health remaining, 0 to MAX_HEALTH. Clamped at zero rather than allowed to go
@@ -271,6 +341,47 @@ public:
     // Called after update() on the same step, which is what lets it land in this
     // step's damage_this_step() rather than being wiped by the next update().
     void take_hit(int amount) { hurt(amount); }
+
+    // A blow's throw, in fx cells per second: `vx` onto the body's own velocity
+    // that is not its legs' (BoxBody::push_x), which skids out on the ground and
+    // flies on in the air, and `vy` onto its vertical speed -- negative throws it
+    // up. Takes the walk key away for KNOCK_STAGGER_STEPS. Called after update()
+    // like take_hit().
+    //
+    // Held, and given to the body by the next update() that moves it, after the
+    // dig-out search. A troll's club breaks the ground the player stands on, and
+    // the rubble sliding into the crater buries its feet the step after: given
+    // at once, the throw was zeroed by the dig-out (which stops a relocated body
+    // dead) and the club only ever dropped the player into its own crater.
+    void knock(fx::v vx, fx::v vy) {
+        knock_x += vx;
+        knock_y += vy;
+        stagger = KNOCK_STAGGER_STEPS;
+    }
+
+    // The body's velocity that is not its legs', fx cells per second: a knock
+    // still skidding out, a shove, the speed kept from stepping off a raft. Zero
+    // when nothing has moved it.
+    fx::v push_velocity() const { return body.push_x; }
+
+    // How the moving body under the feet moved this step, fx cells per second,
+    // and whether there is one -- what the body is riding.
+    bool is_riding() const { return body.riding; }
+    fx::v carry_velocity_x() const { return body.carry_x; }
+
+    // The share of the body under liquid this step, fx 0 to ONE.
+    fx::v submerged() const { return immersed; }
+
+    // What the body did to loose bodies this step, for Run to queue
+    // (Grid::queue_impulse): this class holds the grid const, for the reason at
+    // the top of the class, so it says what it pushed rather than pushing.
+    int push_count() const { return push_n; }
+    const BoxPush& push(int i) const { return pushes[static_cast<size_t>(i)]; }
+
+    // A loose body that struck the body this step (hit is false on most steps):
+    // where, how hard, and whether it pushed it clear or crushed it. Its damage
+    // is already in damage_this_step().
+    const BoxStrike& struck() const { return strike; }
 
     // True if a body placed with its top-left at (px, py) would overlap any solid
     // cell. Public because "the player is not inside a wall" is the single most
@@ -321,6 +432,29 @@ private:
     int burn_timer = 0;
     int hurt_this_step = 0;
     bool has_landed = false;
+
+    // Steps the walk key is still taken away for, after a knock; and a knock
+    // not yet given to the body (see knock()).
+    int stagger = 0;
+    fx::v knock_x = 0;
+    fx::v knock_y = 0;
+    // This step's share under liquid, the strike a body made, and the pushes the
+    // body made, all rebuilt every step like did_flap.
+    fx::v immersed = 0;
+    BoxStrike strike{};
+    std::array<BoxPush, MAX_PUSHES> pushes{};
+    int push_n = 0;
+    void add_push(int x, int y, int64_t jx, int64_t jy) {
+        if (push_n < MAX_PUSHES) pushes[static_cast<size_t>(push_n++)] = BoxPush{x, y, jx, jy};
+    }
+
+    // The damage a strike does, by the rule at IMPACT_SAFE_SPEED.
+    int impact_damage(const BoxStrike& s) const;
+
+    // After the move: the body's weight on what it stands on (and the blow of
+    // landing on it), the kick of a jump off one, and walking into one.
+    void press_bodies(const Grid& grid, const PlayerInput& input, bool was_on_ground,
+                      fx::v impact_speed);
 
     // Takes `amount` off the health, clamped at zero, and records it for
     // damage_this_step(). One writer for both sources, so a third one added later
@@ -403,6 +537,34 @@ static_assert(fx::trunc(Player::MAX_FALL_SPEED - Player::SAFE_FALL_SPEED) /
                   Player::FALL_DAMAGE_DIVISOR <= Player::MAX_HEALTH,
               "a terminal-velocity landing now kills outright from full health; that is "
               "a design change, not a tuning one - see SAFE_FALL_SPEED");
+
+// --- and for the body in water and among loose bodies ------------------------
+
+// The player sinks. player_test stands a body on the floor of a pool a body
+// deep, and the swim stroke is written for a body that has to climb; a density
+// under water's would float it off the floor and turn the stroke into a
+// rocket.
+static_assert(Player::DENSITY > material_of(ElementType::Water).weight,
+              "the player now floats in water; see DENSITY");
+
+// A stroke underwater is a climb, not a slower sink: it has to outweigh the
+// gravity water leaves over a beat's interval, the flight rule above in water.
+static_assert(Player::SWIM_IMPULSE >
+                  fx::per_step(Player::GRAVITY) * Player::FLAP_INTERVAL_STEPS *
+                      (Player::DENSITY - material_of(ElementType::Water).weight) / Player::DENSITY,
+              "a wing beat underwater no longer outweighs the sink it has to pay for");
+
+// Swimming is slower than flying, which is the whole of what makes water a
+// place rather than more air.
+static_assert(Player::SWIM_IMPULSE < Player::FLAP_IMPULSE &&
+                  Player::SWIM_MAX_CLIMB < Player::FLAP_MAX_CLIMB,
+              "swimming is now at least as strong as flying");
+
+// A falling slab hurts and settling against one does not: the threshold sits
+// between a body's sleep drift and what a body gains falling one body height
+// (v^2 = 2 g h, about 180 cells a second under the bodies' gravity).
+static_assert(Player::IMPACT_SAFE_SPEED < fx::from_int(180),
+              "a slab dropped from a body height no longer hurts the player it lands on");
 
 // Steam does not burn and Fire does. The burn threshold sits in a gap between
 // two numbers in MATERIALS, and nothing about editing that row suggests reading

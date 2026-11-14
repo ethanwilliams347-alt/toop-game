@@ -89,7 +89,15 @@ namespace input_log {
 //    version-10 log was recorded against the continuous turn, and the pose is
 //    where an arrow hits, so it replays into a different world from the first
 //    step an enemy is alive.
-constexpr uint32_t FORMAT_VERSION = 11;
+//
+// 12: the player, the enemies and the arrows meet the loose bodies and water
+//    (box_body.h, body_coupling.cpp): a body moving into a box shoves it, a box
+//    stands on and rides a body, pushes one, weighs on it, and wades; arrows
+//    and blows hand on momentum and throw. The record layout is unchanged, but a
+//    version-11 log was recorded against entities that passed through bodies and
+//    fell through water as air, so it replays into a different world from the
+//    first step either is touched.
+constexpr uint32_t FORMAT_VERSION = 12;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt

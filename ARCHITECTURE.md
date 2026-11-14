@@ -140,7 +140,18 @@ Arrows point from includer to included.
   everything resting on it.
 - `element.h` (what a cell holds), `material.h` (`MATERIALS`), `reaction.h`
   (ordered `REACTIONS`).
-- `box_body.h` -- AABB-vs-grid collision shared by player and enemies.
+- `body_coupling.cpp` -- the loose bodies seen from outside the grid (the
+  "Coupling" block at the bottom of `grid.h`): which body is at a cell, how it
+  moved there last step (cells/second), its mass, a stable id, and
+  `queue_impulse` -- a fixed queue of pushes from entities, applied on the next
+  step by one call in `step_tipping` just before the contact solve. A push on a
+  piece at rest that stands on something wakes it, by `gather_contacts`' rule.
+- `box_body.h` -- AABB-vs-grid collision shared by player and enemies, and the
+  box meeting what moves under it: shoved out of a body that moved into it
+  (`shove`), riding one (`stick`, `ride`), a decaying knock velocity
+  (`push_x`), buoyancy and drag in liquid (`wade`). Entities push bodies through
+  `Grid::queue_impulse`; the player, which holds the grid const, reports its
+  pushes (`Player::push`) and `Run::step` queues them.
 - `player.h` / `.cpp` -- `Player`: movement, health. Holds the grid `const`;
   never writes a cell.
 - `tool.h` / `.cpp` -- the player's verbs (dig, bow); the only player-side code

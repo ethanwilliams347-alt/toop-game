@@ -1139,5 +1139,187 @@ int main() {
         check("two runs of the same domino run end pixel-identical", run() == run());
     }
 
+    // =====================================================================
+    // Coupling: what an entity outside the grid asks of a body, and does to one
+    // (body_coupling.cpp). Pushes are made the way Run makes them: after an
+    // update, to be applied in the next one.
+    // =====================================================================
+
+    // The push the player's strength makes in one step, in the API's units:
+    // weight times cells per second (see Player::PUSH_STRENGTH).
+    const int64_t strong = int64_t{1000} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+
+    // --- which body is where, and how it is moving there ---
+    {
+        Grid g(60, 60);
+        fill(g, 0, 55, 59, 59, ElementType::Wall);
+        fill(g, 20, 10, 29, 15, ElementType::Wall);
+        nudge(g, 24, 9);
+        step(g, 12);
+        check("a falling slab is a body", g.tipping_count() == 1);
+        int at = -1, ax = 0, ay = 0;
+        for (int y = 0; y < 55 && at < 0; ++y)
+            for (int x = 0; x < 60 && at < 0; ++x)
+                if (g.body_at(x, y) >= 0) {
+                    at = g.body_at(x, y);
+                    ax = x;
+                    ay = y;
+                }
+        check("body_at finds it", at == 0);
+        check("body_at is -1 for terrain at rest and for open air",
+              g.body_at(5, 57) == -1 && g.body_at(5, 5) == -1 && g.body_at(-1, 5) == -1);
+        const Grid::BodyState s = g.body_state(0);
+        const Grid::BodyMotion m = g.body_velocity_at(0, ax, ay);
+        // What it moved in the last step, per second: the centre's displacement
+        // times sixty, give or take the turn a straight fall does not have.
+        const fx::v moved = (s.y - s.prev_y) * fx::STEPS_PER_SECOND;
+        check("body_velocity_at is its fall, in cells per second",
+              m.vy > 0 && std::abs(m.vy - moved) < fx::ONE && std::abs(m.vx) < fx::ONE,
+              "vy " + std::to_string(fx::to_float(m.vy)) + " fall " +
+                  std::to_string(fx::to_float(moved)));
+        check("body_mass is the sum of its weights",
+              g.body_mass(0) == 60 * material_of(ElementType::Wall).weight);
+        check("its id finds it again", g.body_with_id(g.body_id(0)) == 0);
+        check("body_near sees it and only it",
+              g.body_near(ax, ay, ax, ay) && !g.body_near(50, 50, 52, 52));
+    }
+
+    // --- terrain, open air, and a fluid refuse a push ---
+    {
+        Grid g(60, 40);
+        fill(g, 0, 34, 59, 39, ElementType::Wall);
+        fill(g, 10, 30, 20, 33, ElementType::Water);
+        step(g, 2);
+        check("terrain on the world's floor is not woken by a push",
+              !g.queue_impulse(30, 35, strong, 0) && g.tipping_count() == 0);
+        check("nor is empty space or water pushed",
+              !g.queue_impulse(30, 10, strong, 0) && !g.queue_impulse(15, 31, strong, 0));
+        check("and nothing is queued", g.queued_impulses() == 0);
+    }
+
+    // --- a crate at rest: a nudge leaves it, a shove wakes it, a press does not ---
+    {
+        const auto crate = [] {
+            Grid g(120, 40);
+            fill(g, 0, 34, 119, 39, ElementType::Wall);
+            fill(g, 50, 24, 59, 33, ElementType::Wood);  // 10x10 wood, 600 weight
+            step(g, 2);
+            return g;
+        };
+        {
+            Grid g = crate();
+            check("a push too slight to move it does not wake it",
+                  !g.queue_impulse(50, 28, -fx::from_int(100), 0) && g.tipping_count() == 0);
+            check("nor does pressing down on it, however hard",
+                  !g.queue_impulse(55, 24, 0, 100 * strong) && g.tipping_count() == 0);
+            check("a real push wakes it into a body", g.queue_impulse(50, 28, strong, 0) &&
+                                                          g.tipping_count() == 1 &&
+                                                          g.queued_impulses() == 1);
+        }
+        {
+            // Pushed as the player pushes, a step at a time, it slides: the push
+            // beats the floor's grip on 600 weight of wood.
+            Grid g = crate();
+            const int wood = count_of(g, ElementType::Wood);
+            for (int s = 0; s < 40; ++s) {
+                int left = 120;
+                for (int y = 24; y < 34; ++y)
+                    for (int x = 0; x < 120; ++x)
+                        if (g.get_element(x, y).type == ElementType::Wood) left = std::min(left, x);
+                g.queue_impulse(left, 30, strong, 0);
+                g.update();
+            }
+            int left = 120;
+            for (int y = 0; y < 40; ++y)
+                for (int x = 0; x < 120; ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) left = std::min(left, x);
+            check("a crate pushed along the floor slides", left >= 55,
+                  "left edge at " + std::to_string(left));
+            check("and keeps every cell", count_of(g, ElementType::Wood) == wood);
+        }
+        {
+            // The same push on 4992 weight of stone: the floor's grip wins.
+            Grid g(120, 40);
+            fill(g, 0, 34, 119, 39, ElementType::Wood);
+            fill(g, 50, 22, 65, 33, ElementType::Wall);
+            step(g, 2);
+            for (int s = 0; s < 60; ++s) {
+                g.queue_impulse(50, 28, strong, 0);
+                g.update();
+            }
+            step(g, 60);
+            check("the same push does not move a heavy stone",
+                  rect_exactly_at(g, 50, 22, 65, 33, ElementType::Wall));
+        }
+    }
+
+    // --- a push lands on the step after it was queued, and only then ---
+    {
+        Grid g(120, 60);
+        fill(g, 0, 55, 119, 59, ElementType::Wall);
+        fill(g, 50, 10, 57, 15, ElementType::Wood);
+        nudge(g, 53, 9);
+        step(g, 3);
+        check("a block in the air is a body", g.tipping_count() == 1);
+        const fx::v vx_before = g.body_state(0).vx;
+        g.queue_impulse(53, 12, strong, 0);
+        g.update();
+        check("pushed sideways in the air, it moves sideways the next step",
+              g.body_state(0).vx > vx_before && g.queued_impulses() == 0,
+              "vx " + std::to_string(fx::to_float(g.body_state(0).vx)));
+
+        // A push left queued when the world is reset belongs to the world that
+        // was, and a reset grid has to be a fresh one (see Grid::reset).
+        Grid h(60, 40);
+        fill(h, 0, 34, 59, 39, ElementType::Wall);
+        fill(h, 20, 24, 29, 33, ElementType::Wood);
+        step(h, 2);
+        h.queue_impulse(20, 28, strong, 0);
+        h.reset(3);
+        check("reset drops a queued push", h.queued_impulses() == 0);
+    }
+
+    // --- an arrow-sized tap tips a post that was only just standing ---
+    // A wooden post with a head hanging off one side, its centre of mass inside
+    // its foot by a fraction of a cell: authored, so it stands as built until
+    // something touches it.
+    {
+        const auto post = [](bool tapped) {
+            Grid g(80, 60);
+            fill(g, 0, 50, 79, 59, ElementType::Wall);
+            fill(g, 30, 20, 32, 49, ElementType::Wood);  // 3x30 post
+            fill(g, 33, 20, 35, 22, ElementType::Wood);  // a head hanging right
+            step(g, 2);
+            if (tapped) g.queue_impulse(32, 21, int64_t{4} * fx::from_int(480), 0);
+            step(g, 400);
+            int right = 0;
+            for (int y = 0; y < 60; ++y)
+                for (int x = 0; x < 80; ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) right = std::max(right, x);
+            return right;
+        };
+        check("untouched, the post stands", post(false) == 35);
+        check("tapped at the top, it goes over", post(true) > 45,
+              "rightmost wood x " + std::to_string(post(true)));
+    }
+
+    // --- pushes replay exactly ---
+    {
+        const auto run = [] {
+            Grid g(120, 40, 5);
+            fill(g, 0, 34, 119, 39, ElementType::Wall);
+            fill(g, 50, 24, 59, 33, ElementType::Wood);
+            fill(g, 70, 20, 72, 33, ElementType::Wood);
+            step(g, 2);
+            for (int s = 0; s < 120; ++s) {
+                if (s % 3 == 0) g.queue_impulse(50 + s / 12, 28, strong, -strong / 4);
+                if (s == 30) g.queue_impulse(72, 21, -strong, 0);
+                g.update();
+            }
+            return g.get_pixels();
+        };
+        check("two runs of the same pushes end pixel-identical", run() == run());
+    }
+
     return report();
 }

@@ -18,7 +18,10 @@
 
 #include "physics/player.h"
 #include "test_util.h"
+#include <algorithm>
+#include <cstdlib>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -80,6 +83,47 @@ PlayerInput held_right() {
     PlayerInput in;
     in.right = true;
     return in;
+}
+
+// --- for the loose-body scenarios at the end ---
+
+void fill(Grid& g, int x0, int y0, int x1, int y1, ElementType t) {
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x) g.set_element(x, y, t);
+}
+
+// Puts a structure cell down and takes it straight back out, which queues the
+// piece around it to be asked what holds it up (test_collapse.cpp's nudge).
+void nudge(Grid& g, int x, int y) {
+    g.set_element(x, y, ElementType::Wall);
+    g.set_element(x, y, ElementType::Empty);
+}
+
+// step(), with the pushes the body makes on loose bodies queued after it, the
+// way Run::step queues them.
+void step_coupled(Grid& g, Player& p, const PlayerInput& in, int n) {
+    for (int i = 0; i < n; ++i) {
+        g.update();
+        p.update(g, in);
+        for (int k = 0; k < p.push_count(); ++k) {
+            const BoxPush& q = p.push(k);
+            g.queue_impulse(q.x, q.y, q.jx, q.jy);
+        }
+    }
+}
+
+int left_of(const Grid& g, ElementType t) {
+    for (int x = 0; x < g.get_width(); ++x)
+        for (int y = 0; y < g.get_height(); ++y)
+            if (g.get_element(x, y).type == t) return x;
+    return -1;
+}
+
+int top_of(const Grid& g, ElementType t) {
+    for (int y = 0; y < g.get_height(); ++y)
+        for (int x = 0; x < g.get_width(); ++x)
+            if (g.get_element(x, y).type == t) return y;
+    return -1;
 }
 
 } // namespace
@@ -633,6 +677,229 @@ int main() {
         }
         check("S0: a body left in fire dies, and stops at zero rather than below it",
               p.health() == 0 && !p.is_alive(), "hp=" + std::to_string(p.health()));
+    }
+
+    // =====================================================================
+    // The body among loose bodies and in water. Everything above runs in a world
+    // with neither, which is the promise: walking, jumping and flying are what
+    // they were. What follows is what is new, stepped with the pushes the body
+    // makes queued the way Run queues them (step_coupled).
+    // =====================================================================
+
+    // --- standing on a moving raft, the player goes with it ---
+    // A 40x3 wooden raft floating in a pool, pushed along by a steady current
+    // (an impulse each step), with the player standing still on it.
+    {
+        Grid g(320, 100);
+        fill(g, 0, 90, 319, 99, ElementType::Wall);
+        fill(g, 0, 40, 0, 89, ElementType::Wall);
+        fill(g, 319, 40, 319, 89, ElementType::Wall);
+        fill(g, 1, 60, 318, 89, ElementType::Water);
+        fill(g, 60, 50, 99, 52, ElementType::Wood);
+        nudge(g, 80, 49);
+        Player p(76, 20);
+        step_coupled(g, p, NOTHING, 240);
+        check("a player dropped on a floating raft stands on it", p.is_on_ground() && p.is_riding(),
+              feet_detail(p) + " raft top row " + std::to_string(top_of(g, ElementType::Wood)));
+
+        const int raft0 = left_of(g, ElementType::Wood), player0 = p.cell_x();
+        int grounded = 0;
+        const int64_t current = int64_t{2000} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        for (int s = 0; s < 120; ++s) {
+            const int left = left_of(g, ElementType::Wood);
+            g.queue_impulse(left, top_of(g, ElementType::Wood) + 1, current, 0);
+            step_coupled(g, p, NOTHING, 1);
+            grounded += p.is_on_ground();
+        }
+        const int raft_moved = left_of(g, ElementType::Wood) - raft0;
+        const int player_moved = p.cell_x() - player0;
+        check("the raft drifts", raft_moved > 10, "moved " + std::to_string(raft_moved));
+        check("and carries the player with it", std::abs(player_moved - raft_moved) <= 3,
+              "raft " + std::to_string(raft_moved) + " player " + std::to_string(player_moved));
+        check("without the player falling off it or flickering into the air", grounded >= 117,
+              std::to_string(grounded) + " of 120 steps on the ground");
+        check("and the player is never inside the raft",
+              !p.overlaps_solid(g, p.cell_x(), p.cell_y()));
+    }
+
+    // --- the raft carries the player's weight ---
+    // The same raft with and without the player on it: loaded, it floats lower
+    // -- the mean row of its cells, over a hundred steps of bobbing, since a
+    // raft loaded at one end also tips and its top row is the end in the air.
+    {
+        const auto raft_depth = [](bool loaded) {
+            Grid g(200, 100);
+            fill(g, 0, 90, 199, 99, ElementType::Wall);
+            fill(g, 0, 40, 0, 89, ElementType::Wall);
+            fill(g, 199, 40, 199, 89, ElementType::Wall);
+            fill(g, 1, 60, 198, 89, ElementType::Water);
+            fill(g, 80, 50, 119, 52, ElementType::Wood);
+            nudge(g, 100, 49);
+            Player p(96, 20);
+            int64_t rows = 0, cells = 0;
+            for (int s = 0; s < 300; ++s) {
+                if (loaded) {
+                    step_coupled(g, p, NOTHING, 1);
+                } else {
+                    g.update();
+                }
+                if (s < 200) continue;
+                for (int y = 0; y < 100; ++y)
+                    for (int x = 0; x < 200; ++x)
+                        if (g.get_element(x, y).type == ElementType::Wood) {
+                            rows += y;
+                            ++cells;
+                        }
+            }
+            return cells > 0 ? 100 * rows / cells : 0;  // hundredths of a row
+        };
+        const int64_t empty = raft_depth(false), loaded = raft_depth(true);
+        check("a raft with the player on it floats lower than one without", loaded > empty,
+              "mean row x100 empty " + std::to_string(empty) + ", loaded " +
+                  std::to_string(loaded));
+        check("and still floats", loaded < 100 * 62,
+              "mean row x100 " + std::to_string(loaded) + ", surface at row 60");
+    }
+
+    // --- a body moving into the player pushes it, rather than burying it ---
+    // A crate shoved along the floor into a player standing still, by something
+    // pushing it at about a quarter of a walk: pushed hard while it is slower
+    // than that, not at all once it is faster.
+    {
+        Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+        fill(g, OBSTACLE_X - 30, FLOOR_Y - 10, OBSTACLE_X - 21, FLOOR_Y - 1, ElementType::Wood);
+        Player p(OBSTACLE_X, STAND_Y);
+        step_coupled(g, p, NOTHING, 60);
+        const int x0 = p.cell_x();
+        bool teleported = false, buried = false;
+        const int64_t shove = int64_t{1200} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        for (int s = 0; s < 120; ++s) {
+            int right = 0;
+            for (int y = FLOOR_Y - 12; y < FLOOR_Y; ++y)
+                for (int x = 0; x < WORLD_W; ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) right = std::max(right, x);
+            const int b = g.body_at(right - 9, FLOOR_Y - 5);
+            const fx::v going = b >= 0 ? g.body_velocity_at(b, right - 9, FLOOR_Y - 5).vx : 0;
+            if (going < Player::MOVE_SPEED / 4) g.queue_impulse(right - 9, FLOOR_Y - 5, shove, 0);
+            step_coupled(g, p, NOTHING, 1);
+            teleported = teleported || p.teleported();
+            buried = buried || p.overlaps_solid(g, p.cell_x(), p.cell_y());
+        }
+        check("a crate slid into the player pushes it along", p.cell_x() > x0 + 4,
+              "moved " + std::to_string(p.cell_x() - x0));
+        check("and never buries it, so it is never dug out", !teleported && !buried);
+        check("a crate sliding at a few cells a second does not hurt",
+              p.health() == Player::MAX_HEALTH, "hp=" + std::to_string(p.health()));
+    }
+
+    // --- a falling slab hurts; a light one dropped as far hurts less ---
+    {
+        const auto struck = [](int w, int h, ElementType t) {
+            Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+            Player p(OBSTACLE_X, STAND_Y);
+            step_coupled(g, p, NOTHING, 60);
+            const int x = p.cell_x() + Player::WIDTH / 2 - w / 2;
+            fill(g, x, 2, x + w - 1, 2 + h - 1, t);
+            nudge(g, x + w / 2, 1);
+            int hits = 0;
+            for (int s = 0; s < 120; ++s) {
+                step_coupled(g, p, NOTHING, 1);
+                hits += p.struck().hit && p.struck().speed > Player::IMPACT_SAFE_SPEED;
+            }
+            return std::pair<int, int>(Player::MAX_HEALTH - p.health(), hits);
+        };
+        const auto [stone, stone_hits] = struck(12, 6, ElementType::Wall);
+        const auto [plank, plank_hits] = struck(12, 2, ElementType::Wood);
+        check("a stone slab dropped on the player hurts it", stone > 0 && stone_hits > 0,
+              "damage " + std::to_string(stone));
+        check("and does not kill it from a few body heights", stone < Player::MAX_HEALTH,
+              "damage " + std::to_string(stone));
+        check("a light plank dropped as far hurts less", plank < stone,
+              "plank " + std::to_string(plank) + " stone " + std::to_string(stone));
+    }
+
+    // --- walking into a crate pushes it; into a stone, does not ---
+    {
+        const auto pushed = [](int w, int h, ElementType t) {
+            Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+            const int x = OBSTACLE_X;
+            fill(g, x, FLOOR_Y - h, x + w - 1, FLOOR_Y - 1, t);
+            Player p(x - Player::WIDTH - 4, STAND_Y);
+            step_coupled(g, p, NOTHING, 60);
+            const int start = left_of(g, t);
+            step_coupled(g, p, held_right(), 120);
+            return left_of(g, t) - start;
+        };
+        const int crate = pushed(10, 10, ElementType::Wood);
+        const int stone = pushed(16, 12, ElementType::Wall);
+        check("walking into a wooden crate pushes it", crate > 20,
+              "moved " + std::to_string(crate));
+        check("no faster than the player walks", crate <= fx::trunc(Player::MOVE_SPEED) * 2,
+              "moved " + std::to_string(crate));
+        check("walking into a heavy stone does not move it", stone == 0,
+              "moved " + std::to_string(stone));
+    }
+
+    // --- a knock throws the body, skids out, and leaves walking as it was ---
+    {
+        Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+        Player p(OBSTACLE_X, STAND_Y);
+        step(g, p, NOTHING, 60);
+        const int x0 = p.cell_x();
+        p.knock(fx::from_int(150), -fx::from_int(130));
+        bool left_ground = false;
+        int s = 0;
+        for (; s < 240; ++s) {
+            step(g, p, PlayerInput{true, false, false}, 1);  // holding back toward where it was hit
+            left_ground = left_ground || !p.is_on_ground();
+            if (s > 20 && p.push_velocity() == 0) break;
+        }
+        check("a knock throws the player off its feet and away",
+              left_ground && p.cell_x() > x0 + 20, "thrown " + std::to_string(p.cell_x() - x0));
+        check("and it skids to a stop", p.push_velocity() == 0, "after " + std::to_string(s));
+        const int x1 = p.cell_x();
+        step(g, p, held_right(), 60);
+        const int expected = fx::trunc(Player::MOVE_SPEED) * 66 / 100;
+        check("walking afterwards is walking",
+              p.cell_x() - x1 > expected && p.velocity_x() == Player::MOVE_SPEED,
+              "moved " + std::to_string(p.cell_x() - x1));
+    }
+
+    // --- water: a fall into a pool is slowed, the body sinks slowly, and swims ---
+    // Two bodies deep, so the body is all the way under for most of the way down
+    // and up, and there is air above the surface to climb out into.
+    {
+        Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+        const int surface = FLOOR_Y - 2 * Player::HEIGHT;
+        for (int y = surface; y < FLOOR_Y; ++y)
+            for (int x = 0; x < WORLD_W; ++x) g.set_element(x, y, ElementType::Water);
+        Player p(WORLD_W / 2, AIR_Y);
+        fx::v fastest_under = 0;
+        int steps_to_floor = 0;
+        for (int s = 0; s < 600 && !p.is_on_ground(); ++s) {
+            step(g, p, NOTHING, 1);
+            if (p.submerged() == fx::ONE) fastest_under = std::max(fastest_under, p.velocity_y());
+            steps_to_floor = s;
+        }
+        check("in water, the body sinks slowly", fastest_under < fx::from_int(60),
+              "fastest " + std::to_string(fx::to_float(fastest_under)) + " cells/s");
+        check("and does reach the bottom", feet(p) == FLOOR_Y,
+              feet_detail(p) + " after " + std::to_string(steps_to_floor));
+        check("landing at the bottom of a pool does not hurt", p.health() == Player::MAX_HEALTH,
+              "hp=" + std::to_string(p.health()));
+
+        const int bottom = p.cell_y();
+        PlayerInput swim;
+        swim.jump = true;
+        int out = -1;
+        for (int s = 0; s < 600 && out < 0; ++s) {
+            step(g, p, swim, 1);
+            if (feet(p) < surface) out = s;
+        }
+        check("holding the flap key swims up out of the pool", out > 0,
+              "out after " + std::to_string(out) + " steps from row " + std::to_string(bottom));
+        check("slowly: it takes the best part of a second or more", out > 40,
+              "out after " + std::to_string(out));
     }
 
     return report();

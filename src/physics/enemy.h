@@ -115,6 +115,12 @@ struct Species {
     // for a species whose limbs are all rigid.
     const tentacle::Set* tentacles = nullptr;
 
+    // What its attack does to the player besides hurting it: a throw, in cells
+    // per second -- sideways, away from where the blow came from (Enemy::blow),
+    // and up. Last, and defaulted, so a species that does not throw says nothing.
+    fx::v knock_speed = 0;
+    fx::v knock_lift = 0;
+
     constexpr int frame_w() const { return art->w; }
     constexpr int frame_h() const { return art->h; }
     constexpr int offset_x() const { return (art->w - width) / 2; }
@@ -212,6 +218,11 @@ inline constexpr Species GHOUL{
             // An arm's length (nine cells) plus the lean, rounded up.
             .pad = 14,
         },
+    // A swipe shoves: about a body's width of throw and a hop, enough that a
+    // ghoul's claws push the player off it rather than holding it in place for
+    // the next swipe.
+    .knock_speed = fx::from_int(90),
+    .knock_lift = fx::from_int(50),
 };
 
 // The troll: nearly three times the player's height, slow, and hitting hard
@@ -310,6 +321,11 @@ inline constexpr Species TROLL{
             // carries the shoulder six more.
             .pad = 56,
         },
+    // The club throws: up and out of the crater, about two of the player's
+    // bodies, landing at well under a hurting fall. A troll that leaves the
+    // player standing where it hit has hit nothing heavy.
+    .knock_speed = fx::from_int(150),
+    .knock_lift = fx::from_int(130),
 };
 
 // The fish: a largemouth bass on a man's legs, with a man's arm growing out of
@@ -401,6 +417,9 @@ inline constexpr Species FISH{
             // dozen cells above the frame.
             .pad = 16,
         },
+    // A slap shoves, between the swipe and the club.
+    .knock_speed = fx::from_int(110),
+    .knock_lift = fx::from_int(80),
 };
 
 // The angler's tentacles: the chains its art was drawn along, and how they
@@ -593,6 +612,9 @@ inline constexpr Species ANGLER{
             .pad = 40,
         },
     .tentacles = &ANGLER_TENTACLES,
+    // The lure strike shoves the way the whip comes down, as the fish's slap.
+    .knock_speed = fx::from_int(110),
+    .knock_lift = fx::from_int(80),
 };
 
 // Every species, in a fixed order. The order is an index the session log
@@ -670,6 +692,29 @@ public:
     static constexpr fx::v MAX_FALL_SPEED = Player::MAX_FALL_SPEED;
     static constexpr uint8_t BURN_TEMPERATURE = Player::BURN_TEMPERATURE;
     static constexpr int BURN_INTERVAL_STEPS = Player::BURN_INTERVAL_STEPS;
+
+    // --- among loose bodies, and in water ---
+    //
+    // A body's mass is what it has left: PIXEL_WEIGHT a surviving pixel, in
+    // Material::weight units. One, so the ghoul -- the player's box and scale,
+    // 238 pixels -- weighs what the player does (Player::WEIGHT), and a troll
+    // nearly ten times that. What it weighs is what a raft it stands on carries,
+    // what it pushes back on a body that shoves it with, and what an arrow's
+    // momentum is divided by: a whole troll shrugs an arrow off and a whittled
+    // ghoul is knocked back by one.
+    static constexpr int PIXEL_WEIGHT = 1;
+
+    // How dense it is, per cell, for what it floats or sinks by: the player's,
+    // a little over water, so an enemy walks into a pool and along its bottom,
+    // slowly, rather than floating up out of reach of the bow or bobbing on the
+    // surface it cannot climb out of.
+    static constexpr int DENSITY = Player::DENSITY;
+
+    // A loose body striking it faster than this, relative to it, crushes the
+    // pixels it lands on: the player's threshold for being hurt by one, so a
+    // block that would hurt the player is one that breaks a troll, and a raft
+    // drifting against a ghoul breaks nothing.
+    static constexpr fx::v IMPACT_SAFE_SPEED = Player::IMPACT_SAFE_SPEED;
 
     // The chains of a tentacled species (Species::tentacles), held outside the
     // body: see `chains` below. Defined further down, after the Limb it holds.
@@ -798,6 +843,34 @@ public:
     bool has_arms() const;
     bool has_feet() const;
 
+    // What it weighs, Material::weight units: PIXEL_WEIGHT a surviving pixel.
+    int64_t mass() const { return int64_t{remaining} * PIXEL_WEIGHT; }
+
+    // Struck by an impulse (Material::weight units times fx cells per second):
+    // an arrow's momentum. The speed it gains is that over its mass, sideways
+    // onto the box's knock velocity (BoxBody::push_x) and up or down onto its
+    // fall. Shows from the next update.
+    void knock(int64_t jx, int64_t jy);
+
+    // The throw its attack gives a target whose box's left edge is at
+    // `target_x`, in fx cells per second (Species::knock_speed, knock_lift):
+    // away from the claws, for a swipe; forward out of the crater, for a slam,
+    // club, hand or lure -- and up. For Run, when update() reports an attack
+    // landed.
+    void blow(int target_x, fx::v& vx, fx::v& vy) const;
+
+    // A loose body that moved into its box this step (BoxBody::shove); and how
+    // many pixels a fast one crushed, where, and how fast it was going there.
+    const BoxStrike& struck() const { return strike; }
+    int crushed_this_step() const { return crushed; }
+    int crush_x() const { return crushed_at_x; }
+    int crush_y() const { return crushed_at_y; }
+    fx::v crush_speed() const { return crushed_speed; }
+
+    // The box's knock velocity, fx cells per second: for tests.
+    fx::v push_velocity() const { return body.push_x; }
+    bool is_riding() const { return body.riding; }
+
     // True if a box at (px, py) would overlap anything solid -- static matter
     // anywhere in the box, powder only in its footing rows. Public for the same
     // reason Player's is.
@@ -835,6 +908,14 @@ private:
     // Steps of the strike's follow-through left, in which the bulb still hurts.
     int strike_follow = 0;
     int burn_timer = 0;
+
+    // This step's meeting with the loose bodies, rebuilt every update: the
+    // strike on the box, and the pixels a fast body crushed.
+    BoxStrike strike{};
+    int crushed = 0;
+    int crushed_at_x = 0;
+    int crushed_at_y = 0;
+    fx::v crushed_speed = 0;
 
     // Four bits per frame pixel: 0 once it is gone, and while it exists, one
     // more than the rig::Part it belongs to -- looked up once at spawn, because
@@ -1071,6 +1152,13 @@ private:
     bool is_bulb(int x, int y) const;
     void slam(Grid& grid);
     void shove_powder(Grid& grid);
+
+    // The loose bodies, before anything else looks at the box: a fast one
+    // crushes the pixels it is in, and one that has moved into the box pushes
+    // the box out (BoxBody::shove) and is pushed back on. Then, after the move,
+    // the body's weight on what it stands on.
+    void meet_bodies(Grid& grid);
+    void press_bodies(Grid& grid, bool was_on_ground, fx::v impact_speed);
 
     bool drop_ahead_is_deep(const Grid& grid, int sign) const;
 };

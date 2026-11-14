@@ -48,7 +48,7 @@ struct Knob {
     int64_t value;  // fx raw bits
 };
 
-const Knob PLAYER_KNOBS[] = {
+constexpr Knob PLAYER_KNOBS[] = {
     {"MOVE_SPEED", Player::MOVE_SPEED},
     {"JUMP_SPEED", Player::JUMP_SPEED},
     {"GRAVITY", Player::GRAVITY},
@@ -61,6 +61,14 @@ const Knob PLAYER_KNOBS[] = {
     {"BURN_TEMPERATURE", fx::from_int(Player::BURN_TEMPERATURE)},
     {"BURN_DAMAGE", fx::from_int(Player::BURN_DAMAGE)},
     {"BURN_INTERVAL_STEPS", fx::from_int(Player::BURN_INTERVAL_STEPS)},
+    {"WEIGHT", fx::from_int(Player::WEIGHT)},
+    {"DENSITY", fx::from_int(Player::DENSITY)},
+    {"PUSH_STRENGTH", fx::from_int(Player::PUSH_STRENGTH)},
+    {"SWIM_IMPULSE", Player::SWIM_IMPULSE},
+    {"SWIM_MAX_CLIMB", Player::SWIM_MAX_CLIMB},
+    {"IMPACT_SAFE_SPEED", Player::IMPACT_SAFE_SPEED},
+    {"IMPACT_DAMAGE_DIVISOR", fx::from_int(Player::IMPACT_DAMAGE_DIVISOR)},
+    {"KNOCK_STAGGER_STEPS", fx::from_int(Player::KNOCK_STAGGER_STEPS)},
 };
 
 std::vector<std::string> read_lines(const std::string& path) {

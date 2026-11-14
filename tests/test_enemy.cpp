@@ -1948,5 +1948,114 @@ int main() {
         check("every crawling pose draws what is hit", sound, why);
     }
 
+    // =====================================================================
+    // Enemies among loose bodies, and in water (Enemy::meet_bodies, BoxBody).
+    // =====================================================================
+
+    // --- a stone slab dropped on a troll crushes it ---
+    // Wider than anywhere the troll wanders in the time it takes to fall, so it
+    // lands on the troll wherever it has walked to.
+    {
+        Grid g = make_world();
+        Enemy e;
+        e.spawn(150, FLOOR_Y - species::TROLL.height - 2, species::TROLL);
+        settle(g, e, 20);
+        const int whole = e.pixel_count();
+        for (int y = 2; y < 10; ++y)
+            for (int x = 110; x < 210; ++x) g.set_element(x, y, ElementType::Wall);
+        g.set_element(160, 1, ElementType::Wall);
+        g.set_element(160, 1, ElementType::Empty);
+        int crushed = 0;
+        for (int i = 0; i < 120 && e.is_alive(); ++i) {
+            g.update();
+            e.update(g, -10000, -10000, false);
+            crushed += e.crushed_this_step();
+        }
+        check("a falling slab crushes the troll it lands on",
+              crushed > 0 && (!e.is_alive() || e.pixel_count() < whole),
+              "crushed " + std::to_string(crushed) + " of " + std::to_string(whole));
+        check("hard enough to kill it", !e.is_alive(),
+              "pixels left " + std::to_string(e.pixel_count()));
+    }
+
+    // --- a block slid slowly into a ghoul pushes it and breaks nothing ---
+    {
+        Grid g = make_world();
+        Enemy e = standing_enemy(g, 150);
+        const int whole = e.pixel_count();
+        for (int y = FLOOR_Y - 8; y < FLOOR_Y; ++y)
+            for (int x = 120; x < 128; ++x) g.set_element(x, y, ElementType::Wood);
+        const int64_t shove = int64_t{600} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        int struck = 0, buried = 0;
+        for (int i = 0; i < 240; ++i) {
+            int right = 0;
+            for (int y = FLOOR_Y - 10; y < FLOOR_Y; ++y)
+                for (int x = 0; x < WORLD_W; ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) right = std::max(right, x);
+            const int b = g.body_at(right, FLOOR_Y - 4);
+            const fx::v going = b >= 0 ? g.body_velocity_at(b, right, FLOOR_Y - 4).vx : 0;
+            if (going < fx::from_int(30)) g.queue_impulse(right - 4, FLOOR_Y - 4, shove, 0);
+            g.update();
+            // Facing the block and held still: a target right on top of it,
+            // too high to reach, so it neither wanders off nor attacks.
+            e.update(g, e.cell_x(), e.cell_y() - 200, false);
+            struck += e.struck().hit;
+            buried += e.overlaps_solid(g, e.cell_x(), e.cell_y());
+        }
+        check("a slow block slid into a ghoul shoves it", struck > 0, std::to_string(struck));
+        check("and crushes none of it", e.pixel_count() == whole,
+              std::to_string(whole - e.pixel_count()) + " lost");
+        check("and is never left inside it", buried == 0, std::to_string(buried) + " steps");
+    }
+
+    // --- an arrow knocks a ghoul back; a troll, hardly ---
+    {
+        Grid g = make_world();
+        Enemy ghoul = standing_enemy(g, 150);
+        Enemy troll;
+        troll.spawn(220, FLOOR_Y - species::TROLL.height - 2, species::TROLL);
+        settle(g, troll, 20);
+        const int64_t arrow = int64_t{Quiver::WEIGHT} * Quiver::LAUNCH_SPEED;
+        ghoul.knock(arrow, 0);
+        troll.knock(arrow, 0);
+        check("an arrow's momentum knocks a ghoul back", ghoul.push_velocity() > fx::from_int(10),
+              std::to_string(fx::to_float(ghoul.push_velocity())) + " cells/s");
+        check("and a troll a tenth as far", troll.push_velocity() * 5 < ghoul.push_velocity(),
+              std::to_string(fx::to_float(troll.push_velocity())) + " cells/s");
+        settle(g, ghoul, 20);
+        check("the knock skids out", ghoul.push_velocity() == 0);
+    }
+
+    // --- a ghoul wades: slower in a pool, along its bottom ---
+    {
+        const auto walked = [](bool wet) {
+            Grid g = make_world();
+            if (wet)
+                for (int y = FLOOR_Y - 40; y < FLOOR_Y; ++y)
+                    for (int x = 1; x < WORLD_W - 1; ++x) g.set_element(x, y, ElementType::Water);
+            Enemy e;
+            e.spawn(100, FLOOR_Y - G.height - 2);
+            int grounded = 0;
+            for (int i = 0; i < 120; ++i) {
+                g.update();
+                e.update(g, -10000, -10000, false);
+                if (i >= 60) grounded += e.on_ground();
+            }
+            const int start = e.cell_x();
+            for (int i = 0; i < 60; ++i) {
+                g.update();
+                e.update(g, -10000, -10000, false);
+                grounded += e.on_ground();
+            }
+            return std::pair<int, int>(std::abs(e.cell_x() - start), grounded);
+        };
+        const auto [dry, dry_ground] = walked(false);
+        const auto [wet, wet_ground] = walked(true);
+        check("a ghoul wading a pool covers less ground than on land", wet < dry && wet > 0,
+              "dry " + std::to_string(dry) + " wet " + std::to_string(wet));
+        check("and walks its bottom rather than floating up", wet_ground >= 100,
+              std::to_string(wet_ground) + " of 120 steps on the ground");
+    }
+
     return report();
 }

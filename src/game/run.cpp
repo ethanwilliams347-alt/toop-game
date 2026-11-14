@@ -122,11 +122,25 @@ void Run::step(const Input& input) {
     player_input.jump = input.jump;
     const int health_before = player.health();
     player.update(grid, player_input);
-    // Whatever the world did to the body this step -- a burn, a hard landing.
-    // Enemies hurt it below, and say so themselves.
+    // Whatever the world did to the body this step -- a burn, a hard landing, a
+    // loose body striking it. Enemies hurt it below, and say so themselves.
     if (player.health() < health_before)
         events_.push(Event{Event::Kind::PlayerHurt, player.center_x(), player.center_y(),
                            health_before - player.health(), -1});
+    const BoxStrike& struck = player.struck();
+    if (struck.hit && struck.speed > Player::IMPACT_SAFE_SPEED)
+        events_.push(Event{Event::Kind::Struck, struck.x, struck.y, -1, fx::trunc(struck.speed)});
+
+    // What the body did to the loose bodies -- stood on one, jumped off one,
+    // walked into one, was shoved by one and shoved back. The player holds the
+    // grid const, so it reports them and they are queued here. Every push queued
+    // on this step, by anything, lands in the next step's Grid::update, inside
+    // the bodies' solve (grid.h, "Coupling"): a step late, and the same step
+    // late for everyone.
+    for (int i = 0; i < player.push_count(); ++i) {
+        const BoxPush& p = player.push(i);
+        grid.queue_impulse(p.x, p.y, p.jx, p.jy);
+    }
 
     // Last, so the dig is aimed from where the body actually ended up this step.
     // Called every step whether or not the button is held, because that is what
@@ -175,12 +189,26 @@ void Run::step(const Input& input) {
                 events_.push(Event{Event::Kind::Slam, ix, iy, i, 0});
         }
 
+        // A loose body that crushed part of it.
+        if (e.crushed_this_step() > 0)
+            events_.push(Event{Event::Kind::Struck, e.crush_x(), e.crush_y(), i,
+                               fx::trunc(e.crush_speed())});
+
         if (landed) {
             const int before = player.health();
             player.take_hit(e.species().damage);
             if (player.health() < before)
                 events_.push(Event{Event::Kind::PlayerHurt, player.center_x(), player.center_y(),
                                    before - player.health(), species::index_of(e.species())});
+            // And thrown by it: out of the crater, off the claws. From the next
+            // step on, as the damage is this one's.
+            fx::v kx = 0, ky = 0;
+            e.blow(player.cell_x(), kx, ky);
+            if (kx != 0 || ky != 0) {
+                player.knock(kx, ky);
+                events_.push(Event{Event::Kind::Knocked, player.center_x(), player.center_y(),
+                                   fx::trunc(kx), species::index_of(e.species())});
+            }
         }
     }
 
