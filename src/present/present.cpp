@@ -78,6 +78,31 @@ void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
     }
 }
 
+void lure_lights(const Run& run, float alpha, std::vector<lit::PointLight>& out) {
+    out.clear();
+    for (const Enemy& en : run.enemies) {
+        if (!en.is_alive()) continue;
+        rig::Point was{}, now{};
+        if (!en.lure_tip(was, now)) continue;
+        // The bulb's own teal (angler_art.h's 'v', 0xB8F2E0) a little over
+        // white, so it reads as the thing giving the light; a lantern's reach
+        // rather than a lamp's, so the fish is found by the pool it carries
+        // before it is seen. Interpolated as the sprite is, so the light
+        // stays on the bulb drawn between steps instead of stepping at 60 Hz.
+        const float x0 = fx::to_float(was.x), y0 = fx::to_float(was.y);
+        const float x1 = fx::to_float(now.x), y1 = fx::to_float(now.y);
+        lit::PointLight l;
+        l.x = x0 + (x1 - x0) * alpha + 0.5f;
+        l.y = y0 + (y1 - y0) * alpha + 0.5f;
+        l.r = 0.55f;
+        l.g = 1.25f;
+        l.b = 1.05f;
+        l.radius = 22.0f;
+        l.flicker = 0.15f;
+        out.push_back(l);
+    }
+}
+
 void paint_bodies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                   std::vector<frame::BodySprite>& out, std::vector<frame::HiddenCell>& hidden) {
     out.clear();

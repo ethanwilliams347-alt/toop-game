@@ -141,7 +141,37 @@ void test_arrows_and_words() {
 
 }  // namespace
 
+// The angler's lure lights the world under the multiply light model: one light
+// per angler, at its bulb, and none for a species without a lure.
+void test_lure_lights() {
+    const auto run_owner = std::make_unique<Run>(240, 120, 3);
+    Run& run = *run_owner;
+    build_floor(run.grid, 100);
+    run.player = Player(30, 100 - Player::HEIGHT);
+    const int ya = boot::standing_y(run.grid, 150, species::ANGLER);
+    const int yg = boot::standing_y(run.grid, 60, species::GHOUL);
+    check("lure: the fixture's enemies stand", ya >= 0 && yg >= 0 &&
+                                                   run.spawn_enemy(150, ya, species::ANGLER) &&
+                                                   run.spawn_enemy(60, yg, species::GHOUL));
+    for (int s = 0; s < 10; ++s) run.step(Input{});
+    std::vector<lit::PointLight> lights;
+    present::lure_lights(run, 1.0f, lights);
+    check("lure: one light, the angler's", lights.size() == 1, std::to_string(lights.size()));
+    if (lights.size() == 1) {
+        // Near the fish: the bulb hangs within its frame of the body.
+        const Enemy* angler = nullptr;
+        for (const Enemy& en : run.enemies)
+            if (en.is_alive() && &en.species() == &species::ANGLER) angler = &en;
+        const float dx = lights[0].x - static_cast<float>(angler ? angler->cell_x() : -999);
+        const float dy = lights[0].y - static_cast<float>(angler ? angler->cell_y() : -999);
+        check("lure: the light is at the fish", std::fabs(dx) < 120.0f && std::fabs(dy) < 120.0f,
+              std::to_string(dx) + ", " + std::to_string(dy));
+        check("lure: it gives light", lights[0].radius > 0.0f && lights[0].g > 0.0f);
+    }
+}
+
 int main() {
+    test_lure_lights();
     test_drawn_is_hit();
     test_arrows_and_words();
     return report();
