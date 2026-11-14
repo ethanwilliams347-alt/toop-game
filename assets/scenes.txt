@@ -18,6 +18,8 @@
 #                  from the far edge, and enemies are spread by a heuristic.
 #   backdrop=<dir> the painted layers behind the scene: assets/<dir>/backdrop.txt
 #                  (src/render/backdrop_set.h). Without one, the clear colour.
+#   mood=<file>    the scene's light, air and material look, a *_mood.txt under
+#                  assets/ (src/render/mood.h). Without one, the legacy look.
 
 # Backdrop scenes all follow one naming rule, so a set is one name used
 # everywhere and one folder holding everything it is:

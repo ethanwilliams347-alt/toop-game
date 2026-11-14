@@ -79,7 +79,7 @@ textures, draw calls.
 | Bind a sprite | `python tools/load_sprite.py <key> <file.bmp>` | never hardcode asset paths |
 | What appears on screen from game state | `src/present/present.*` | `present_test` |
 | Draw order, layers, light pass | `src/render/frame.cpp` (`frame::LAYERS`); on GL with a multiply mood, `src/gpu/pass_graph.h` | `golden_frame_test`, `gl_frame_test` |
-| Lighting | `src/render/light.*` (CPU, the reference); `src/gpu/pipeline.*` + `assets/shaders/light_*.frag`, `sun.frag`, `resolve.frag` (GL multiply model) | `light_test`, `gl_frame_test`, `preview_light.exe`, `preview_frame.exe`, `grid_bench --focus` light rows |
+| Lighting, atmosphere, material looks | `src/render/light.*` (CPU, the reference); `src/render/mood.*` (the scene's `*_mood.txt`); `src/gpu/pipeline.*` + `assets/shaders/light_*.frag`, `sun.frag`, `resolve.frag`, `weather*`, `bloom_*.frag`, `post.frag`, `cells.frag` (GL multiply model) | `light_test`, `gl_frame_test`, `preview_light.exe`, `preview_frame.exe`, `grid_bench --focus` light rows |
 | Player animation | `src/render/player_anim.*` | `src/render/player_sprite.h` is generated -- regenerate with `python tools/player_sheet.py --header` |
 | HUD, reticle, hotbar, menu drawing | `src/render/overlay.*`, `src/ui/*` | `golden_frame_test` |
 | Parallax backdrops | `src/render/backdrop_set.*`, `backdrop_wrap.h`, `depth_rig.h`; generators in `tools/generate_bg_*.py` | `backdrop_test`, `backdrop_set_test`, `rig_test` |
@@ -242,16 +242,23 @@ Arrows point from includer to included.
   grain, weather, point lights, per-material looks; `mood::legacy()` is
   today's look and what a scene with no `mood=` gets). The mood is loaded on
   scene switch in `main.cpp`; on GL a `light_model multiply` mood is drawn
-  by the light pipeline (`src/gpu/`, below) -- so far its ambient, sun and
-  point lights; fog, bloom, grade, vignette, grain, weather and material
-  looks are read by nothing yet (R4-R6). A legacy mood, and every mood on
-  the SDL renderer, draws today's look. `mood::fill_lit` turns one into the
-  pipeline's numbers. Format: `src/render/mood.h`, summary in `assets/README.md`.
+  by the light pipeline (`src/gpu/`, below), which reads all of it: ambient,
+  sun and point lights in the resolve, fog on the backdrop layers, bloom,
+  grade LUT, vignette and grain in post, weather in its own pass, and the
+  per-material looks in `cells.frag`. A legacy mood, and every mood on the
+  SDL renderer, draws today's look. `mood::fill_lit` turns one into the
+  pipeline's numbers (`lit::LitFrame`) and the cell look
+  (`lit::CellLook`). F3 (GL) reloads the active scene's mood file in place. Format: `src/render/mood.h`, summary in `assets/README.md`.
 - `lit_frame.h` -- std-only records the GL light pipeline is told:
   `lit::LightConstants` (filled by `LightField::gpu_constants()` from the CPU
   field's own tables, so the GPU port propagates with the same numbers) and
   `lit::LitFrame` (the mood's ambient/sun/point lights plus where the cell
-  pack sits this frame). Shared by `render/light`, `render/mood` and `src/gpu/`
+  pack sits this frame, plus the fog, bloom, post and weather numbers),
+  `lit::CellLook` (the mood's `material` lines -- tint, tile texture, rim,
+  reflect, spec, depth per type -- plus the sun direction, the pack's world
+  origin and the step, handed to `GlCanvas::set_cell_look` before compose),
+  and `lit::append_lights` (a frame's dynamic lights, the anglers' lures from
+  `present::lure_lights`, after the mood's own). Shared by `render/light`, `render/mood` and `src/gpu/`
   without any of them including the others.
 - `canvas.h` -- `gfx::Canvas`, the drawing seam (draw colour/blend, clear,
   fill_rect, blit, blit_ex, textures as `gfx::Texture` handles). No SDL.
@@ -270,7 +277,7 @@ Arrows point from includer to included.
 - `gl_canvas.*` -- `gpu::GlCanvas`, a `gfx::Canvas` that batches every fill and
   blit as quads (one shader, `assets/shaders/sprite.*`; fills sample a 1x1 white
   texture) into an offscreen framebuffer the window's size, then blits it to
-  the window and swaps on `present()`. For now a parity backend: same blend
+  the window and swaps on `present()`. Its plain draws are a parity backend: same blend
   equations as SDL, and destination rects truncated field by field the way
   SDL's software renderer does, so the frame matches `SdlCanvas`'s. Reads the
   drawable size at the first draw of each frame, so `shell::apply_window` resizing
@@ -286,10 +293,14 @@ Arrows point from includer to included.
   shader's mode: `Legacy` (default) outputs the colour exactly as a blit would;
   `Material` (F10) flat-colours cells by type and flags; `Raw` writes the pack's
   bytes, which `gl_frame_test` reads back against `CellPack` byte for byte.
-  `cells.frag` mirrors the bit layout in `render/cell_pack.h`.
+  `cells.frag` mirrors the bit layout in `render/cell_pack.h`. With a
+  `lit::CellLook` on (R4a/R4b, a multiply mood with `material` lines) it also
+  draws the material look: world-anchored tiles from `assets/materials/`, a
+  sun-facing rim, water that shows and reflects the "behind" copy of the
+  albedo (with caustics stepped by simulation step), oil and steam.
 - The multiply light model (R3): `pass_graph.h` is the lit frame as a
-  constexpr table -- backdrop -> world (albedo + emissive MRT) -> light ->
-  resolve -> weather -> post -> UI -- with static_asserts that nothing is read
+  constexpr table (`PASSES`) -- backdrop -> behind -> world (albedo +
+  emissive MRT) -> light -> resolve -> weather -> bloom -> post -> UI -- with static_asserts that nothing is read
   before it is written, there is exactly one Resolve, and UI comes after Post.
   `main.cpp` calls `GlCanvas::begin_lit_frame()` before `frame::compose` (every
   draw then also writes attachment 1, a linear emissive buffer: `cells.frag`
@@ -299,7 +310,17 @@ Arrows point from includer to included.
   block resolution, from the cell pack), a sun-visibility march per cell, then
   `albedo x (ambient + sun + fire light + point lights) + emissive` in linear
   half-float, then back to display encoding into the target the UI draws over.
-  Weather is an empty pass (R6); post is only the encode (R5). `targets.*` is
+  Fog (R5) is applied as the backdrop layers draw: `sprite.frag` blends each
+  toward the fog colour by its aerial depth (`frame.cpp` derives it from the
+  layer's factor; `GlCanvas::set_fog`). Weather (R6, `weather.vert/.frag`) is
+  instanced and stateless -- rain, wisps, dust as a function of index and
+  step -- lit, and stopped at the first solid in each column
+  (`weather_top.frag`). Bloom (R5) is a half- to 1/16-resolution chain
+  (`bloom_down/up.frag`) of over-threshold light; post (`post.frag`) adds it,
+  tonemaps, grades through the mood's LUT strip (`tools/make_lut.py`),
+  vignettes, adds per-step grain, then encodes. `Pipeline` times each pass
+  with double-buffered `GL_TIME_ELAPSED` queries (canvas, light, resolve,
+  weather, bloom, post); F8's inspector shows them as a `GPU MS` HUD line. `targets.*` is
   a texture + FBO pair; `program.*` compiles a vert/frag pair. Any pipeline
   shader or target failing at creation fails `GlCanvas::create`, so the game
   falls back to SDL; failing mid-run draws the frame unlit. The CPU
@@ -349,7 +370,9 @@ Arrows point from includer to included.
    objective, enemies, player, arrows, foreground, light pass); `overlay::draw`;
    `canvas.present()`. On GL with a multiply mood, `compose` runs inside a lit
    frame with the CPU light pass skipped, and `GlCanvas::resolve_lit` lights the
-   frame before `overlay::draw` (`src/gpu/pass_graph.h`).
+   frame before `overlay::draw` (`src/gpu/pass_graph.h`): first `main.cpp`
+   hands the canvas the cell look and the fog, then after compose the
+   pipeline runs light, resolve, weather, bloom and post.
 
 Only step 3 changes the world; 4-6 read the `Run` const.
 
@@ -442,7 +465,10 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
   `GlCanvas` vs `SdlCanvas`, cells via `cells.frag`, plus a byte-exact
   readback of the uploaded cell pack, and the lit passes: a neutral lit frame
   equals the unlit SDL frame, the GPU light field equals `LightField`'s, light
-  raises luminance, the sun's march shades under a slab; needs a GL 3.3
+  raises luminance, the sun's march shades under a slab; post with an identity
+  LUT is identity, fog grows with depth and leaves the world plane as painted,
+  bloom only adds light, weather stops at solids, the cell look's water lets
+  the backdrop through; needs a GL 3.3
   context, returns 77 = skipped without one), `alloc_test` (allocations in a replayed step),
   `tuning_test` (`TUNING.md` vs. the constants it names), `sdl_boundary_test`.
 - `tests/bench_grid.cpp` -> `grid_bench`: timings incl. a replayed session. Not
@@ -467,5 +493,8 @@ compiler on a one-line probe with `slop_engine`'s include path and fails if
 art is in `art_src/`. `assets/scenes.txt` lists scenes (material BMP, albedo
 BMP, optional prop list, then `mode=`, `size=`, `scale=`, `backdrop=` a
 `bg_*/backdrop.txt` directory, `level=`, `mood=` a `*_mood.txt` in that
-directory). `assets/sprites.txt` maps sprite keys
+directory; a mood variant such as `bg_tarn_noir` is a row that reuses its
+set's maps and backdrop and differs only in `mood=`). `assets/shaders/` holds
+the GL renderer's GLSL and `assets/materials/` the cell look's tiles.
+`assets/sprites.txt` maps sprite keys
 to BMPs. Each format is documented at the top of its file and in its parser.
