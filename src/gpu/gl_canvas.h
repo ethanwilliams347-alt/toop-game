@@ -10,15 +10,13 @@
 
 // The OpenGL 3.3 core backend of gfx::Canvas.
 //
-// At this stage it is a parity backend: it draws what gfx::SdlCanvas draws, with
-// the same blend equations and the same rect snapping, so switching renderer=gl
-// changes nothing on screen. That is the point of doing it first -- the shader
-// passes that come after it (cells, light, post) each move pixels on purpose,
-// and they need a GL frame already known to equal the SDL one to be measured
-// against. gl_frame_test holds the two within a few levels of each other.
-// The first such pass is the multiply light model (begin_lit_frame /
-// resolve_lit below, gpu/pass_graph.h); a frame that does not ask for it is
-// still the parity frame.
+// Its plain draws are a parity backend: it draws what gfx::SdlCanvas draws, with
+// the same blend equations and the same rect snapping, so a frame with no lit
+// passes looks the same under renderer=gl. The shader passes (cells, light,
+// fog, bloom, post -- begin_lit_frame / resolve_lit below, gpu/pass_graph.h)
+// each move pixels on purpose, and they need a GL frame already known to equal
+// the SDL one to be measured against. gl_frame_test holds the two within a few
+// levels of each other.
 //
 // How it draws: every fill and blit is a quad appended to one vertex batch,
 // flushed when the texture or blend mode changes, before an upload, and at

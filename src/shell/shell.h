@@ -13,12 +13,11 @@
 #include "scene/scene_list.h"
 
 // The SDL side of the game: the window and its modes, the render targets, and
-// turning asset files into textures. What main.cpp used to define above main()
-// and inside it, collected so main.cpp is the loop and the wiring and nothing
-// else.
+// turning asset files into textures, collected so main.cpp is the loop and the
+// wiring and nothing else.
 //
 // Everything here makes SDL calls and is therefore reachable only from the game
-// executable. The decisions it used to make inline that do not need SDL --
+// executable. The decisions around it that do not need SDL --
 // which mode to open at, what a backdrop file says, what the HUD reads -- are in
 // game/display.h, render/backdrop_set.h and present/present.h, each with a suite.
 namespace gpu {

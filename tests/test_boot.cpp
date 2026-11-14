@@ -1,8 +1,5 @@
 // The startup decisions, headless.
 //
-// Everything asserted below used to run inside main(), print a line to stdout,
-// and be checkable only by a person reading the line at launch.
-//
 // Two halves. The unit half covers the decisions in game/boot.h against worlds
 // this file builds, and the window decisions in game/display.h -- which size
 // and mode to open at, the lists the settings menu offers, settings.txt. The

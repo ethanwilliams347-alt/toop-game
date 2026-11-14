@@ -9,8 +9,8 @@
 #include "scene/props.h"
 
 // The decisions main() takes before its first frame, kept out of the SDL shell
-// so a test can reach them. Everything here previously ran inline in main(),
-// once at startup, and could only be checked by a person reading a printed line.
+// so a test can reach them rather than a person reading a printed line at
+// launch.
 //
 // A header rather than a sixth source-set variable: the guard in CMakeLists.txt
 // is a set of variables kept apart so that a simulation source reaching for a

@@ -46,7 +46,7 @@
 //      bg_valley already obeys this, which is how the relation was checked: its
 //      hills_midfar (0.30) stands at row 73 and hills_near (0.70) at row 89,
 //      which solves to h = 61, c = 101 -- and bg_valley_08_ground's first opaque row
-//      is 63. Ethan's factors were a pinhole camera all along.
+//      is 63. The hand-picked factors were a pinhole camera all along.
 //
 //   2. The plane can scroll one row at a time, each at factor(r) -- line scroll,
 //      what the SNES did per scanline with HDMA. There is no band boundary to

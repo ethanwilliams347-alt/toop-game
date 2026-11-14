@@ -1,5 +1,5 @@
 // The game: the frame loop, the input pump, and the wiring between the parts
-// that do the work. What used to live here and no longer does, and where it went:
+// that do the work. The parts that live elsewhere, each with its own suite:
 //
 //   game/level.h        putting a world together for a scene (headless; level_test)
 //   present/present.h   what the frame shows, from a const Run (present_test)
@@ -522,9 +522,8 @@ int main(int argc, char* argv[]) {
     };
 
     // Centred across and held VERTICAL_ANCHOR of the way down (game/camera.h), and
-    // deliberately not configurable from here. A moving vertical anchor was built
-    // and removed at the tester's request; what is left is one constant on Camera,
-    // so there is nothing for main.cpp to hold.
+    // deliberately not configurable from here: the anchor is one constant on
+    // Camera, so there is nothing for main.cpp to hold.
     Camera camera;
 
     // Declared above the scene lambdas rather than below them, and that is a
@@ -1264,11 +1263,10 @@ int main(int argc, char* argv[]) {
         // The camera's framing is fixed -- centred across, VERTICAL_ANCHOR down -- so
         // nothing per-frame is left to do to it besides the follow further down.
         //
-        // Worth keeping the note a removed moving anchor leaves behind: it was updated
-        // after the cursor was resolved, on purpose, so that the aim was read through
-        // the frame the player was actually looking at. Any later feature that moves
-        // the view from player input inherits that ordering problem and the positive
-        // feedback loop behind it.
+        // A feature that moves the view from player input has an ordering problem:
+        // it must update after the cursor is resolved, so that the aim is read
+        // through the frame the player is actually looking at, or the aim moves the
+        // view, which moves the aim -- a positive feedback loop.
 
         // The freeze rule is pacer::world_advances, and it is one function because it
         // is one mechanism. The argument -- that freezing means not accumulating time,

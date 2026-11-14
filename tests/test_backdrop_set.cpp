@@ -1,11 +1,9 @@
 // Backdrop sets: the backdrop.txt parser, and every set a shipped scene names
 // held to the BMPs it describes.
 //
-// The second half is what boot_test (for the bg_valley family) and rig_test (for
-// bg_tarn) used to do against C++ tables. The numbers moved into text files
-// next to the art; the checks moved here with them, and now run on every set
-// whatever its model, so a property one set has is checked on every set that
-// claims it.
+// The second half checks the shipped sets' text files against the art next to
+// them. The checks run on every set whatever its model, so a property one set
+// has is checked on every set that claims it.
 //
 // Runs from the source tree (WORKING_DIRECTORY), because it reads
 // assets/scenes.txt and the art. Links no SDL: what a person has to judge --
