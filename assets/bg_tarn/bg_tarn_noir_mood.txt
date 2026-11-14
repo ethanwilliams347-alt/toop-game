@@ -13,7 +13,7 @@
 #   - fog that eats the far shore and the mountains, so depth reads as layers
 #     of haze (Rain World's depth fog too).
 #
-# Units (src/render/mood.h is the authority; tune in game with F6 hot reload):
+# Units (src/render/mood.h is the authority; tune in game with F3 (mood reload)):
 #   colours      linear; `ambient`/`sun`/`fog` take r g b as three words,
 #                `color=`/`tint=` take r,g,b; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y the way the light TRAVELS (x right, y DOWN), each -1..1
@@ -26,7 +26,7 @@
 #                albedo; texture=<stem> is assets/materials/<stem>.bmp (omit for
 #                no tile); strength is s in albedo*(1+s*(tile-0.5)); rim,
 #                reflect, spec and depth 0..1 (assets/materials/README.md)
-# authority; tune the numbers in game with F6 hot reload):
+# authority; tune the numbers in game with F3 (mood reload)):
 #   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
 #   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
@@ -50,13 +50,13 @@ sun 0.14 0.18 0.28 dir=0.30,1.00 shadow=on
 
 # Heavy, cold fog from the near pines back. near=0.10 starts it just behind the
 # world plane, so the player stays crisp and the far shore is half gone.
-fog 0.09 0.13 0.16 near=0.10 far=0.90 amount=0.65
+fog 0.055 0.085 0.115 near=0.10 far=0.90 amount=0.60
 
 # Lamps and neon bloom; nothing lit by the moon reaches the threshold.
 bloom threshold=0.60 strength=0.70
 grade bg_tarn_noir_grade.bmp
 vignette 0.35
-grain 0.06
+grain 0.035
 
 # Steady rain, leaning a little right: dense enough to read as weather, sparse
 # enough that the lamp halos still show between the streaks.
@@ -69,17 +69,17 @@ weather rain density=0.60 angle=12 speed=240
 # magenta and a cyan, the two hues the noir grade's saturation keeper favours.
 #
 # Spawn lamp: the first thing the player sees, warm and steady.
-light x=72  y=246 color=1.00,0.62,0.24 radius=48 flicker=0.03
+light x=72  y=246 color=2.20,1.30,0.48 radius=48 flicker=0.03
 # Pond lamp: just east of the water, so its reflection lies across the pond.
-light x=168 y=246 color=1.00,0.62,0.24 radius=44 flicker=0.03
+light x=168 y=246 color=2.20,1.30,0.48 radius=44 flicker=0.03
 # Mid-shore lamp between the two ghouls.
-light x=330 y=244 color=1.00,0.60,0.22 radius=50 flicker=0.03
+light x=330 y=244 color=2.20,1.25,0.44 radius=50 flicker=0.03
 # A failing lamp over the second ghoul: the flicker is the point.
-light x=410 y=246 color=1.00,0.58,0.20 radius=40 flicker=0.45
+light x=410 y=246 color=2.10,1.15,0.40 radius=40 flicker=0.45
 # Magenta neon sign in front of the sand bank and the troll: buzzes slightly.
-light x=478 y=254 color=1.00,0.18,0.62 radius=32 flicker=0.12
+light x=478 y=254 color=2.00,0.30,1.30 radius=32 flicker=0.12
 # Cyan neon at the objective: the run's goal reads as the one cold bright thing.
-light x=628 y=252 color=0.15,0.85,1.00 radius=36 flicker=0.06
+light x=628 y=252 color=0.30,1.60,2.00 radius=36 flicker=0.06
 
 # Materials: wet and cold. Tints pull every surface a little toward blue-grey
 # (Backbone's muted base), the light does the warming. Rock and sand are rain

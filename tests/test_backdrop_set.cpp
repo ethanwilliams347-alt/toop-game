@@ -161,12 +161,31 @@ std::vector<Shipped> shipped_sets() {
         // name. Checked here rather than left to the comment, because a row
         // pointing at another set's material map loads and plays -- it is just the
         // wrong world under the right painting.
+        //
+        // One exception, a mood variant: <set>_<mood> is <set>'s scene under
+        // another light (bg_tarn_noir), so it is <set> in every field but its name
+        // and its mood=, which must be <set>/<set>_<mood>_mood.txt -- the name says
+        // which mood file it is, and nothing else may differ.
         {
             const std::string& set = def.backdrop;
-            const std::string own = set + "/" + set + "_";
-            check(("shipped: scene '" + def.name + "' is named bg_<place> and is its backdrop's name")
-                      .c_str(),
-                  set.compare(0, 3, "bg_") == 0 && def.name == set, "backdrop=" + set);
+            std::string own = set;
+            own += '/';
+            own += set;
+            own += '_';
+            const bool variant = def.name.size() > set.size() + 1 &&
+                                 def.name.compare(0, set.size() + 1, set + "_") == 0;
+            const std::string mood_name = variant ? def.name.substr(set.size() + 1) + "_" : "";
+            const std::string named =
+                "shipped: scene '" + def.name +
+                "' is named bg_<place>, its backdrop's name or a mood variant";
+            check(named.c_str(), set.compare(0, 3, "bg_") == 0 && (def.name == set || variant),
+                  "backdrop=" + set);
+            const std::string mood_rule =
+                "shipped: scene '" + def.name + "' loads its own mood from its own folder";
+            check(mood_rule.c_str(),
+                  variant ? def.mood == own + mood_name + "mood.txt"
+                          : def.mood.empty() || def.mood == own + "mood.txt",
+                  def.mood);
             check(("shipped: scene '" + def.name + "' loads its maps from its own folder").c_str(),
                   def.material == own + "material.bmp" && def.albedo == own + "albedo.bmp",
                   def.material + ", " + def.albedo);
