@@ -1558,12 +1558,15 @@ int main() {
             for (int x = 0; x < 120; ++x) {
                 const Element& e = g.get_element(x, y);
                 const bool in_a = x >= 10 && x <= 13 && y >= 51;
-                if (in_a) whole = whole && e.type == ElementType::Wall && e.piece_tag == now_a;
-                else if (e.type == ElementType::Wall && e.piece_tag == now_a) ++shared;
+                if (in_a)
+                    whole = whole && e.type == ElementType::Wall && e.piece_tag == now_a;
+                else if (e.type == ElementType::Wall && e.piece_tag == now_a)
+                    ++shared;
             }
         check("a block landing against a resting one with a recycled tag stays separate",
               whole && shared == 0,
-              "tag " + std::to_string(now_a) + ", " + std::to_string(shared) + " cells of it outside");
+              "tag " + std::to_string(now_a) + ", " + std::to_string(shared) +
+                  " cells of it outside");
     }
 
     // --- nor does a body in flight wear a resting piece's tag ---
