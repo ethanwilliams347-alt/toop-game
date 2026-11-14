@@ -307,7 +307,7 @@ void draw_player(gfx::Canvas& canvas, const Params& p) {
                             player_sprite::FRAME_H};
         canvas.blit_ex(p.player_tex, &src, body, 0.0, nullptr, flip);
     } else {
-        // A plain rectangle, kept as the fallback rather than deleted. A missing
+        // A plain rectangle as the fallback. A missing
         // asset should degrade to a visible player, not an invisible one --
         // load_art_texture already printed why it failed, and a game you can
         // still move around in is a better diagnostic than a world with nothing

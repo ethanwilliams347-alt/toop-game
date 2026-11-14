@@ -453,10 +453,6 @@ void blank_cells(gfx::Canvas& canvas, const gfx::Texture& cells) {
 // window lies wholly inside the grid, though: a scene with the horizontal clamp
 // dropped can put the window past its edge, and those cells have to be cleared
 // rather than read from outside the buffer. That case copies.
-//
-// (A near-terrain tint pass used to sit here, compiled in and switched off,
-// blending terrain toward the generated ground plane. It went with that
-// backdrop; render/backdrop_set.h has the account.)
 void upload_cells(gfx::Canvas& canvas, const gfx::Texture& cells, const Grid& grid,
                   const Camera& camera, int visible_w, int visible_h,
                   std::vector<uint32_t>& scratch, const std::vector<frame::HiddenCell>* hidden) {

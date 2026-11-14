@@ -4,12 +4,11 @@
 // The drawing seam: every draw call the frame, the overlay and the UI make, as an
 // interface a backend implements.
 //
-// Today there is one backend, gfx::SdlCanvas (render/sdl_canvas.h), a thin wrapper
-// over SDL_Renderer that makes exactly the calls this code used to make directly.
-// The interface exists so a second one -- OpenGL, with shaders -- can be put
-// behind the same frame::compose and overlay::draw without either of them
-// changing, and so golden_frame_test, which drives the SDL backend's software
-// renderer, keeps checksumming the very code the game runs.
+// There are two backends: gfx::SdlCanvas (render/sdl_canvas.h), a thin wrapper
+// over SDL_Renderer, and the OpenGL one in src/gpu/gl_canvas.h, with shaders.
+// Both sit behind the same frame::compose and overlay::draw, so neither of
+// those changes with the backend, and golden_frame_test, which drives the SDL
+// backend's software renderer, checksums the very code the game runs.
 //
 // The surface is deliberately the one SDL_Renderer already had, not a new idea of
 // drawing: a stateful draw colour and blend mode, filled rects, and textured rects
@@ -55,7 +54,7 @@ enum class Flip : unsigned char { None, Horizontal };
 // only to that backend (an SDL_Texture* for SdlCanvas); w and h are its size in
 // texels, kept here so nothing has to ask the backend for them. A
 // default-constructed Texture is "no texture", and every draw that would use one
-// skips instead -- the same as the null SDL_Texture* the frame used to check for.
+// skips instead.
 //
 // Copyable, because the frame records borrow it (several props share one
 // texture); only the owner calls destroy_texture.

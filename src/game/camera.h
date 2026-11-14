@@ -4,8 +4,8 @@
 // directions, and which part of the world is currently in view.
 class Camera {
 public:
-    // The default, not a constant. A default-constructed Camera is the old one,
-    // which is what keeps test_golden_frame's checksum meaningful rather than lucky.
+    // The default, not a constant. A default-constructed Camera draws at this
+    // scale, which is what keeps test_golden_frame's checksum meaningful rather than lucky.
     //
     // A scene may state its own. Art authored at one art pixel to one world cell
     // needs a scale large enough that the window is a view into the scene rather

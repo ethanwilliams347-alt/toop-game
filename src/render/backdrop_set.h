@@ -8,44 +8,31 @@
 // each one moves with the camera. Read from `assets/<dir>/backdrop.txt`, which a
 // scene names with `backdrop=<dir>` in assets/scenes.txt.
 //
-// --- one system, where there were three ---------------------------------------
+// --- one layer type --------------------------------------------------------------
 //
-// There used to be three ways to draw a background. A generated sky, mountain
-// range and receding ground tile (render/backdrop_layers.h, written by
-// tools/generate_backdrop.py) that only the `empty` debug scene still used, with
-// a near-terrain tint pass compiled in and switched off. The `bg_valley` family
-// (the former render/bg1_backdrop.h): nine hand-painted layers at typed factors, locked
-// vertically, with the ground cut into three bands. And the perspective rig
-// (render/depth_rig.h, render/rig_backdrop.h), which derives each factor from the
-// row the layer stands on. frame.cpp branched between them inside every layer
-// function, frame::Backdrop carried fields for all three, and main.cpp had a
-// loader for each.
-//
-// The rig turned out to contain the other two as settings. A bg_valley layer placed at
-// -(cam * f) is a rig layer whose anchor is the world's corner; bg_valley's locked
-// vertical is a rig with vertical_strength 0 (depth_rig.h says so: "k = 0 is
-// bg_valley's locked vertical"); and bg_valley's bands are per-row factors, which the rig's
-// plane already draws, just stepped instead of continuous. So there is now one
-// layer type, one file format, one loader and one draw function, and a set picks
-// its behaviour with three lines of data:
+// The perspective rig (render/depth_rig.h) contains the other ways of drawing a
+// backdrop as settings. A layer placed at -(cam * f) is a rig layer whose anchor
+// is the world's corner; a locked vertical is a rig with vertical_strength 0
+// (depth_rig.h: "k = 0 is bg_valley's locked vertical"); and ground cut into
+// bands is per-row factors, which the rig's plane already draws, just stepped
+// instead of continuous. So there is one layer type, one file format, one
+// loader and one draw function, and a set picks its behaviour with three lines
+// of data:
 //
 //     anchor corner | standing   where the stack is exactly the painting
 //     rig h c k                  the camera the painting implies
 //     layer ... bands=...        a painted surface cut on flat paint
 //
-// The generated three-layer backdrop is gone rather than migrated. It had one
-// user, a debug scene; its plane geometry existed to feed the switched-off tint
-// pass; and the rig's line-scrolled plane is the better version of its strip
-// loop. `empty` now draws the clear colour behind the cells.
+// The `empty` debug scene names no backdrop and draws the clear colour behind
+// the cells.
 //
 // --- why a text file -----------------------------------------------------------
 //
-// The tables used to be C++ headers, so a new backdrop was a code change and a
-// rebuild, and a scene found its set by a name comparison in main.cpp. Now it is
-// an asset drop: paint the layers, write the file, name the directory in
-// scenes.txt. The numbers still have to agree with the art, and backdrop_set_test
-// still checks every shipped set against its BMPs -- feet, bands on flat paint,
-// the wrap seam -- exactly as boot_test and rig_test did for the headers.
+// A text file makes a new backdrop an asset drop rather than a code change and a
+// rebuild: paint the layers, write the file, name the directory in scenes.txt.
+// The numbers still have to agree with the art, so backdrop_set_test checks
+// every shipped set against its BMPs -- feet, bands on flat paint, the wrap
+// seam.
 //
 // Like every parser here it is all-or-nothing: the first malformed record
 // rejects the whole file and names its line. A stack missing the layer it could
