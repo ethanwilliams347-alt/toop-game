@@ -30,18 +30,19 @@ public:
     // rubble. When the answer is too expensive to compute, guess the harmless way.
     static constexpr int MAX_SUPPORT_CELLS = 4096;
 
-    // A falling structure speeds up. It moves one cell on the step it comes loose
-    // and gains a cell per step for every TICKS_PER_SPEEDUP steps it stays in the
-    // air, up to MAX_FALL_SPEED.
+    // The support queue's pass budget. A structure no longer falls here: the fill
+    // that finds a piece unsupported hands it to start_body, and the body
+    // integrates its own fall (BODY_GRAVITY, AIR_DRAG). What is left of the old
+    // cell-a-step fall is its bookkeeping. resolve_support still runs up to
+    // MAX_FALL_SPEED passes, so a seed queued mid-step (by a body landing, a
+    // crack, a wake) is judged within the step rather than the next; a queued
+    // cell's `ticks` still ages one a step while it waits, and fall_speed(ticks)
+    // still decides which pass may take it. That aging is also the fall clock
+    // fracture_landing reads (FRACTURE_MIN_TICKS), which in practice never
+    // reaches four now that nothing stays queued while falling -- see there.
     //
-    // Speed is repetition, not a longer stride: a piece never travels a cell
-    // without first re-deriving what is holding it up, so moving at 8 costs eight
-    // flood fills in a step. That is why there is a ceiling. It also means a fast
-    // piece cannot pass through a floor thinner than its speed, which a "move N
-    // cells then look" implementation would have to guard against explicitly.
-    //
-    // Read against 1 cell = 1 cm: at 60 Hz, +1 cell/step every 4 steps is ~15 m/s^2
-    // with a ceiling of 4.8 m/s, reached in about half a second.
+    // Read against 1 cell = 1 cm, the old fall was +1 cell/step every 4 steps,
+    // ~15 m/s^2 with a ceiling of 4.8 m/s; BODY_GRAVITY keeps that quarter cell.
     static constexpr int MAX_FALL_SPEED = 8;
     static constexpr int TICKS_PER_SPEEDUP = 4;
 
@@ -828,13 +829,16 @@ private:
 
     // --- fracture ---
     //
-    // drop_component translates an unsupported piece straight down with its shape
-    // intact, so masonry descends like an elevator. Fracture was originally the
-    // whole answer, on the grounds that rotation on a cell grid means resampling
-    // the piece and destroying its authored pixels. Rotation by shears does not
-    // resample, so pieces now tip as well (see "toppling" below); fracture keeps
-    // the landings where most of the weight is over solid ground, and toppling
-    // takes the ones where most of it is not.
+    // An unsupported piece used to be translated straight down a cell at a time,
+    // so masonry descended like an elevator, and fracture on landing was the
+    // whole answer to that. Pieces now come loose as bodies and fall, turn and
+    // land under the body solver, which breaks overhangs itself (snap_overhang).
+    // What follows is the landing fracture of the old fall, kept because it is
+    // cheap and harmless, though it no longer fires in practice: it needs a seed
+    // that was queued, aging, for FRACTURE_MIN_TICKS steps and is then found
+    // grounded, and every piece that falls is a body, whose cells have ticks
+    // zeroed (start_body, end_tipping). No test, probe or bench scene reaches it
+    // (checked with an abort() in it, 2026-11-13).
     //
     // A piece breaks when it lands, not while it falls, and that timing is what
     // makes the feature safe. Every "nothing must move here" test in the suite is
@@ -904,18 +908,16 @@ private:
     void queue_support_check(int x, int y);
 
     // Works through that list. Called once per step, before the sweep, and
-    // internally runs up to MAX_FALL_SPEED passes over it -- one cell of travel
-    // each -- so that pieces already up to speed get further in the step than
-    // ones that have just come loose.
+    // internally runs up to MAX_FALL_SPEED passes over it, so that a seed queued
+    // during one pass (by a landing, a crack, a wake) is answered in the same
+    // step. See MAX_FALL_SPEED for why it is still counted in falling terms.
     void resolve_support();
 
     // Flood-fills the structure containing (x, y). If no cell in it is grounded,
-    // the whole piece moves down exactly one cell, shape intact.
+    // the whole piece comes loose as a body (start_body), shape intact, and
+    // falls from there under the body solver -- it is not moved here at all.
+    // If it is grounded, it is asked about balance (topple_if_unbalanced).
     void fall_if_unsupported(int x, int y);
-
-    // Translates the piece currently in support_component down by one cell and
-    // re-queues it so it keeps falling on the next step.
-    void drop_component();
 
     // What a fill concluded about a cell. Only meaningful while that cell's
     // support_visit stamp holds the current epoch.
@@ -944,9 +946,6 @@ private:
     std::vector<int> support_rejudge;
     std::vector<int> support_stack;     // scratch, reused across fills
     std::vector<int> support_component; // scratch, reused across fills
-    // drop_component's sort keys, one per support_component entry. Scratch, and
-    // reserved to the same bound, for the same no-allocation reason.
-    std::vector<uint64_t> drop_keys;
 
     // The two working queues of resolve_support(): the seeds taken for the pass in
     // hand, and the ones too slow for it. Members rather than locals so the
@@ -999,8 +998,8 @@ private:
     // it up is pushing on it off its centre, so the push turns it; as it goes over
     // the contact slides or holds by friction; when it comes clear it keeps the
     // spin and the speed it had, flies off in an arc and lands on whatever corner
-    // reaches the ground first, which kicks it again. Straight down, the cheap
-    // case, stays with falling (drop_component), which is the same motion.
+    // reaches the ground first, which kicks it again. Straight down is the same
+    // motion with no spin, and is a body too (fall_if_unsupported).
     //
     // The solver is the standard one -- sequential impulses with accumulated,
     // clamped normal and friction impulses (Catto) -- in 16.16 integers, so it
@@ -1036,9 +1035,9 @@ private:
     // a tag of its own; if it moved, the support logic asks about it again from
     // where it lies, and that is the whole hand-off in both directions.
 
-    // Gravity on a body, in cells per step per step. The same quarter cell that a
-    // falling piece gains every TICKS_PER_SPEEDUP steps, so a post toppling and one
-    // dropping read as the same world.
+    // Gravity on a body, in cells per step per step. Set from the quarter cell
+    // the old cell-a-step fall gained every TICKS_PER_SPEEDUP steps; every fall
+    // is a body now, so a post toppling and one dropping share it by construction.
     //
     // Nine tenths of the quarter cell a step it was first set to, which a playtest
     // found a little quick.
