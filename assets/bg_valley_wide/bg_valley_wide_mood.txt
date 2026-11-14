@@ -45,8 +45,8 @@ weather none
 # than remembering a default. Daylight: no tints; the albedo is the colour.
 material Sand tint=1.00,1.00,1.00 strength=0.00 rim=0.35 reflect=0.00 spec=0.10 depth=0.00
 material Water tint=1.00,1.00,1.00 texture=materials_caustics strength=0.50 rim=0.00 reflect=0.50 spec=0.55 depth=0.70
-material Wall tint=1.00,1.00,1.00 texture=materials_rock strength=0.60 rim=0.50 reflect=0.00 spec=0.08 depth=0.00
-material Wood tint=1.00,1.00,1.00 texture=materials_wood strength=0.55 rim=0.40 reflect=0.00 spec=0.05 depth=0.00
+material Wall tint=1.00,1.00,1.00 texture=materials_rock strength=0.45 rim=0.45 reflect=0.00 spec=0.08 depth=0.00
+material Wood tint=1.00,1.00,1.00 texture=materials_wood strength=0.40 rim=0.40 reflect=0.00 spec=0.05 depth=0.00
 material Oil tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.30 spec=0.80 depth=0.40
 material Steam tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
 material Fire tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
