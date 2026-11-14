@@ -216,6 +216,48 @@ void stack(int every) {
     picture(g, "end");
 }
 
+// A dam break with a raft downstream: a reservoir on the left held back by a
+// wall, a shallow channel with a wooden raft afloat in it. The wall is removed
+// once the raft has settled, and the raft's left edge and the water's flow
+// beside it are printed -- how far, and how soon, the surge carries it.
+void current(int every) {
+    std::printf("\n== current ==\n");
+    Grid g(240, 60);
+    fill(g, 0, 55, 239, 59, ElementType::Wall);
+    fill(g, 0, 10, 0, 54, ElementType::Wall);
+    fill(g, 239, 30, 239, 54, ElementType::Wall);
+    fill(g, 1, 15, 40, 54, ElementType::Water);   // the reservoir
+    fill(g, 41, 15, 41, 54, ElementType::Wall);   // the dam
+    fill(g, 42, 48, 238, 54, ElementType::Water); // the channel
+    fill(g, 80, 45, 99, 47, ElementType::Wood);
+    nudge(g, 85, 44);
+    for (int s = 0; s < 300; ++s) g.update();
+    const auto left = [&] {
+        for (int x = 0; x < 240; ++x)
+            for (int y = 0; y < 60; ++y)
+                if (g.get_element(x, y).type == ElementType::Wood) return x;
+        return -1;
+    };
+    const int start = left();
+    fill(g, 41, 15, 41, 54, ElementType::Empty);
+    for (int s = 0; s <= 600; ++s) {
+        if (s % every == 0)
+        {
+            // The liquid's sideways flow (raw Element::flow units) summed over
+            // the rows the raft floats in, from 20 cells behind it to its far end.
+            int flow = 0;
+            const int l = left();
+            for (int y = 44; y <= 50; ++y)
+                for (int x = l - 20; x < l + 20; ++x)
+                    if (x >= 0 && x < 240) flow += g.get_element(x, y).flow;
+            std::printf("  step %4d  raft left %3d (moved %+d)  bodies %d  flow %d\n", s, l,
+                        l - start, g.tipping_count(), flow);
+        }
+        g.update();
+    }
+    picture(g, "end");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -230,5 +272,6 @@ int main(int argc, char** argv) {
     if (want("float")) floating(every);
     if (want("slope")) slope(every);
     if (want("stack")) stack(every);
+    if (want("current")) current(every);
     return 0;
 }
