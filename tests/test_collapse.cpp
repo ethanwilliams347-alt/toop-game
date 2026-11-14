@@ -1640,5 +1640,127 @@ int main() {
               std::to_string(taken) + " censuses");
     }
 
+    // --- five blocks dropped one at a time stand as five, and fall as five ---
+    // Playtest 4.6. Each Wall block is painted in the air and lands on the last
+    // before the next is painted. Stone on stone at rest is held apart only by
+    // piece_tag, so the risk is a landed block wearing its neighbour's tag (a
+    // one-byte counter, re-tagged only on a clash) and the stack welding into one
+    // piece: then a knock moves it all, or nothing.
+    {
+        constexpr int FLOOR = 55, W = 6, H = 4, X0 = 27, N = 5;
+        Grid g(60, 60);
+        fill(g, 0, FLOOR, 59, 59, ElementType::Wall);
+        // Every Wall cell above the floor, by tag: how many, and their box.
+        struct Piece {
+            int tag, cells, x0, y0, x1, y1;
+        };
+        const auto pieces = [&] {
+            std::vector<Piece> out;
+            for (int y = 0; y < FLOOR; ++y)
+                for (int x = 0; x < 60; ++x) {
+                    const Element e = g.get_element(x, y);
+                    if (e.type != ElementType::Wall) continue;
+                    auto it = std::find_if(out.begin(), out.end(),
+                                           [&](const Piece& p) { return p.tag == e.piece_tag; });
+                    if (it == out.end()) {
+                        out.push_back({e.piece_tag, 0, x, y, x, y});
+                        it = out.end() - 1;
+                    }
+                    it->cells++;
+                    it->x0 = std::min(it->x0, x);
+                    it->y0 = std::min(it->y0, y);
+                    it->x1 = std::max(it->x1, x);
+                    it->y1 = std::max(it->y1, y);
+                }
+            return out;
+        };
+        const auto five_whole = [&](const std::vector<Piece>& ps) {
+            if (ps.size() != N) return false;
+            for (const Piece& p : ps)
+                if (p.cells != W * H) return false;
+            return true;
+        };
+        const auto describe = [&](const std::vector<Piece>& ps) {
+            std::string out = std::to_string(ps.size()) + " pieces:";
+            for (const Piece& p : ps)
+                out += " tag " + std::to_string(p.tag) + "/" + std::to_string(p.cells) + "@" +
+                       std::to_string(p.x0) + "," + std::to_string(p.y0);
+            return out;
+        };
+        const auto busy = [&] { return g.has_pending_support_checks() || g.tipping_count() > 0; };
+        int worst = 0;
+        bool all_slept = true;
+        for (int n = 0; n < N; ++n) {
+            fill(g, X0, 5, X0 + W - 1, 5 + H - 1, ElementType::Wall);
+            nudge(g, X0, 4);
+            int s = 0;
+            for (; s < 900 && busy(); ++s) g.update();
+            worst = std::max(worst, s);
+            all_slept = all_slept && !busy();
+        }
+        const std::vector<Piece> rested = pieces();
+        check("five blocks dropped one at a time rest as five pieces, none welded",
+              five_whole(rested), describe(rested));
+        check("and each comes to rest within 900 steps of being painted", all_slept,
+              "slowest " + std::to_string(worst) + " steps");
+
+        step(g, 600);
+        const std::vector<Piece> later = pieces();
+        int drift = 0;
+        bool same = later.size() == rested.size();
+        for (size_t i = 0; same && i < rested.size(); ++i) {
+            if (later[i].tag != rested[i].tag) {
+                same = false;
+                break;
+            }
+            drift = std::max({drift, std::abs(later[i].x0 - rested[i].x0),
+                              std::abs(later[i].y0 - rested[i].y0)});
+        }
+        check("the rested stack stands without creeping", same && drift <= 1,
+              "drift " + std::to_string(drift) + " cells");
+
+        // Knock the middle block sideways at its centre, hard: at a fifth of this
+        // it wakes but the two blocks pressing on it hold it by friction, and it
+        // goes back to rest unmoved -- still five pieces, which is the point.
+        const int mid_y = FLOOR - 2 * H - H / 2 - 1;
+        const int64_t knock = int64_t{20000} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        const bool took = g.queue_impulse(X0 + W / 2, mid_y, knock, 0);
+        int most = 0;
+        for (int s = 0; s < 900; ++s) {
+            g.update();
+            most = std::max(most, g.tipping_count());
+            if (s > 30 && !busy()) break;
+        }
+        const std::vector<Piece> after = pieces();
+        // By box, not tag: a body that lands is re-tagged.
+        int moved = 0;
+        for (const Piece& r : rested)
+            moved += std::none_of(after.begin(), after.end(),
+                                  [&](const Piece& a) { return a.x0 == r.x0 && a.y0 == r.y0; })
+                         ? 1
+                         : 0;
+        check("a knock on the middle block takes", took);
+        check("knocked, the stack moves as separate bodies, not one",
+              most >= 2 && moved >= 1 && moved < N,
+              "most bodies at once " + std::to_string(most) + ", moved " + std::to_string(moved));
+        check("and it falls apart as five whole blocks", five_whole(after), describe(after));
+
+        // Informational: the same five painted at once, touching, are one paint
+        // stroke and may fairly be one piece. Printed, not asserted.
+        Grid h(60, 60);
+        fill(h, 0, FLOOR, 59, 59, ElementType::Wall);
+        fill(h, X0, 5, X0 + W - 1, 5 + N * H - 1, ElementType::Wall);
+        nudge(h, X0, 4);
+        for (int s = 0; s < 900 && (h.has_pending_support_checks() || h.tipping_count() > 0); ++s)
+            h.update();
+        bool worn[256] = {};
+        for (int y = 0; y < FLOOR; ++y)
+            for (int x = 0; x < 60; ++x)
+                if (h.get_element(x, y).type == ElementType::Wall)
+                    worn[h.get_element(x, y).piece_tag] = true;
+        std::printf("  info: five painted at once in a column land as %d piece(s)\n",
+                    static_cast<int>(std::count(std::begin(worn), std::end(worn), true)));
+    }
+
     return report();
 }
