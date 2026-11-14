@@ -67,6 +67,8 @@ uniform int u_step;             // simulation steps: time, never the wall clock
 
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_emissive;
+// The world takes all of a lamp's light (sprite.frag's u_unlit, resolve.frag).
+layout(location = 2) out vec4 o_receive;
 
 // render/cell_pack.h: A's bits.
 const uint FLAG_HIDDEN = 1u;
@@ -228,6 +230,7 @@ void main() {
     // body's sprite is what is drawn there, and it gives off nothing.
     float glow = (c.a & FLAG_HIDDEN) != 0u ? 0.0 : u_emissive[int(min(c.r, 15u))];
     o_emissive = vec4(to_linear(colour.rgb) * glow, colour.a);
+    o_receive = vec4(1.0, 0.0, 0.0, colour.a);
     // Screen pixels per cell along each axis, signed (the framebuffer's y may run
     // either way): the cell coordinate's derivative is exact and constant over
     // the quad. Taken here, in uniform control flow, where derivatives are

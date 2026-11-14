@@ -235,6 +235,7 @@ rows above tune both. Its own knob:
 | Knob | File | Now | What it does |
 |---|---|---|---|
 | `SUN_MARCH_CELLS` | [pipeline.h](src/gpu/pipeline.h) | 96 | How far the sun's shadow march looks toward the sun, in cells. A cell with no occluder within this many is in full sun; longer finds taller overhangs and costs that many texel reads per visible cell. |
+| `lamp_backdrop` (mood default) | [mood.h](src/render/mood.h) | 0.25 | The share of a point light a backdrop layer just behind the world takes; it falls with the square of (1 - depth), so far layers and the sky take almost none. A mood file can set its own (`lamp_backdrop <k>`). |
 
 ---
 
@@ -629,3 +630,10 @@ Record adjustments to tuning parameters and their rationale here.
   rubble buries the player's feet on that step and the dig-out zeroed it, so it
   is now held until the body is free. `IMPACT_SAFE_SPEED` 60 is a cell a step:
   a slab dropped one body height (about 180 cells/s) hurts, a raft nudge does not.
+- **2026-11-14 -- lamps stop lighting the backdrop** (`lamp_backdrop` 0.25, new).
+  In the noir tarn a shore lamp lit the far lake and mountains as if they stood
+  beside it, since the backdrop is painted into the same albedo the resolve
+  lights. A layer just behind the world now takes a quarter of the light, and
+  the share falls with the square of how near the layer is to the world, so the
+  mountains (depth about 0.7) take about 2%. The world, sprites and each lamp's
+  own hot core are unchanged.

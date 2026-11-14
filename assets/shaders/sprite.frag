@@ -15,13 +15,21 @@ uniform sampler2D u_tex;
 // much of it stands in front of what is drawn now. 0 outside a lit frame and
 // for everything not in the backdrop, so those draws are exactly as before.
 uniform vec4 u_fog;
+// How much less lamp light what is drawn now takes than the world does
+// (GlCanvas::set_depth, mood `lamp_backdrop`): 0 for the world and every
+// sprite, so the default of an unset uniform is the old behaviour. The third
+// output carries 1 - it to the resolve, blended by this draw's coverage, so a
+// backdrop pixel ends up with its own layer's share and a world pixel with 1.
+uniform float u_unlit;
 
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_emissive;
+layout(location = 2) out vec4 o_receive;
 
 void main() {
     o_color = texture(u_tex, v_uv) * v_color;
     o_emissive = vec4(0.0, 0.0, 0.0, o_color.a);
+    o_receive = vec4(1.0 - u_unlit, 0.0, 0.0, o_color.a);
     if (u_fog.a > 0.0) {
         // The paint dimmed in linear light by what the fog hides, and the fog's
         // own light put in the emissive attachment, which the resolve adds

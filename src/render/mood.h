@@ -86,6 +86,11 @@
 //
 //   vignette <v>                              0..1, default 0 (none).
 //   grain <g>                                 0..1, default 0 (none).
+//   lamp_backdrop <k>                         0..1, default 0.25.
+//       The share of a point light a backdrop layer just behind the world
+//       takes, falling with the square of (1 - depth), so the sky takes none:
+//       a lamp stands in the world plane and a painted layer far behind it.
+//       The world, sprites and each lamp's own hot core are unaffected.
 //
 //   weather none | rain | fog | dust density=<d> angle=<deg> speed=<cells/s>
 //       Default none. `none` takes no fields; the others need all three.
@@ -206,6 +211,7 @@ struct Mood {
     std::string grade;  // resolved path of the LUT strip, or empty for none
     float vignette = 0.0f;
     float grain = 0.0f;
+    float lamp_backdrop = 0.25f;
     Weather weather;
     std::vector<PointLight> lights;
     // Indexed by ElementType, so a draw looks a cell's material up without a

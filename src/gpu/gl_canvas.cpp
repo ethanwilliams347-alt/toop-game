@@ -162,6 +162,7 @@ GlCanvas::~GlCanvas() {
             if (fbo_) gl::DeleteFramebuffers(1, &fbo_);
             if (fbo_tex_) gl::DeleteTextures(1, &fbo_tex_);
             if (emissive_tex_) gl::DeleteTextures(1, &emissive_tex_);
+            if (receive_tex_) gl::DeleteTextures(1, &receive_tex_);
             if (tiles_tex_) gl::DeleteTextures(1, &tiles_tex_);
             if (behind_fbo_) gl::DeleteFramebuffers(1, &behind_fbo_);
             if (behind_tex_) gl::DeleteTextures(1, &behind_tex_);
@@ -212,11 +213,12 @@ void GlCanvas::set_light_constants(const lit::LightConstants& c) {
     if (frame_open_) gl::UseProgram(program_);
 }
 
-// One attachment outside a lit frame, two inside one. Set whenever the frame's
+// One attachment outside a lit frame, three inside one. Set whenever the frame's
 // target is bound, since a pass may have left another framebuffer's set.
 void GlCanvas::apply_draw_buffers() {
-    static constexpr GLenum BOTH[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    gl::DrawBuffers(lit_ ? 2 : 1, BOTH);
+    static constexpr GLenum ALL[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
+                                      GL_COLOR_ATTACHMENT2};
+    gl::DrawBuffers(lit_ ? 3 : 1, ALL);
 }
 
 void GlCanvas::begin_lit_frame() {
@@ -233,12 +235,14 @@ bool GlCanvas::resolve_lit(const lit::LitFrame& f) {
     begin_frame();
     flush();
     apply_fog(0.0f);
+    apply_unlit(0.0f);
     fog_on_ = false;
     if (f.grade && std::string(f.grade) != lut_path_ && lut_path_ != "<memory>")
         ensure_lut(f.grade);
     Pipeline::Inputs in;
     in.albedo_tex = fbo_tex_;
     in.emissive_tex = emissive_tex_;
+    in.receive_tex = receive_tex_;
     in.frame_fbo = fbo_;
     in.target_w = target_w_;
     in.target_h = target_h_;
@@ -267,10 +271,21 @@ void GlCanvas::set_fog(const lit::LitFrame& f) {
     fog_near_ = f.fog_near;
     fog_far_ = f.fog_far;
     fog_amount_ = f.fog_amount;
+    lamp_backdrop_ = f.lamp_backdrop;
     apply_fog(0.0f);
+    apply_unlit(0.0f);
 }
 
 void GlCanvas::set_depth(float depth) {
+    // Lamp light on the backdrop: a layer stands well behind the lamp, which is
+    // in the world plane, so it takes only `lamp_backdrop` of the light even
+    // just behind the world, falling with the square of how far back it is --
+    // the far mountains take next to none. Depth 0 is the world (and a layer
+    // that scrolls with it) and takes all of it, as before.
+    if (lit_) {
+        const float front = 1.0f - std::clamp(depth, 0.0f, 1.0f);
+        apply_unlit(depth > 0.0f ? 1.0f - lamp_backdrop_ * front * front : 0.0f);
+    }
     if (!fog_on_) return;
     // Smoothstep from near to far: no visible seam where the fog starts, and
     // the far layers settle into it rather than flattening at a hard limit.
@@ -289,6 +304,15 @@ void GlCanvas::apply_fog(float amount) {
     gl::UseProgram(program_);
     gl::Uniform4f(gl::GetUniformLocation(program_, "u_fog"), fog_lin_[0], fog_lin_[1], fog_lin_[2],
                   amount);
+}
+
+// Like apply_fog: a uniform on the sprite program, set only when it changes.
+void GlCanvas::apply_unlit(float unlit) {
+    if (unlit == unlit_now_) return;
+    flush();
+    unlit_now_ = unlit;
+    gl::UseProgram(program_);
+    gl::Uniform1f(gl::GetUniformLocation(program_, "u_unlit"), unlit);
 }
 
 void GlCanvas::ensure_lut(const char* path) {
@@ -330,6 +354,7 @@ bool GlCanvas::reload_shaders() {
     cells_program_ = cells;
     u_scale_ = -1;  // looked up again against the new program
     fog_now_ = 0.0f;  // a new program starts with u_fog at zero
+    unlit_now_ = 0.0f;  // and u_unlit
     bind_cell_uniforms();
     // A reload between frames is the usual case; one mid-frame (a test) needs the
     // new program's scale now, which begin_frame only sets when it opens a frame.
@@ -366,20 +391,32 @@ bool GlCanvas::resize_target(int w, int h) {
     gl::BindFramebuffer(GL_FRAMEBUFFER, fbo);
     gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, emissive, 0);
+    // Each pixel's share of point light (resolve.frag's u_receive): one byte is
+    // plenty for a factor 0..1 that only scales a light.
+    GLuint receive = 0;
+    gl::GenTextures(1, &receive);
+    gl::BindTexture(GL_TEXTURE_2D, receive);
+    gl::TexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, receive, 0);
     if (gl::CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         gl::BindFramebuffer(GL_FRAMEBUFFER, fbo_);
         gl::DeleteFramebuffers(1, &fbo);
         gl::DeleteTextures(1, &tex);
         gl::DeleteTextures(1, &emissive);
+        gl::DeleteTextures(1, &receive);
         error_ = "the offscreen framebuffer is incomplete";
         return false;
     }
     if (fbo_) gl::DeleteFramebuffers(1, &fbo_);
     if (fbo_tex_) gl::DeleteTextures(1, &fbo_tex_);
     if (emissive_tex_) gl::DeleteTextures(1, &emissive_tex_);
+    if (receive_tex_) gl::DeleteTextures(1, &receive_tex_);
     fbo_ = fbo;
     fbo_tex_ = tex;
     emissive_tex_ = emissive;
+    receive_tex_ = receive;
     apply_draw_buffers();
     target_w_ = w;
     target_h_ = h;
@@ -464,10 +501,12 @@ void GlCanvas::clear() {
     const GLfloat c[4] = {color_[0] / 255.0f, color_[1] / 255.0f, color_[2] / 255.0f,
                           color_[3] / 255.0f};
     if (lit_) {
-        // The albedo takes the clear colour; the emissive buffer starts dark.
+        // The albedo takes the clear colour; the emissive buffer starts dark,
+        // and the clear colour is the sky, which no lamp reaches.
         static constexpr GLfloat DARK[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         gl::ClearBufferfv(GL_COLOR, 0, c);
         gl::ClearBufferfv(GL_COLOR, 1, DARK);
+        gl::ClearBufferfv(GL_COLOR, 2, DARK);
         return;
     }
     gl::ClearColor(c[0], c[1], c[2], c[3]);

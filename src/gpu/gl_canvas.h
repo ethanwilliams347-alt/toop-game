@@ -205,6 +205,8 @@ private:
     unsigned white_ = 0;     // 1x1 opaque white, the "texture" of every fill
     unsigned fbo_ = 0, fbo_tex_ = 0;
     unsigned emissive_tex_ = 0;  // attachment 1 of fbo_, RGBA16F; drawn only in a lit frame
+    // Attachment 2 of fbo_, R8: how much point light each pixel takes (resolve.frag).
+    unsigned receive_tex_ = 0;
     bool lit_ = false;
     // Fog (set_fog): the mood's, and the strength the sprite program has now.
     bool fog_on_ = false;
@@ -212,6 +214,11 @@ private:
     float fog_near_ = 0.0f, fog_far_ = 1.0f, fog_amount_ = 0.0f;
     float fog_now_ = 0.0f;
     void apply_fog(float amount);
+    // Lamp light on the backdrop (set_fog, mood `lamp_backdrop`) and the sprite
+    // program's u_unlit now.
+    float lamp_backdrop_ = 0.25f;
+    float unlit_now_ = 0.0f;
+    void apply_unlit(float unlit);
     std::string lut_path_;  // the strip the pipeline holds, or "" / "<memory>"
     void ensure_lut(const char* path);
     lit::LightConstants constants_;
