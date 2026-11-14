@@ -56,6 +56,7 @@ constexpr const char* FULL = "# a night mood\n"
                              "grade night_grade.bmp\n"
                              "vignette 0.35\n"
                              "grain 0.04\n"
+                             "lamp_backdrop 0.1\n"
                              "weather rain density=0.7 angle=12 speed=60\n"
                              "\n"
                              "light x=210 y=150 color=1,0.62,0.25 radius=48 flicker=0.1\n"
@@ -112,12 +113,13 @@ int main() {
         check("full: grade resolves in the mood file's folder (here, the cwd)",
               m.grade == "night_grade.bmp", m.grade);
         check("full: vignette and grain", approx(m.vignette, 0.35f) && approx(m.grain, 0.04f));
+        check("full: lamp_backdrop", approx(m.lamp_backdrop, 0.1f));
         check("full: weather",
               m.weather.kind == mood::WeatherKind::Rain && approx(m.weather.density, 0.7f) &&
                   approx(m.weather.angle, 12.0f) && approx(m.weather.speed, 60.0f));
         check("full: two lights, in file order, with their lines",
               m.lights.size() == 2 && m.lights[0].x == 210 && m.lights[0].y == 150 &&
-                  m.lights[0].line == 12 && m.lights[1].x == 420 && m.lights[1].line == 13);
+                  m.lights[0].line == 13 && m.lights[1].x == 420 && m.lights[1].line == 14);
         if (m.lights.size() == 2) {
             check("full: light colour and radius", approx(m.lights[0].color.g, 0.62f) &&
                                                        approx(m.lights[0].radius, 48.0f) &&
@@ -129,7 +131,7 @@ int main() {
         check("full: water look", water.set && approx(water.tint.g, 0.85f) &&
                                       approx(water.reflect, 0.6f) && approx(water.spec, 0.4f) &&
                                       approx(water.depth, 0.5f) && water.texture.empty() &&
-                                      water.rim == 0.0f && water.line == 14);
+                                      water.rim == 0.0f && water.line == 15);
         const mood::MaterialLook& wall = m.look(ElementType::Wall);
         check("full: wall look, untouched fields at their defaults",
               wall.set && wall.texture == "wall_rock" && approx(wall.strength, 0.35f) &&
@@ -228,6 +230,8 @@ int main() {
     rejects("reject: vignette above 1", M + "vignette 1.5\n", 2);
     rejects("reject: vignette missing", M + "vignette\n", 2);
     rejects("reject: vignette twice", M + "vignette 0.1\nvignette 0.2\n", 3);
+    rejects("reject: lamp_backdrop above 1", M + "lamp_backdrop 2\n", 2);
+    rejects("reject: lamp_backdrop junk", M + "lamp_backdrop dim\n", 2);
     rejects("reject: grain negative", M + "grain -0.1\n", 2);
     rejects("reject: grain two numbers", M + "grain 0.1 0.2\n", 2);
     rejects("reject: weather unknown kind", M + "weather snow density=1 angle=0 speed=1\n", 2);

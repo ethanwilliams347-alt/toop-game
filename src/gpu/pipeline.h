@@ -69,6 +69,7 @@ public:
     struct Inputs {
         unsigned albedo_tex = 0;    // attachment 0 of frame_fbo: read, then overwritten by post
         unsigned emissive_tex = 0;  // attachment 1 of frame_fbo
+        unsigned receive_tex = 0;  // attachment 2: each pixel's share of point light
         unsigned frame_fbo = 0;
         int target_w = 0, target_h = 0;
         unsigned pack_tex = 0;

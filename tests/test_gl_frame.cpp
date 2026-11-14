@@ -703,6 +703,56 @@ int main() {
                   red[2] > red[1] && red[1] > red[0] && green[2] < green[1] && green[1] < green[0]);
         }
 
+        // A lamp lights the world, not the backdrop behind it: one paint at
+        // depth 0 (the world plane) and at depth 0.3 (a near backdrop layer),
+        // the same lamp over the middle of each. The layer gains less light.
+        {
+            lit::LitFrame lamp = neutral_frame(camera);
+            lamp.ambient[0] = lamp.ambient[1] = lamp.ambient[2] = 0.2f;
+            const int cx[2] = {52, 252}, cy = 52;  // swatch centres, screen pixels
+            const auto draw = [&](bool lamps, std::vector<uint32_t>& out) {
+                lamp.light_count = 0;
+                if (lamps)
+                    for (int i = 0; i < 2; ++i) {
+                        const float s = static_cast<float>(Camera::DEFAULT_SCALE);
+                        lamp.lights[lamp.light_count++] = lit::PointLight{
+                            static_cast<float>(lamp.origin_x) + (cx[i] - lamp.screen_x) / s,
+                            static_cast<float>(lamp.origin_y) + (cy - lamp.screen_y) / s,
+                            1.5f,
+                            1.5f,
+                            1.5f,
+                            12.0f,
+                            0.0f};
+                    }
+                gl->begin_lit_frame();
+                gl->set_fog(lamp);
+                gl->set_blend(gfx::Blend::None);
+                gl->set_draw_color(120, 120, 120, 255);
+                const float depths[2] = {0.0f, 0.3f};
+                for (int i = 0; i < 2; ++i) {
+                    gl->set_depth(depths[i]);
+                    gl->fill_rect(gfx::Rect{cx[i] - 32, cy - 32, 64, 64});
+                }
+                gl->set_depth(0.0f);
+                const bool ok = gl->resolve_lit(lamp);
+                gl->read_pixels(out);
+                return ok;
+            };
+            std::vector<uint32_t> off_px, on_px;
+            const bool ok = draw(false, off_px) && draw(true, on_px);
+            double gain[2];
+            // Beside the lamp, off its hot core, which is the lamp itself and not light it casts.
+            for (int i = 0; i < 2; ++i)
+                gain[i] = luma(on_px, W, cx[i] + 14, cy + 14, 12, 12) -
+                          luma(off_px, W, cx[i] + 14, cy + 14, 12, 12);
+            std::printf("  lamp: world gains %.1f luma, backdrop at depth 0.3 %.1f\n", gain[0],
+                        gain[1]);
+            check("a lamp-lit frame resolves", ok, gl->error());
+            check("a lamp lights the world plane", gain[0] > 10.0);
+            check("a lamp lights a backdrop layer less than the world",
+                  gain[1] < gain[0] * 0.5 && gain[1] >= 0.0);
+        }
+
         // Bloom only adds light: no pixel darker than without it, and the frame
         // brighter overall (a low threshold, so the fixture's sky blooms).
         {
