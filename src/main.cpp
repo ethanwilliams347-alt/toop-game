@@ -331,6 +331,7 @@ int main(int argc, char* argv[]) {
     std::vector<uint32_t> enemy_atlas_pixels(
         static_cast<size_t>(present::ENEMY_ATLAS_W) * present::ENEMY_ATLAS_H, 0u);
     std::vector<frame::EnemySprite> enemy_sprites;
+    std::vector<lit::PointLight> lure_lights;  // the lit frame's, per frame
     std::vector<frame::ArrowSprite> arrow_sprites;
 
     // The loose bodies' pictures, the same way; present/present.h has the layout.
@@ -1040,6 +1041,24 @@ int main(int argc, char* argv[]) {
                 // GL only. F10 switches the cells between the shipped look and the
                 // material view -- each cell flat-coloured by what the pack says it
                 // is -- to see the material texture arrive and line up.
+                // GL only. F3 reloads the scene's mood file, so a mood is tuned
+                // with the game running: edit assets/<set>/<set>_mood.txt beside
+                // the exe and press it. One that does not parse keeps the mood
+                // already on screen and prints why.
+                if (e.key.keysym.sym == SDLK_F3 && !repeat && display.gl) {
+                    const scene_list::SceneDef& def = scenes[static_cast<size_t>(active_scene)];
+                    std::string why;
+                    mood::Mood fresh;
+                    const bool took =
+                        !def.mood.empty() && mood::load("assets/" + def.mood, fresh, &why);
+                    if (took)
+                        scene_mood = fresh;
+                    else
+                        std::fprintf(stderr, "Mood reload failed: %s\n",
+                                     def.mood.empty() ? "this scene names no mood" : why.c_str());
+                    record_notice = took ? "MOOD RELOADED" : "MOOD RELOAD FAILED - SEE STDERR";
+                    record_notice_timer = 2.0;
+                }
                 if (e.key.keysym.sym == SDLK_F10 && !repeat && display.gl) {
                     using View = gpu::GlCanvas::CellView;
                     const bool to_material = display.gl->cell_view() == View::Legacy;
@@ -1427,23 +1446,12 @@ int main(int argc, char* argv[]) {
         // cloud tiles makes the clouds jump at the wrap, and a float second count
         // still resolves a millisecond after a day of play.
         fp.time_s = static_cast<float>(static_cast<double>(SDL_GetTicks64()) / 1000.0);
+        // The lit frame's numbers before the frame code draws: the backdrop's fog
+        // is applied as each layer goes down. The cell pack's window is the
+        // camera's view, placed on screen where frame::draw_cells puts the cells.
+        // Weather and grain run on the simulation's step count, never the clock.
+        lit::LitFrame lf;
         if (lit_frame) {
-            // The cells' look (R4a/R4b): the mood's material lines, anchored to
-            // the pack's window, animated by the steps taken -- not the wall
-            // clock, so a paused world's water stands still.
-            lit::CellLook look;
-            mood::fill_cell_look(scene_mood, look);
-            look.origin_x = camera.view_x();
-            look.origin_y = camera.view_y();
-            look.step = render_steps;
-            display.gl->set_cell_look(look);
-            display.gl->begin_lit_frame();
-        }
-        frame::compose(canvas, fp);
-        if (lit_frame) {
-            // The cell pack's window is the camera's view, placed on screen where
-            // frame::draw_cells puts the cells.
-            lit::LitFrame lf;
             mood::fill_lit(scene_mood, lf);
             lf.origin_x = camera.view_x();
             lf.origin_y = camera.view_y();
@@ -1451,6 +1459,25 @@ int main(int argc, char* argv[]) {
             lf.screen_y = -camera.frac_y() * static_cast<float>(camera.scale());
             lf.scale = camera.scale();
             lf.time_s = fp.time_s;
+            lf.step = run.grid.steps();
+            present::lure_lights(run, alpha, lure_lights);
+            lit::append_lights(lf, lure_lights.data(), lure_lights.size());
+
+            // The cells' look (R4a/R4b): the mood's material lines, anchored to
+            // the pack's window, animated by the steps taken -- not the wall
+            // clock, so a paused world's water stands still. Handed over before
+            // the lit frame opens, because the cells draw during compose.
+            lit::CellLook look;
+            mood::fill_cell_look(scene_mood, look);
+            look.origin_x = camera.view_x();
+            look.origin_y = camera.view_y();
+            look.step = render_steps;
+            display.gl->set_cell_look(look);
+            display.gl->begin_lit_frame();
+            display.gl->set_fog(lf);
+        }
+        frame::compose(canvas, fp);
+        if (lit_frame) {
             if (!display.gl->resolve_lit(lf) && !lit_failure_reported) {
                 std::fprintf(stderr, "WARNING: the lit frame failed (%s); drawing it unlit.\n",
                              display.gl->error());
@@ -1509,6 +1536,20 @@ int main(int argc, char* argv[]) {
         {
             const std::string modes = debug_status(debug);
             if (!modes.empty()) op.hud_lines.push_back({modes, 0xFF80D0FF});
+        }
+        // GL only, with the inspector: what each pass of the lit frame cost on
+        // the GPU two frames ago (gpu::Pipeline's timers never stall a frame).
+        if (debug.inspector && display.gl && lit_frame) {
+            float ms[gpu::Pipeline::TIMER_COUNT];
+            display.gl->gpu_ms(ms, false);
+            std::string line = "GPU MS";
+            for (int t = 0; t < gpu::Pipeline::TIMER_COUNT; ++t) {
+                char part[32];
+                std::snprintf(part, sizeof(part), "  %s %.2f", gpu::Pipeline::timer_name(t),
+                              static_cast<double>(ms[t]));
+                line += part;
+            }
+            op.hud_lines.push_back({line, 0xFF80D0FF});
         }
         if (debug.inspector) {
             // Reads the cell the cursor names, which the free camera can put outside

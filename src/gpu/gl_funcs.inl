@@ -85,3 +85,14 @@ GL_FUNC(void, DrawBuffers, (GLsizei n, const GLenum* bufs))
 GL_FUNC(void, ClearBufferfv, (GLenum buffer, GLint drawbuffer, const GLfloat* value))
 GL_FUNC(void, BlitFramebuffer, (GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0,
                                 GLint dx1, GLint dy1, GLbitfield mask, GLenum filter))
+
+// --- atmosphere (R5 post, R6 weather) and per-pass GPU timing ---
+GL_FUNC(void, Uniform4f, (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3))
+GL_FUNC(void, DrawArraysInstanced, (GLenum mode, GLint first, GLsizei count, GLsizei instances))
+GL_FUNC(void, BlendFunc, (GLenum sfactor, GLenum dfactor))
+GL_FUNC(void, GenQueries, (GLsizei n, GLuint* ids))
+GL_FUNC(void, DeleteQueries, (GLsizei n, const GLuint* ids))
+GL_FUNC(void, BeginQuery, (GLenum target, GLuint id))
+GL_FUNC(void, EndQuery, (GLenum target))
+GL_FUNC(void, GetQueryObjectiv, (GLuint id, GLenum pname, GLint* params))
+GL_FUNC(void, GetQueryObjectui64v, (GLuint id, GLenum pname, GLuint64* params))

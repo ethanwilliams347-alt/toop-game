@@ -46,6 +46,7 @@ void main() {
     light += u_fire_gain * fire / (1.0 + fire);
 
     vec2 world = u_view + cell;
+    vec3 hot = vec3(0.0);
     for (int i = 0; i < u_light_count; ++i) {
         vec4 l = u_light_pos[i];
         float f = clamp(1.0 - distance(world, l.xy) / l.z, 0.0, 1.0);
@@ -56,8 +57,16 @@ void main() {
         float w = 0.5 + 0.25 * sin(u_time * (6.1 + 1.3 * fi) + 2.3 * fi) +
                   0.25 * sin(u_time * (17.3 + 0.7 * fi) + 0.9 * fi);
         light += u_light_color[i] * (f * f) * (1.0 - l.w * w);
+        // The lamp itself: a hot plus of cells at its centre, on the cell grid
+        // so it is pixel art rather than a smooth dot, added as light the
+        // albedo does not dim. It is what bloom finds -- a pool of light on dark
+        // paint is never over the threshold, so without it a lamp lights the
+        // ground but is nowhere to be seen.
+        vec2 dc = abs(floor(world) + 0.5 - l.xy);
+        float core = dc.x + dc.y < 0.75 ? 3.0 : (dc.x + dc.y < 1.75 ? 0.9 : 0.0);
+        hot += u_light_color[i] * core * (1.0 - l.w * w);
     }
 
     vec3 e = texelFetch(u_emissive, px, 0).rgb;
-    o_color = vec4(to_linear(a.rgb) * light + e, a.a);
+    o_color = vec4(to_linear(a.rgb) * light + e + hot, a.a);
 }

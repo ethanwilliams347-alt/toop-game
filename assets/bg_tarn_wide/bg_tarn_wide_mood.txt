@@ -2,7 +2,7 @@
 # lake as one long walk and the two should read as one place. Keep them in
 # step: a change to one is a change to both, except the grade file.
 #
-# Units (src/render/mood.h is the authority; tune in game with F6 hot reload):
+# Units (src/render/mood.h is the authority; tune in game with F3 (mood reload)):
 #   colours      linear; `ambient`/`sun`/`fog` take r g b as three words,
 #                `color=`/`tint=` take r,g,b; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y the way the light TRAVELS (x right, y DOWN), each -1..1
@@ -15,7 +15,7 @@
 #                albedo; texture=<stem> is assets/materials/<stem>.bmp (omit for
 #                no tile); strength is s in albedo*(1+s*(tile-0.5)); rim,
 #                reflect, spec and depth 0..1 (assets/materials/README.md)
-# authority; tune the numbers in game with F6 hot reload):
+# authority; tune the numbers in game with F3 (mood reload)):
 #   colours      linear r g b, 0..1; light = albedo x (ambient + sun + lights)
 #   sun dir=     x,y TOWARD the sun in world axes (x right, y DOWN), any length
 #   fog near/far parallax depth, 0 = the world plane, 1 = the sky (1 - factor)
@@ -37,7 +37,7 @@ sun 0.74 0.60 0.40 dir=-0.30,0.45 shadow=on
 
 # Haze only on the far half of the backdrop; the art already has aerial
 # perspective painted in, so this is a nudge, not a wall.
-fog 0.86 0.66 0.48 near=0.60 far=1.00 amount=0.18
+fog 0.86 0.66 0.48 near=0.60 far=1.00 amount=0.13
 
 bloom threshold=0.85 strength=0.25
 grade bg_tarn_wide_grade.bmp

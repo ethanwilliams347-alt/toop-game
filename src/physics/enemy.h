@@ -790,6 +790,17 @@ public:
     int prev_cell_y() const { return prev_y; }
     fx::v prev_remainder_x() const { return prev_rem_x; }
     fx::v prev_remainder_y() const { return prev_rem_y; }
+    // Where the lure's tip (the glowing bulb) was drawn last step and this one,
+    // world fx, for the renderer's lure light (present::lure_lights) -- false for
+    // a species without a lure, a lure walked on as a leg, or one cut off, whose
+    // bulb is a falling piece rather than the thing the fish holds out.
+    bool lure_tip(rig::Point& was, rig::Point& now) const {
+        const int k = lure_limb();
+        if (k < 0 || arm(k).cut >= 0) return false;
+        was = arm(k).drawn_was;
+        now = arm(k).drawn_now;
+        return true;
+    }
 
     // True on the step the stuck-lift in update() moved the box up out of its own
     // dust rather than the body walking or falling there -- Player::teleported's

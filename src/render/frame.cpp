@@ -79,6 +79,13 @@ void draw_layer(gfx::Canvas& canvas, const Params& p, const ParallaxLayer& l) {
         drift_px = std::fmod(l.drift * p.time_s * static_cast<float>(scale),
                              static_cast<float>(l.w));
 
+    // Aerial depth for the fog: the layer's factor, or, for the ground plane, the
+    // row's own (set per row below), since the plane runs from the foreground to
+    // the horizon and one depth for all of it would fog the near shore as hard
+    // as the far one.
+    const auto depth_of = [](float factor) { return std::clamp(1.0f - factor, 0.0f, 1.0f); };
+    canvas.set_depth(depth_of(l.parallax_x));
+
     const auto draw_span = [&](float x, const gfx::Rect* src, float y, float h) {
         const backdrop_wrap::Tiling t = backdrop_wrap::wrap_axis(x, l.w, window_w);
         for (int c = 0; c < t.count; ++c) {
@@ -99,6 +106,7 @@ void draw_layer(gfx::Canvas& canvas, const Params& p, const ParallaxLayer& l) {
             if (band.row1 <= band.row0) continue;
             const float top = flat_edge(band.row0);
             const gfx::Rect src{0, band.row0, tex_w, band.row1 - band.row0};
+            canvas.set_depth(depth_of(band.parallax_x));
             draw_span(depth_rig::origin(cam_x, b.anchor_x, band.parallax_x, scale) + drift_px, &src,
                       top, flat_edge(band.row1) - top);
         }
@@ -135,6 +143,7 @@ void draw_layer(gfx::Canvas& canvas, const Params& p, const ParallaxLayer& l) {
             if (l.line_scroll) {
                 const float f = depth_rig::plane_factor(b.rig, static_cast<float>(row) + 0.5f);
                 x = depth_rig::origin(cam_x, b.anchor_x, f, scale) + drift_px;
+                canvas.set_depth(depth_of(f));
             }
             if (row >= l.ripple_row0 && row < l.ripple_row1)
                 x += depth_rig::ripple_cells(row, p.time_s, b.ripple_amplitude) *
@@ -151,12 +160,14 @@ void draw_backdrop(gfx::Canvas& canvas, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
         if (!l.is_foreground) draw_layer(canvas, p, l);
+    canvas.set_depth(0.0f);
 }
 
 void draw_foreground(gfx::Canvas& canvas, const Params& p) {
     if (!p.backdrop) return;
     for (const ParallaxLayer& l : p.backdrop->layers)
         if (l.is_foreground) draw_layer(canvas, p, l);
+    canvas.set_depth(0.0f);
 }
 
 // Props. Drawn before the cell texture on purpose -- see the Prop

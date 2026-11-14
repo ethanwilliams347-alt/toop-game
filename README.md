@@ -101,6 +101,7 @@ together.
 **Dev tools: OpenGL renderer only** (`renderer=gl`; with the SDL renderer these keys do nothing)
 | Key | Action |
 |---|---|
+| `F3` | Reload the scene's mood file (`assets/<set>/<set>_mood.txt` next to the exe). One that doesn't parse keeps the current mood and prints why. With `F8`'s inspector on, a `GPU MS` line shows what each lit-frame pass costs. |
 | `F5` | Recompile the shaders from the `assets/shaders/` copy next to the exe. A shader that doesn't compile keeps the old one running and prints why. |
 | `F10` | Switch the cells between the normal look and the material view, where each cell is flat-coloured by what it is. |
 | `F11` | Turn the scene's mood lighting off and on, to compare with the plain look. |

@@ -4,6 +4,7 @@
 #include <vector>
 #include "game/run.h"
 #include "render/frame.h"
+#include "render/lit_frame.h"
 
 // The presenter: what the frame shows, worked out from the simulation's state.
 //
@@ -52,6 +53,13 @@ static_assert(ENEMY_ATLAS_W <= 2048 && ENEMY_ATLAS_H <= 2048,
 // that was written, which is also the rectangle the caller has to upload.
 void paint_enemies(const Run& run, float alpha, std::vector<uint32_t>& atlas,
                    std::vector<frame::EnemySprite>& out);
+
+// One point light per lure that is out (Enemy::lure_tip), at its bulb,
+// interpolated to `alpha` like the sprites, for the GL multiply light model's
+// resolve (lit::append_lights). Read from the Run and never written back:
+// the bulb lights the cave, it does not heat or wake anything. Under the legacy
+// light model nothing reads these; the painted bulb is its light there.
+void lure_lights(const Run& run, float alpha, std::vector<lit::PointLight>& out);
 
 // --- the body atlas ----------------------------------------------------------
 //

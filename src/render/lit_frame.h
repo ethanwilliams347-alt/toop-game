@@ -78,6 +78,29 @@ struct LitFrame {
     float screen_x = 0.0f, screen_y = 0.0f;
     int scale = 1;
     float time_s = 0.0f;  // for flicker
+
+    // --- atmosphere (R5 post, R6 weather), from the mood (mood::fill_lit) ---
+    // Fog is applied while the backdrop is drawn (GlCanvas::set_fog), since only
+    // then is each layer's depth known; it is here so one record carries the
+    // whole mood. Colour is linear light, as the mood files' headers say of
+    // every colour they hold.
+    bool fog_on = false;
+    float fog[3] = {0.0f, 0.0f, 0.0f};
+    float fog_near = 0.0f, fog_far = 1.0f, fog_amount = 0.0f;
+    bool bloom_on = false;
+    float bloom_threshold = 1.0f, bloom_strength = 0.0f;
+    // The LUT strip's path (Mood::grade), or null for none. Points into the
+    // Mood, which outlives the frame; GlCanvas loads and caches the strip.
+    const char* grade = nullptr;
+    float vignette = 0.0f, grain = 0.0f;
+    // 0 none, 1 rain, 2 fog wisps, 3 dust (mood::WeatherKind's order).
+    int weather = 0;
+    float weather_density = 0.0f, weather_angle_deg = 0.0f, weather_speed = 0.0f;
+
+    // --- from the frame ---
+    // The simulation step count: weather and grain are functions of it, never of
+    // the wall clock, so a replay or a paused game draws the same frame.
+    unsigned long long step = 0;
 };
 
 // How the cells themselves look under the multiply model (R4a/R4b): the mood's
@@ -112,5 +135,14 @@ struct CellLook {
     // and a replay draws the same water on the same step.
     uint32_t step = 0;
 };
+
+// One frame's dynamic lights (an angler's lure), appended after the mood's own
+// lights up to MAX_POINT_LIGHTS. Returns how many fitted.
+inline size_t append_lights(LitFrame& f, const PointLight* lights, size_t n) {
+    size_t added = 0;
+    while (added < n && f.light_count < MAX_POINT_LIGHTS)
+        f.lights[f.light_count++] = lights[added++];
+    return added;
+}
 
 }  // namespace lit
