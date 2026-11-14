@@ -94,6 +94,23 @@ int top_row_of(const Grid& g, ElementType t) {
 } // namespace
 
 int main() {
+    // --- every contact a body can have in one step has its own name ---
+    // The warm start finds last step's impulse by id, so two contacts sharing one
+    // both start from whichever was found first. Over every tag a body can wear,
+    // the world among them, every direction and both ends: no two alike.
+    {
+        std::vector<uint32_t> ids;
+        for (int other = -1; other <= 255; ++other) {
+            if (other == 0) continue;  // no body wears tag 0
+            for (int dir = 0; dir < 9; ++dir)
+                for (int end = 0; end < 2; ++end)
+                    ids.push_back(Grid::contact_id(7, other, dir, end));
+        }
+        std::sort(ids.begin(), ids.end());
+        check("a body's contacts with the world and with body 255 have different names",
+              std::adjacent_find(ids.begin(), ids.end()) == ids.end());
+    }
+
     // --- an undisturbed structure is never questioned ---
     // The single most important test here. Support is checked on disturbance, never
     // as a global truth, so a platform placed on purpose stays put.
@@ -1080,6 +1097,63 @@ int main() {
         check("and the same splash every time", same);
     }
 
+    // --- spray and rise conserve each liquid, to the unit ---
+    // The plunge above watches one liquid falling in. These are the other two
+    // ways water is thrown about: a buoyant block let go at the bottom of a pool
+    // rises through it and heaves a surge out of the surface as it breaks it
+    // (step_rise, draw_in behind it), and a plunge through a layer of oil on
+    // water pushes both aside at once, with spray of each type in the air. A
+    // unit lost or made in any of it would drift a pool for good, so the count is
+    // exact every step, per liquid: spray_mass() sums every type, so the drops
+    // are counted by their own.
+    {
+        const auto in_air = [](const Grid& g, ElementType t) {
+            int64_t m = 0;
+            for (const Grid::Spray& d : g.spray())
+                if (d.type == t) m += d.mass;
+            return m;
+        };
+        const auto watch = [&](Grid& g, const char* what) {
+            const int64_t water = liquid::total(g, ElementType::Water);
+            const int64_t oil = liquid::total(g, ElementType::Oil);
+            int first_off = -1;
+            size_t most_spray = 0;
+            for (int i = 1; i <= 900 && first_off < 0; ++i) {
+                g.update();
+                most_spray = std::max(most_spray, g.spray().size());
+                if (liquid::total(g, ElementType::Water) + in_air(g, ElementType::Water) != water ||
+                    liquid::total(g, ElementType::Oil) + in_air(g, ElementType::Oil) != oil)
+                    first_off = i;
+            }
+            check((std::string(what) + " conserves every liquid every step").c_str(), first_off < 0,
+                  "first off at step " + std::to_string(first_off) + ", " +
+                      std::to_string(most_spray) + " drops at most");
+        };
+        {
+            Grid g(80, 60);
+            fill(g, 0, 55, 79, 59, ElementType::Wall);
+            fill(g, 0, 10, 0, 54, ElementType::Wall);
+            fill(g, 79, 10, 79, 54, ElementType::Wall);
+            fill(g, 1, 15, 78, 54, ElementType::Water);
+            fill(g, 30, 45, 45, 50, ElementType::Wood);
+            nudge(g, 37, 44);
+            watch(g, "a block rising from the bottom of a pool");
+        }
+        {
+            Grid g(80, 50);
+            fill(g, 0, 45, 79, 49, ElementType::Wall);
+            fill(g, 0, 20, 0, 44, ElementType::Wall);
+            fill(g, 79, 20, 79, 44, ElementType::Wall);
+            fill(g, 1, 28, 78, 44, ElementType::Water);
+            fill(g, 1, 24, 78, 27, ElementType::Oil);
+            fill(g, 15, 2, 26, 8, ElementType::Wall);
+            fill(g, 50, 2, 57, 8, ElementType::Wood);
+            nudge(g, 20, 1);
+            nudge(g, 53, 1);
+            watch(g, "a plunge through oil on water");
+        }
+    }
+
     // --- a stack that leans past its base comes down ---
     // Every block is balanced on the one under it; the stack as a whole is not.
     // Only weighing each block with everything resting on it finds that.
@@ -1471,12 +1545,65 @@ int main() {
             if (n == 299) walked = false;
         }
         drop(14, 40, 17, 43);
-        const uint8_t tag_b = g.get_element(15, 53).piece_tag;
-        check("the tag counter was walked round to the resting piece's tag", walked,
-              "tag_a " + std::to_string(tag_a));
+        // Separate: the resting block is whole where it was, one tag, and no cell
+        // of the second block wears it. Not where the second block ends up --
+        // falling past the first block's face it rubs it, and may tip away off
+        // it. (It used to land square beside it only because, with the resting
+        // block's tag, the resting block read as part of itself and was not
+        // touched at all; see the next test.)
+        const uint8_t now_a = g.get_element(10, 51).piece_tag;
+        bool whole = now_a != 0;
+        int shared = 0;
+        for (int y = 0; y < 55; ++y)
+            for (int x = 0; x < 120; ++x) {
+                const Element& e = g.get_element(x, y);
+                const bool in_a = x >= 10 && x <= 13 && y >= 51;
+                if (in_a) whole = whole && e.type == ElementType::Wall && e.piece_tag == now_a;
+                else if (e.type == ElementType::Wall && e.piece_tag == now_a) ++shared;
+            }
         check("a block landing against a resting one with a recycled tag stays separate",
-              g.get_element(14, 53).type == ElementType::Wall && tag_a != tag_b,
-              "tags " + std::to_string(tag_a) + " / " + std::to_string(tag_b));
+              whole && shared == 0,
+              "tag " + std::to_string(now_a) + ", " + std::to_string(shared) + " cells of it outside");
+    }
+
+    // --- nor does a body in flight wear a resting piece's tag ---
+    // The landing above is one place a recycled tag shows; the flight before it
+    // is the other. Every question the grid asks of a cell -- is_tipping, and
+    // body_at for the player, the enemies and the arrows -- reads its tag, so a
+    // resting block wearing the tag of a body in the air across the level reads
+    // as part of that body: something standing on the block rides the body's
+    // motion, a push on the block shoves the body, and the support fill passes
+    // the block over as "tipping, step_tipping owns it", so it can hang in the
+    // air if what holds it up is dug out meanwhile.
+    {
+        Grid g(120, 60);
+        fill(g, 0, 55, 119, 59, ElementType::Wall);
+        const auto settle = [&] {
+            for (int s = 0; s < 900 && g.has_pending_support_checks(); ++s) g.update();
+        };
+        fill(g, 10, 30, 13, 33, ElementType::Wall);
+        nudge(g, 10, 29);
+        settle();
+        const uint8_t tag_a = g.get_element(11, 53).piece_tag;
+        int shared_at = -1;  // the step a body in flight wore tag_a, if one did
+        bool misread = false;
+        for (int n = 0; n < 300 && tag_a != 0 && shared_at < 0; ++n) {
+            fill(g, 80, 30, 81, 31, ElementType::Wall);
+            nudge(g, 80, 29);
+            for (int s = 0; s < 900 && g.has_pending_support_checks(); ++s) {
+                g.update();
+                for (int i = 0; i < g.tipping_count(); ++i)
+                    if (g.body_id(i) == tag_a) {
+                        shared_at = n;
+                        misread = misread || g.body_at(11, 53) >= 0;
+                    }
+            }
+            fill(g, 70, 20, 100, 54, ElementType::Empty);
+            settle();
+        }
+        check("a resting block never reads as part of a body in flight", !misread,
+              "a body wore the resting block's tag " + std::to_string(tag_a) + " on drop " +
+                  std::to_string(shared_at));
     }
 
     return report();

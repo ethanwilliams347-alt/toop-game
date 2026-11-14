@@ -161,6 +161,7 @@ void Grid::reset(uint64_t seed) {
     fracture_component.clear();
     fracture_lowest.clear();
     next_piece_tag = 1;
+    std::fill(std::begin(tag_worn), std::end(tag_worn), false);
 
     // The pool keeps its entries, and each entry its capacity -- the same "cleared,
     // not freed" rule as every other scratch vector here. tip_count is what says
@@ -791,26 +792,51 @@ void Grid::fall_if_unsupported(int x, int y) {
     start_body(support_component, 0, speed);
 }
 
+void Grid::tag_census() {
+    std::fill(std::begin(tag_worn), std::end(tag_worn), false);
+    for (const Element& e : cells)
+        if (is_structural(e.type)) tag_worn[e.piece_tag] = true;
+}
+
 uint8_t Grid::alloc_piece_tag() {
     // pending_support is every cell currently asking to be re-checked, so a piece
     // still in flight has its cells in it. Scanning it is O(queue) per fracture,
     // the same order as the fill that just ran, and a fracture is rare next to a
     // step.
-    for (int attempt = 0; attempt < 255; ++attempt) {
-        const uint8_t candidate = next_piece_tag;
-        next_piece_tag = static_cast<uint8_t>(next_piece_tag + 1);
-        if (next_piece_tag == 0) next_piece_tag = 1;  // 0 means "never broken"
+    //
+    // A tag a resting piece still wears is refused too, not only one in flight.
+    // A body wearing it reads, everywhere a cell is asked for its body by its tag
+    // (is_tipping, body_at), as owning that resting piece as well: the player
+    // standing on the piece rides the body, a push on the piece shoves it, and
+    // the support fill passes the piece over as step_tipping's, so it can be left
+    // hanging when what holds it up is dug out. Which tags the world wears is
+    // tag_worn, refreshed by a census of the grid each time the counter wraps;
+    // only when every tag is worn does this fall back to refusing the in-flight
+    // ones alone, as it always did.
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int attempt = 0; attempt < 255; ++attempt) {
+            const uint8_t candidate = next_piece_tag;
+            next_piece_tag = static_cast<uint8_t>(next_piece_tag + 1);
+            if (next_piece_tag == 0) {
+                next_piece_tag = 1;  // 0 means "never broken"
+                tag_census();
+            }
+            if (pass == 0 && tag_worn[candidate]) continue;
 
-        // A body is in the air too, but is not in pending_support while it
-        // moves, so its tag has to be refused by name.
-        bool in_use = tag_body[candidate] >= 0;
-        for (const int idx : pending_support) {
-            if (cells[idx].ticks > 0 && cells[idx].piece_tag == candidate) {
-                in_use = true;
-                break;
+            // A body is in the air too, but is not in pending_support while it
+            // moves, so its tag has to be refused by name.
+            bool in_use = tag_body[candidate] >= 0;
+            for (const int idx : pending_support) {
+                if (cells[idx].ticks > 0 && cells[idx].piece_tag == candidate) {
+                    in_use = true;
+                    break;
+                }
+            }
+            if (!in_use) {
+                tag_worn[candidate] = true;
+                return candidate;
             }
         }
-        if (!in_use) return candidate;
     }
 
     // All 255 tags are in the air at once. There is no non-colliding answer, so

@@ -880,6 +880,14 @@ private:
     // a collision costs.
     uint8_t next_piece_tag = 1;
 
+    // Tags some cell in the world may wear: every tag handed out since the last
+    // census, and every tag a structural cell wore at it. A census is a scan of
+    // the grid, taken each time the counter comes back round to 1 -- once per 255
+    // tags handed out -- and it is what lets a tag no resting piece wears any more
+    // be handed out again. See alloc_piece_tag for why a resting piece's tag must
+    // not be.
+    bool tag_worn[256] = {};
+
     // Hands out the next tag, skipping any that a piece still in the air is
     // wearing. A bare counter suffices only while 255 landings cannot happen inside
     // one piece's flight; a long cascade makes that reachable, and the collision
@@ -887,6 +895,8 @@ private:
     // piece. Deterministic: it reads only pending_support and the counter, both
     // part of the simulation state.
     uint8_t alloc_piece_tag();
+    // Rebuilds tag_worn from the grid. See alloc_piece_tag.
+    void tag_census();
 
     std::vector<int> fracture_component; // scratch, reused across breaks
 
@@ -1510,6 +1520,20 @@ public:
     // true is a maybe, false is a no. The cheap question a box asks before the
     // dear one -- scanning itself cell by cell for a body that is nowhere near it.
     bool body_near(int x0, int y0, int x1, int y1) const;
+
+    // The name a contact goes by from one step to the next, for the solver's warm
+    // start: the two bodies by tag (a pool index moves when a body ends), which of
+    // the nine snapped directions, and which end of the face. `other_tag` is -1
+    // for the world. Public so test_collapse can hold it to being one-to-one.
+    static uint32_t contact_id(int self_tag, int other_tag, int direction, int end) {
+        // The world is tag 0, the one tag no body can wear (alloc_piece_tag skips
+        // it: 0 is "never broken"). It was 0xFF, which is a body's tag too: a body
+        // lying half on the floor and half on body 255 had both faces under the
+        // same name, and both warm-started from whichever came first last step.
+        const uint32_t other = other_tag >= 0 ? static_cast<uint32_t>(other_tag) : 0u;
+        return (static_cast<uint32_t>(self_tag) << 16) | (other << 8) |
+               (static_cast<uint32_t>(direction) << 1) | static_cast<uint32_t>(end);
+    }
 
     // Pushes the structure at cell (x, y), at that cell's centre, with impulse
     // (jx, jy) in Material::weight units times fx cells per second. Applied next
