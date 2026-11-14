@@ -19,6 +19,9 @@
 //   slope     - a block set on a 45-degree stone slope: does it slide?
 //   stack     - a leaning stack of blocks, built off-centre, one block at a time.
 //   raft      - a wooden slab dropped into a pond from several heights and offsets.
+//   pile      - pieces dropped onto each other, and a slab in a narrow pond: how
+//               many steps each takes to sleep, how often they wake, and whether
+//               any is only frozen at BODY_MAX_STEPS.
 //
 // Usage: body_probe [scene] [every]. With no scene, runs them all.
 #include "physics/grid.h"
@@ -358,6 +361,64 @@ void raft(int every) {
     }
 }
 
+// Runs until nothing moves or `budget` steps, counting each body that starts
+// (age 1: dropped, struck or pushed awake) and the oldest any body got. A body
+// frozen at BODY_MAX_STEPS shows as an oldest age at the cap.
+void settle(Grid& g, const char* name, int budget) {
+    int wakes = 0, oldest = 0, rest = -1;
+    for (int s = 1; s <= budget; ++s) {
+        g.update();
+        for (int i = 0; i < g.tipping_count(); ++i) {
+            const Grid::BodyState b = g.body_state(i);
+            if (b.age == 1) ++wakes;
+            oldest = std::max(oldest, b.age);
+        }
+        if (!g.has_pending_support_checks() && s > 5) {
+            rest = s;
+            break;
+        }
+    }
+    std::printf("  %-28s at rest step %5d  wakes %3d  oldest body %4d steps\n", name, rest,
+                wakes, oldest);
+}
+
+void pile(int) {
+    std::printf("\n== pile ==\n");
+    for (int n = 3; n <= 5; ++n) {
+        for (const int off : {0, 3, 6}) {
+            Grid g(80, 80);
+            fill(g, 0, 75, 79, 79, ElementType::Wall);
+            // Blocks of alternating material, so each is its own piece, stacked
+            // in the air with gaps and offsets so they land on one another.
+            for (int i = 0; i < n; ++i) {
+                const ElementType t = i % 2 == 0 ? ElementType::Wood : ElementType::Wall;
+                const int x0 = 30 + (i % 2 ? off : -off / 2), y1 = 70 - 9 * i;
+                fill(g, x0, y1 - 3, x0 + 7 + i, y1, t);
+            }
+            for (int i = 0; i < n; ++i) nudge(g, 31, 70 - 9 * i - 4);
+            char name[64];
+            std::snprintf(name, sizeof name, "pile n=%d off=%d", n, off);
+            settle(g, name, 2400);
+        }
+    }
+    // A slab 30 wide in a pond `gap` cells wider on each side.
+    for (const int gap : {3, 5, 8}) {
+        for (const int drop : {2, 10, 20, 30}) {
+        Grid g(240, 100);
+        fill(g, 0, 90, 239, 99, ElementType::Wall);
+        fill(g, 0, 40, 59 - gap, 89, ElementType::Wall);
+        fill(g, 90 + gap, 40, 239, 89, ElementType::Wall);
+        fill(g, 60 - gap, 60, 89 + gap, 89, ElementType::Water);
+        const int y1 = 59 - drop;
+        fill(g, 60, y1 - 3, 89, y1, ElementType::Wood);
+        nudge(g, 70, y1 - 4);
+        char name[64];
+        std::snprintf(name, sizeof name, "pond gap %d drop %d", gap, drop);
+        settle(g, name, 2400);
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -374,5 +435,6 @@ int main(int argc, char** argv) {
     if (want("stack")) stack(every);
     if (want("current")) current(every);
     if (want("raft")) raft(every);
+    if (want("pile")) pile(every);
     return 0;
 }
