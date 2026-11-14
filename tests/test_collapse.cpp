@@ -1356,6 +1356,46 @@ int main() {
               "queued " + std::to_string(took) + " bodies " + std::to_string(g.tipping_count()));
     }
 
+    // --- a body still moving at BODY_MAX_STEPS is not frozen where it is ---
+    // The age cap ends a body that has never come to rest. It used to hand the
+    // cells back where they stood and ask nothing, so a raft poled across a pool
+    // for thirty seconds became a fixed slab hovering on the water mid-stroke.
+    // Now a body that times out is re-judged from where it lies, and one with
+    // nothing solid under it comes loose again, fresh.
+    {
+        const int MAX_STEPS = 1800;  // Grid::BODY_MAX_STEPS, which is private
+        Grid g(400, 60);
+        fill(g, 0, 50, 399, 59, ElementType::Wall);
+        fill(g, 0, 20, 0, 49, ElementType::Wall);
+        fill(g, 399, 20, 399, 49, ElementType::Wall);
+        fill(g, 1, 35, 398, 49, ElementType::Water);
+        fill(g, 20, 30, 39, 32, ElementType::Wood);
+        nudge(g, 25, 29);
+        const auto wood_left = [&] {
+            for (int x = 0; x < 400; ++x)
+                for (int y = 0; y < 60; ++y)
+                    if (g.get_element(x, y).type == ElementType::Wood) return x;
+            return -1;
+        };
+        const int64_t pole = int64_t{60} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+        int awake_at_end = 0;
+        int left_before = 0;
+        for (int s = 0; s < MAX_STEPS + 240; ++s) {
+            if (s == MAX_STEPS + 120) left_before = wood_left();
+            const int left = wood_left();
+            int row = -1;
+            for (int y = 0; y < 60 && row < 0; ++y)
+                if (g.get_element(left, y).type == ElementType::Wood) row = y;
+            if (s % 4 == 0) g.queue_impulse(left, row, pole, 0);
+            g.update();
+            if (s >= MAX_STEPS + 120) awake_at_end += g.tipping_count();
+        }
+        check("a raft poled past BODY_MAX_STEPS is still a body", awake_at_end > 100,
+              std::to_string(awake_at_end) + " of 120 steps");
+        check("and still being poled along", wood_left() > left_before,
+              std::to_string(left_before) + " -> " + std::to_string(wood_left()));
+    }
+
     // --- a piece let go in a mirrored world turns the mirrored way ---
     // Mirror symmetry is a stated goal of the fixed-point rules (products are
     // truncated toward zero, so +x and -x round alike; sin is exactly odd). A slab
