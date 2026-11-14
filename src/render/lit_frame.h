@@ -1,5 +1,7 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
+#include <string>
 
 // What the GL light passes (src/gpu/pipeline.*) are told, as plain numbers.
 //
@@ -76,6 +78,39 @@ struct LitFrame {
     float screen_x = 0.0f, screen_y = 0.0f;
     int scale = 1;
     float time_s = 0.0f;  // for flicker
+};
+
+// How the cells themselves look under the multiply model (R4a/R4b): the mood's
+// `material` lines plus the few frame numbers the cell shader needs to anchor
+// texture to the world and animate water. Unlike LitFrame it is handed to the
+// canvas *before* frame::compose (GlCanvas::set_cell_look), because the cells
+// are drawn during compose and the resolve comes after it. `on` false -- the
+// default, and what every legacy frame keeps -- draws the cells exactly as a
+// plain blit, so nothing here can reach the SDL path or a legacy mood.
+struct CellLook {
+    bool on = false;
+    // Per material, by ElementType (mood::MaterialLook, see mood.h for each).
+    float tint[MAX_TYPES][3] = {};
+    float strength[MAX_TYPES] = {};
+    float rim[MAX_TYPES] = {};
+    float reflect[MAX_TYPES] = {};
+    float spec[MAX_TYPES] = {};
+    float depth[MAX_TYPES] = {};
+    // The tile stem under assets/materials/ (no extension), empty for none. The
+    // canvas loads each stem once and keeps it.
+    std::string texture[MAX_TYPES];
+    // The sun's direction, the way light travels (+y down), so a rim lights the
+    // edge that faces the sun. (0, 1) -- light from straight above -- when the
+    // mood has no sun.
+    float sun_dir[2] = {0.0f, 1.0f};
+    // World cell of the cell pack's texel (0, 0): what anchors a tile to the
+    // world rather than to the screen, so a texture does not swim as the camera
+    // pans.
+    int origin_x = 0, origin_y = 0;
+    // Simulation steps since the run began, for caustics and the reflection's
+    // wobble. Steps and not the wall clock, so a paused world is a still picture
+    // and a replay draws the same water on the same step.
+    uint32_t step = 0;
 };
 
 }  // namespace lit

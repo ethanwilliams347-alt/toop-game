@@ -310,6 +310,36 @@ int main() {
             }
     }
     check("shipped: assets/ could be searched", !ec, ec.message());
+
+    // fill_cell_look: the material lines reach the cell shader's record, by
+    // ElementType, and only a multiply mood turns the look on -- a legacy mood's
+    // cells stay exactly the SDL path's whatever material lines it carries.
+    {
+        const Result r = parse("light_model multiply\nsun 1 1 1 dir=1,0\n"
+                               "material Wall tint=0.5,0.6,0.7 texture=materials_rock "
+                               "strength=0.4 rim=0.3\n"
+                               "material Water reflect=0.55 spec=0.6 depth=0.7\n");
+        check("cell look: the mood parses", r.ok, r.error);
+        lit::CellLook look;
+        mood::fill_cell_look(r.m, look);
+        const size_t wall = static_cast<size_t>(ElementType::Wall);
+        const size_t water = static_cast<size_t>(ElementType::Water);
+        check("cell look: a multiply mood turns it on", look.on);
+        check("cell look: a material's numbers arrive by type",
+              approx(look.tint[wall][1], 0.6f) && approx(look.strength[wall], 0.4f) &&
+                  approx(look.rim[wall], 0.3f) && look.texture[wall] == "materials_rock" &&
+                  approx(look.reflect[water], 0.55f) && approx(look.spec[water], 0.6f) &&
+                  approx(look.depth[water], 0.7f));
+        check("cell look: an unnamed material is untouched",
+              approx(look.tint[static_cast<size_t>(ElementType::Sand)][0], 1.0f) &&
+                  look.texture[static_cast<size_t>(ElementType::Sand)].empty());
+        check("cell look: the rim follows the sun", approx(look.sun_dir[0], 1.0f));
+
+        const Result legacy = parse("light_model legacy\nmaterial Wall rim=0.5\n");
+        lit::CellLook off;
+        mood::fill_cell_look(legacy.m, off);
+        check("cell look: a legacy mood leaves it off", legacy.ok && !off.on, legacy.error);
+    }
     std::printf("       (%d mood file%s under assets/)\n", found, found == 1 ? "" : "s");
 
     // And every scene that names a mood names one that is there and loads.
