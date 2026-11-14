@@ -1196,12 +1196,9 @@ void Grid::gather_contacts(int i) {
     // body ends -- which of the eight directions, and which end of the face.
     for (int f = 0; f < face_count; ++f) {
         const int other = faces[f].key / 9 - 1;
-        const uint32_t base =
-            (static_cast<uint32_t>(b->tag) << 16) |
-            (static_cast<uint32_t>(other >= 0 ? tip_bodies[other].tag : 0xFF) << 8) |
-            (static_cast<uint32_t>(faces[f].key % 9) << 1);
-        faces[f].lo.id = base;
-        faces[f].hi.id = base | 1u;
+        const int other_tag = other >= 0 ? tip_bodies[other].tag : -1;
+        faces[f].lo.id = contact_id(b->tag, other_tag, faces[f].key % 9, 0);
+        faces[f].hi.id = contact_id(b->tag, other_tag, faces[f].key % 9, 1);
         contacts.push_back(faces[f].lo);
         if (faces[f].hi_t != faces[f].lo_t) contacts.push_back(faces[f].hi);
     }

@@ -102,7 +102,12 @@ namespace input_log {
 //    world tips the mirrored way; and a body that stops against a resting
 //    piece wearing its own recycled tag takes a fresh one instead of welding to
 //    it. Layout unchanged; a version-12 log loosens pieces with different spins.
-constexpr uint32_t FORMAT_VERSION = 13;
+// 14: piece tags (grid.cpp alloc_piece_tag). A tag a resting piece still wears
+//    is no longer handed to a new body, so a resting piece never reads as part
+//    of a body in flight; and a contact with the world is named by tag 0, not
+//    0xFF, which body 255 wore too. Layout unchanged; a version-13 log hands
+//    out different tags from its 255th body on, and solves differently there.
+constexpr uint32_t FORMAT_VERSION = 14;
 
 // The longest scene name a log stores. Scene names are short identifiers
 // (text_record::name_ok); the cap is what lets read() refuse a corrupt
