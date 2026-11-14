@@ -27,10 +27,19 @@ ctest --test-dir build -C Release --output-on-failure
   an OpenGL 3.3 context and reports itself skipped without one.
   `golden_frame_test` checksums a rendered frame, so a changed checksum means
   the visible output changed.
-- The benchmark is run by hand, not in CI. Only compare timings taken back to
-  back in one sitting, because runs on different occasions can differ by more
-  than 2x. Its replayed row needs a `session.rec`; without one it prints
-  "not run".
+- The benchmark is run by hand, not in CI. For an A/B comparison use
+  `grid_bench --focus`, compare timings taken back to back in one sitting, and
+  trust them only when the `placement:` line says `on`: without pinning to the
+  fast cores, runs can differ by nearly 2x. Its replayed row needs a
+  `session.rec`; without one it prints "not run". Recordings are not actively
+  maintained (see below).
+
+## Recordings
+
+`F9` saves the session so far to `session.rec`, which `grid_bench` replays.
+Recordings are not actively maintained: no change is checked against
+replaying a saved session. Before relying on recordings again, record a session,
+replay it, and confirm the replay matches.
 
 ## Manual check
 
@@ -111,10 +120,6 @@ Holding a key down doesn't repeat it, except for the keys that are meant to be
 held (movement, `E`, the mouse buttons), `.` (which steps once per repeat, to
 scrub) and the settings menu's arrow keys. A held `F7` changes scene once, and a
 held `F9` writes one recording.
-
-**Recordings are not actively maintained.** No change is checked against
-replaying a saved session. Before relying on recordings again, record a session,
-replay it, and confirm the replay matches.
 
 ## Settings
 
@@ -203,7 +208,8 @@ Spawn them at the cursor with `T`, `Y`, `U` and `I`.
 ## Assets
 
 `assets/` is copied next to the exe at build time, so a hand edit doesn't show
-up until you rebuild or run `python tools/load_sprite.py --stage`.
+up until you rebuild or run `python tools/load_sprite.py --stage`. How files
+under `assets/` are named and laid out is in [assets/README.md](assets/README.md).
 
 - **Sprites:** run `python tools/load_sprite.py <key> <file>.bmp` to bind a BMP
   in `assets/sprites.txt`, check it against the frame grid, and stage it, with
