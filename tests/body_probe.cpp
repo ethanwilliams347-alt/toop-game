@@ -378,8 +378,8 @@ void settle(Grid& g, const char* name, int budget) {
             break;
         }
     }
-    std::printf("  %-28s at rest step %5d  wakes %3d  oldest body %4d steps\n", name, rest,
-                wakes, oldest);
+    std::printf("  %-28s at rest step %5d  wakes %3d  oldest body %4d steps\n", name, rest, wakes,
+                oldest);
 }
 
 void pile(int) {
@@ -404,17 +404,17 @@ void pile(int) {
     // A slab 30 wide in a pond `gap` cells wider on each side.
     for (const int gap : {3, 5, 8}) {
         for (const int drop : {2, 10, 20, 30}) {
-        Grid g(240, 100);
-        fill(g, 0, 90, 239, 99, ElementType::Wall);
-        fill(g, 0, 40, 59 - gap, 89, ElementType::Wall);
-        fill(g, 90 + gap, 40, 239, 89, ElementType::Wall);
-        fill(g, 60 - gap, 60, 89 + gap, 89, ElementType::Water);
-        const int y1 = 59 - drop;
-        fill(g, 60, y1 - 3, 89, y1, ElementType::Wood);
-        nudge(g, 70, y1 - 4);
-        char name[64];
-        std::snprintf(name, sizeof name, "pond gap %d drop %d", gap, drop);
-        settle(g, name, 2400);
+            Grid g(240, 100);
+            fill(g, 0, 90, 239, 99, ElementType::Wall);
+            fill(g, 0, 40, 59 - gap, 89, ElementType::Wall);
+            fill(g, 90 + gap, 40, 239, 89, ElementType::Wall);
+            fill(g, 60 - gap, 60, 89 + gap, 89, ElementType::Water);
+            const int y1 = 59 - drop;
+            fill(g, 60, y1 - 3, 89, y1, ElementType::Wood);
+            nudge(g, 70, y1 - 4);
+            char name[64];
+            std::snprintf(name, sizeof name, "pond gap %d drop %d", gap, drop);
+            settle(g, name, 2400);
         }
     }
 }
