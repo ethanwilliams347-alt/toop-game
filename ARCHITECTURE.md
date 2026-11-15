@@ -331,10 +331,11 @@ Arrows point from includer to included.
   entry point used, as `gpu::gl::Name` pointers filled by
   `SDL_GL_GetProcAddress`. No GLAD/GLEW, nothing links opengl32.lib. A function
   must be listed before it is called; a driver missing one fails creation.
-- Selected by `renderer=gl|sdl` in `settings.txt` (default `sdl`; the settings
+- Selected by `renderer=gl|sdl` in `settings.txt` (default `gl`; the settings
   menu writes it, applied on restart) or
   `--renderer=gl|sdl`; `shell::open_display` falls back to SDL on any GL
-  failure (no context, missing entry point, shader compile, incomplete FBO).
+  failure (no context, missing entry point, shader compile, incomplete FBO),
+  printing `OpenGL renderer unavailable (...); falling back to SDL.` to stderr.
 
 ### `src/ui/`, `src/shell/`, `src/main.cpp`
 

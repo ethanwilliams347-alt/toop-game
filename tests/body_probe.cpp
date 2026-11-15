@@ -18,11 +18,16 @@
 //   float     - a wooden block and a stone block dropped into a pool.
 //   slope     - a block set on a 45-degree stone slope: does it slide?
 //   stack     - a leaning stack of blocks, built off-centre, one block at a time.
+//   raft      - a wooden slab dropped into a pond from several heights and offsets.
+//   pile      - pieces dropped onto each other, and a slab in a narrow pond: how
+//               many steps each takes to sleep, how often they wake, and whether
+//               any is only frozen at BODY_MAX_STEPS.
 //
 // Usage: body_probe [scene] [every]. With no scene, runs them all.
 #include "physics/grid.h"
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -257,6 +262,163 @@ void current(int every) {
     picture(g, "end");
 }
 
+// A painted wooden slab dropped into a pond from several heights and x
+// offsets, its rows against the pond's still surface printed every `every`
+// steps: it should sink in a little, bob, and settle with its top above the
+// water and its bottom below it -- never come to rest clear of the water.
+void raft(int every) {
+    std::printf("\n== raft ==\n");
+    const int SURFACE = 60;
+    for (const int drop : {2, 10, 30, 45}) {
+        for (const int dx : {0, 37, 71}) {
+            for (const int narrow : {0, 1}) {
+                // narrow: a pond only a few cells wider than the slab, where the
+                // splash has nowhere to go but up its sides.
+                const int lo = narrow ? 55 + dx : 1, hi = narrow ? 94 + dx : 238;
+                Grid g(240, 100);
+                fill(g, 0, 90, 239, 99, ElementType::Wall);
+                fill(g, 0, 40, lo - 1, 89, ElementType::Wall);
+                fill(g, hi + 1, 40, 239, 89, ElementType::Wall);
+                fill(g, lo, SURFACE, hi, 89, ElementType::Water);
+                const int x0 = 60 + dx, y1 = SURFACE - 1 - drop;
+                fill(g, x0, y1 - 3, x0 + 29, y1, ElementType::Wood);
+                nudge(g, x0 + 10, y1 - 4);
+                int top = 0, bottom = 0, worst = 99, rest = -1;
+                for (int s = 1; s <= 1200; ++s) {
+                    g.update();
+                    top = 99;
+                    bottom = -1;
+                    for (int y = 0; y < 100; ++y)
+                        for (int x = 1; x < 239; ++x)
+                            if (g.get_element(x, y).type == ElementType::Wood) {
+                                top = std::min(top, y);
+                                bottom = std::max(bottom, y);
+                            }
+                    if (s > 120) worst = std::min(worst, bottom - SURFACE);
+                    if (every > 0 && s % every == 0)
+                        std::printf("    drop %2d dx %2d step %4d  top %+d bottom %+d  bodies %d\n",
+                                    drop, dx, s, top - SURFACE, bottom - SURFACE,
+                                    g.tipping_count());
+                    if (rest < 0 && g.tipping_count() == 0) rest = s;
+                }
+                if (narrow && drop == 30 && dx == 0) {
+                    for (int y = 50; y < 66; ++y) {
+                        std::string row = "    ";
+                        for (int x = lo - 2; x <= hi + 2; ++x)
+                            row += glyph(g.get_element(x, y).type);
+                        std::printf("%s  %d\n", row.c_str(), y - SURFACE);
+                    }
+                }
+                std::printf("  %s drop %2d dx %2d: end top %+d bottom %+d, highest bottom after "
+                            "step 120 %+d, first at rest step %d\n",
+                            narrow ? "narrow" : "wide  ", drop, dx, top - SURFACE, bottom - SURFACE,
+                            worst, rest);
+            }
+        }
+    }
+    // A droplet stuck beside the slab's top row, after it has settled: does
+    // the slab count as submerged and rise out of the pond?
+    for (const bool kept : {false, true}) {
+        Grid g(240, 100);
+        fill(g, 0, 90, 239, 99, ElementType::Wall);
+        fill(g, 0, 40, 0, 89, ElementType::Wall);
+        fill(g, 239, 40, 239, 89, ElementType::Wall);
+        fill(g, 1, SURFACE, 238, 89, ElementType::Water);
+        fill(g, 60, SURFACE - 12, 89, SURFACE - 3, ElementType::Wood);
+        nudge(g, 70, SURFACE - 13);
+        const auto rows = [&](int& top, int& bottom) {
+            top = 99;
+            bottom = -1;
+            for (int y = 0; y < 100; ++y)
+                for (int x = 1; x < 239; ++x)
+                    if (g.get_element(x, y).type == ElementType::Wood) {
+                        top = std::min(top, y);
+                        bottom = std::max(bottom, y);
+                    }
+        };
+        for (int s = 0; s < 600; ++s) g.update();
+        int top = 0, bottom = 0;
+        rows(top, bottom);
+        std::printf("  droplet (%s): settled top %+d bottom %+d\n", kept ? "kept" : "once",
+                    top - SURFACE, bottom - SURFACE);
+        for (int s = 1; s <= 300; ++s) {
+            // A water cell on the slab's top-left corner's outside, once, or
+            // kept there every step as a film clinging to it would be.
+            int l = 239;
+            for (int x = 1; x < 239; ++x)
+                if (g.get_element(x, top).type == ElementType::Wood) {
+                    l = x;
+                    break;
+                }
+            if ((kept || s == 1) && l > 1 && g.get_element(l - 1, top).type == ElementType::Empty)
+                g.set_element(l - 1, top, ElementType::Water);
+            g.update();
+            rows(top, bottom);
+            if (s % 30 == 0)
+                std::printf("    droplet step %3d top %+d bottom %+d\n", s, top - SURFACE,
+                            bottom - SURFACE);
+        }
+    }
+}
+
+// Runs until nothing moves or `budget` steps, counting each body that starts
+// (age 1: dropped, struck or pushed awake) and the oldest any body got. A body
+// frozen at BODY_MAX_STEPS shows as an oldest age at the cap.
+void settle(Grid& g, const char* name, int budget) {
+    int wakes = 0, oldest = 0, rest = -1;
+    for (int s = 1; s <= budget; ++s) {
+        g.update();
+        for (int i = 0; i < g.tipping_count(); ++i) {
+            const Grid::BodyState b = g.body_state(i);
+            if (b.age == 1) ++wakes;
+            oldest = std::max(oldest, b.age);
+        }
+        if (!g.has_pending_support_checks() && s > 5) {
+            rest = s;
+            break;
+        }
+    }
+    std::printf("  %-28s at rest step %5d  wakes %3d  oldest body %4d steps\n", name, rest, wakes,
+                oldest);
+}
+
+void pile(int) {
+    std::printf("\n== pile ==\n");
+    for (int n = 3; n <= 5; ++n) {
+        for (const int off : {0, 3, 6}) {
+            Grid g(80, 80);
+            fill(g, 0, 75, 79, 79, ElementType::Wall);
+            // Blocks of alternating material, so each is its own piece, stacked
+            // in the air with gaps and offsets so they land on one another.
+            for (int i = 0; i < n; ++i) {
+                const ElementType t = i % 2 == 0 ? ElementType::Wood : ElementType::Wall;
+                const int x0 = 30 + (i % 2 ? off : -off / 2), y1 = 70 - 9 * i;
+                fill(g, x0, y1 - 3, x0 + 7 + i, y1, t);
+            }
+            for (int i = 0; i < n; ++i) nudge(g, 31, 70 - 9 * i - 4);
+            char name[64];
+            std::snprintf(name, sizeof name, "pile n=%d off=%d", n, off);
+            settle(g, name, 2400);
+        }
+    }
+    // A slab 30 wide in a pond `gap` cells wider on each side.
+    for (const int gap : {3, 5, 8}) {
+        for (const int drop : {2, 10, 20, 30}) {
+            Grid g(240, 100);
+            fill(g, 0, 90, 239, 99, ElementType::Wall);
+            fill(g, 0, 40, 59 - gap, 89, ElementType::Wall);
+            fill(g, 90 + gap, 40, 239, 89, ElementType::Wall);
+            fill(g, 60 - gap, 60, 89 + gap, 89, ElementType::Water);
+            const int y1 = 59 - drop;
+            fill(g, 60, y1 - 3, 89, y1, ElementType::Wood);
+            nudge(g, 70, y1 - 4);
+            char name[64];
+            std::snprintf(name, sizeof name, "pond gap %d drop %d", gap, drop);
+            settle(g, name, 2400);
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -272,5 +434,7 @@ int main(int argc, char** argv) {
     if (want("slope")) slope(every);
     if (want("stack")) stack(every);
     if (want("current")) current(every);
+    if (want("raft")) raft(every);
+    if (want("pile")) pile(every);
     return 0;
 }

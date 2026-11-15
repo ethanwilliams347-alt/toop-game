@@ -93,6 +93,9 @@ struct LitFrame {
     // Mood, which outlives the frame; GlCanvas loads and caches the strip.
     const char* grade = nullptr;
     float vignette = 0.0f, grain = 0.0f;
+    // The share of a point light a backdrop layer just behind the world takes
+    // (mood `lamp_backdrop`); GlCanvas::set_depth falls it off with depth.
+    float lamp_backdrop = 0.25f;
     // 0 none, 1 rain, 2 fog wisps, 3 dust (mood::WeatherKind's order).
     int weather = 0;
     float weather_density = 0.0f, weather_angle_deg = 0.0f, weather_speed = 0.0f;

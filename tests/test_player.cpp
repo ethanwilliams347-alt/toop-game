@@ -19,6 +19,7 @@
 #include "physics/player.h"
 #include "test_util.h"
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <utility>
@@ -124,6 +125,32 @@ int top_of(const Grid& g, ElementType t) {
         for (int x = 0; x < g.get_width(); ++x)
             if (g.get_element(x, y).type == t) return y;
     return -1;
+}
+
+// The hardest a scenario threw the player: its push speed, its upward speed,
+// and the farthest it moved in one step, all over `n` coupled steps.
+struct Throw {
+    fx::v push = 0, up = 0;
+    float hop = 0;
+    int hp_lost = 0;
+};
+Throw track_throw(Grid& g, Player& p, int n) {
+    Throw t;
+    for (int i = 0; i < n; ++i) {
+        const float x0 = visual_x(p), y0 = visual_y(p);
+        const int hp0 = p.health();
+        step_coupled(g, p, NOTHING, 1);
+        t.push = std::max(t.push, p.push_velocity() < 0 ? -p.push_velocity() : p.push_velocity());
+        t.up = std::max(t.up, -p.velocity_y());
+        t.hop = std::max(t.hop, std::max(std::abs(visual_x(p) - x0), std::abs(visual_y(p) - y0)));
+        t.hp_lost = std::max(t.hp_lost, hp0 - p.health());
+    }
+    return t;
+}
+std::string throw_detail(const Throw& t) {
+    return "push " + std::to_string(fx::to_float(t.push)) + " up " +
+           std::to_string(fx::to_float(t.up)) + " cells/s, hop " + std::to_string(t.hop) +
+           " cells, worst hit " + std::to_string(t.hp_lost);
 }
 
 } // namespace
@@ -900,6 +927,68 @@ int main() {
               "out after " + std::to_string(out) + " steps from row " + std::to_string(bottom));
         check("slowly: it takes the best part of a second or more", out > 40,
               "out after " + std::to_string(out));
+    }
+
+    // --- a body never throws the player harder than a blow does ---
+    // Playtest 4.3: a body's edge speed (its centre's plus spin times reach) was
+    // handed to the player whole when it shoved it, which comes to hundreds of
+    // cells a second off a tipping post or a spinning plank. Each scenario runs
+    // 600 steps and keeps the hardest throw.
+    {
+        const fx::v cap = MAX_SHOVE_SPEED;
+        // (a) a tall post tips onto the player.
+        {
+            Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+            const int px = OBSTACLE_X;
+            fill(g, px + 6, FLOOR_Y - 40, px + 7, FLOOR_Y - 1, ElementType::Wood);
+            Player p(px, STAND_Y);
+            step_coupled(g, p, NOTHING, 30);
+            g.queue_impulse(px + 7, FLOOR_Y - 40,
+                            -int64_t{4000} * fx::per_step(Grid::BODY_WEIGHT_ACCEL), 0);
+            const Throw t = track_throw(g, p, 600);
+            std::printf("  post: %s\n", throw_detail(t).c_str());
+            check("a post tipping onto the player throws it no harder than the cap",
+                  t.push <= cap && t.up <= cap, throw_detail(t));
+        }
+        // (b) a crate dropped on the end of a plank the player stands on.
+        {
+            Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+            const int px = OBSTACLE_X;
+            fill(g, px - 2, FLOOR_Y - 3, px + 1, FLOOR_Y - 1, ElementType::Wall);  // fulcrum
+            fill(g, px - 30, FLOOR_Y - 5, px + 30, FLOOR_Y - 4, ElementType::Wood);
+            nudge(g, px, FLOOR_Y - 6);
+            Player p(px - 28, FLOOR_Y - 5 - Player::HEIGHT - 2);
+            step_coupled(g, p, NOTHING, 30);
+            fill(g, px + 20, 2, px + 29, 11, ElementType::Wood);
+            nudge(g, px + 24, 12);
+            const Throw t = track_throw(g, p, 600);
+            std::printf("  plank: %s\n", throw_detail(t).c_str());
+            check("a crate flipping a plank throws the player no harder than the cap",
+                  t.push <= cap && t.up <= cap, throw_detail(t));
+        }
+        // (c) the player stands on a body kept spinning hard.
+        {
+            Grid g = make_world(WORLD_W, WORLD_H, FLOOR_Y);
+            const int px = OBSTACLE_X;
+            fill(g, px - 20, FLOOR_Y - 30, px + 20, FLOOR_Y - 28, ElementType::Wood);
+            nudge(g, px, FLOOR_Y - 31);
+            Player p(px - 2, FLOOR_Y - 31 - Player::HEIGHT - 2);
+            step_coupled(g, p, NOTHING, 10);
+            const int64_t j = int64_t{6000} * fx::per_step(Grid::BODY_WEIGHT_ACCEL);
+            Throw worst;
+            for (int s = 0; s < 600; ++s) {
+                const int l = left_of(g, ElementType::Wood);
+                if (s < 120 && l >= 0) g.queue_impulse(l, top_of(g, ElementType::Wood), 0, -j);
+                const Throw t = track_throw(g, p, 1);
+                worst.push = std::max(worst.push, t.push);
+                worst.up = std::max(worst.up, t.up);
+                worst.hop = std::max(worst.hop, t.hop);
+                worst.hp_lost = std::max(worst.hp_lost, t.hp_lost);
+            }
+            std::printf("  spin: %s\n", throw_detail(worst).c_str());
+            check("a spinning body throws the player no harder than the cap",
+                  worst.push <= cap && worst.up <= cap, throw_detail(worst));
+        }
     }
 
     return report();

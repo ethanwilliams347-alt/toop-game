@@ -8,6 +8,12 @@ uniform sampler2D u_albedo;
 uniform sampler2D u_emissive;
 uniform sampler2D u_blocks;  // propagated fire light, linear, one texel per block
 uniform sampler2D u_sun;     // visibility, one texel per cell
+// How much of a point light each pixel takes: 1 for the world, less for a
+// backdrop layer the further back it stands (GlCanvas::set_depth), 0 for the
+// bare clear colour (the sky). The backdrop is painted into the same albedo as
+// the world, and without this a lamp lit a mountain as if it stood beside it.
+// Only the point lights read it: ambient, sun and fire are as before.
+uniform sampler2D u_receive;
 
 uniform float u_target_h;
 uniform vec2 u_origin_px;     // screen position of the pack's cell (0, 0)
@@ -47,6 +53,7 @@ void main() {
 
     vec2 world = u_view + cell;
     vec3 hot = vec3(0.0);
+    float receive = texelFetch(u_receive, px, 0).r;
     for (int i = 0; i < u_light_count; ++i) {
         vec4 l = u_light_pos[i];
         float f = clamp(1.0 - distance(world, l.xy) / l.z, 0.0, 1.0);
@@ -56,7 +63,7 @@ void main() {
         float fi = float(i);
         float w = 0.5 + 0.25 * sin(u_time * (6.1 + 1.3 * fi) + 2.3 * fi) +
                   0.25 * sin(u_time * (17.3 + 0.7 * fi) + 0.9 * fi);
-        light += u_light_color[i] * (f * f) * (1.0 - l.w * w);
+        light += u_light_color[i] * (f * f) * (1.0 - l.w * w) * receive;
         // The lamp itself: a hot plus of cells at its centre, on the cell grid
         // so it is pixel art rather than a smooth dot, added as light the
         // albedo does not dim. It is what bloom finds -- a pool of light on dark

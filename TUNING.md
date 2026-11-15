@@ -101,6 +101,7 @@ it; walking, jumping and flying are unchanged there.
 | `KNOCK_STAGGER_STEPS` | [player.h](src/physics/player.h) | 15 | Steps a blow's throw takes the walk key away for, so the walk does not undo the throw. |
 | `KNOCK_GROUND_DECEL` | [box_body.h](src/physics/box_body.h) | 900 | How fast a knock skids out on the ground, cells/s². |
 | `KNOCK_AIR_DRAG` | [box_body.h](src/physics/box_body.h) | 1/64 | Share of a knock lost a step in the air: a thrown box flies an arc. |
+| `MAX_SHOVE_SPEED` | [box_body.h](src/physics/box_body.h) | 150 | Fastest a loose body throws, carries off or strikes a box, cells/s per axis: the troll club's throw. |
 | `RIDE_SNAP` | [box_body.h](src/physics/box_body.h) | 2 | Cells a box standing on a body follows it down in a step. What keeps a player on a bobbing raft from flickering into the fall pose. |
 | `WADE_FORM_DRAG` | [box_body.h](src/physics/box_body.h) | 1/8 | Speed-squared drag on a box in liquid, v / (1 + k v) with v in cells/step. What slows a dive into a pool. |
 | `WADE_DRAG` | [box_body.h](src/physics/box_body.h) | 1/32 | Viscous share of a box's speed lost a step all the way under. Sets the slow sink. |
@@ -210,6 +211,7 @@ what each scene does in numbers and pictures; run it after turning any of these.
 | `LIQUID_SPIN_DRAG` | [grid.h](src/physics/grid.h) | 40 | The same for spin, /256. Higher stops a piece turning in water sooner. |
 | `LIQUID_FORM_DRAG` | [grid.h](src/physics/grid.h) | 5 | Speed-squared drag in liquid, applied as v / (1 + k v). Sets terminal speed: an 8x6 stone sinks at about 0.6 cells/step. Higher sinks slower and slaps harder into a pool. |
 | `LIQUID_ADDED_MASS` | [grid.h](src/physics/grid.h) | 1 | Share of the displaced liquid's weight a body must move along with itself. Why stone gathers speed instead of starting at it, and wood held under rises gently instead of popping. |
+| `WATERLINE_SLACK` | [grid.h](src/physics/grid.h) | 3/4 cell | How far above the liquid on a floating body's lower side the waterline it is lifted by may stand. Higher believes more of the side-to-side bob (rafts with a rider buck); lower sinks a raft by the bob and leaves a splashed block bobbing longer. |
 | `FLOAT_SLEEP_DRIFT` | [grid.h](src/physics/grid.h) | 1/8 cell | `BODY_SLEEP_DRIFT` for a body held only by liquid. At 1/2 a floater was stopped mid-bob, found floating and relaunched -- the pop. |
 | `REST_SQUARE_ANGLE` | [grid.h](src/physics/grid.h) | 1/10 rad | A body coming to rest within about six degrees of a quarter turn is set down exactly square, so its cells match its sprite and the hand-back does not jump. 0 leaves every rest at its own angle. |
 | `SETTLE_STEPS` | [present.h](src/present/present.h) | 10 | Steps over which a body's sprite eases onto the pose its cells will take. Shorter snaps; longer looks like sliding into place. Presentation only. |
@@ -235,6 +237,7 @@ rows above tune both. Its own knob:
 | Knob | File | Now | What it does |
 |---|---|---|---|
 | `SUN_MARCH_CELLS` | [pipeline.h](src/gpu/pipeline.h) | 96 | How far the sun's shadow march looks toward the sun, in cells. A cell with no occluder within this many is in full sun; longer finds taller overhangs and costs that many texel reads per visible cell. |
+| `lamp_backdrop` (mood default) | [mood.h](src/render/mood.h) | 0.25 | The share of a point light a backdrop layer just behind the world takes; it falls with the square of (1 - depth), so far layers and the sky take almost none. A mood file can set its own (`lamp_backdrop <k>`). |
 
 ---
 
@@ -629,3 +632,26 @@ Record adjustments to tuning parameters and their rationale here.
   rubble buries the player's feet on that step and the dig-out zeroed it, so it
   is now held until the body is free. `IMPACT_SAFE_SPEED` 60 is a cell a step:
   a slab dropped one body height (about 180 cells/s) hurts, a raft nudge does not.
+- **`WATERLINE_SLACK` 3/4 added (playtest 4.1).** A body's waterline was the
+  highest liquid beside any of its cells, so a film down one side of a slab set it
+  at the slab's top and lifted the slab out of the pond, and splash kept dropped
+  slabs bobbing for up to twenty seconds. The waterline is now taken per side,
+  from liquid that rests on something rather than drops in the air, and the
+  higher side may stand at most this far above the lower. Swept 0, 1/4, 1/2, 3/4,
+  1, 2 against `collapse_test` and `player_test`: only 3/4 passed both (see the
+  comment in grid.h for what each other value broke), so this sits in a narrow
+  band and is worth re-checking when buoyancy or the rider coupling changes.
+- **2026-11-14 — `MAX_SHOVE_SPEED` 150 (new).** Playtest 4.3: the player was
+  sometimes flung far too hard. A body shoving the box handed over its edge
+  speed whole (centre plus spin times reach), and stepping off a spinning body
+  kept that point's speed; `player_test` measured 252 cells/s sideways off a
+  spinning plank and 187 up off a plank flipped by a crate. Both, and the strike
+  speed that sets the damage, are now held to 150, the troll club's throw, the
+  hardest knock meant to land. Blows (troll, ghoul, angler, arrows) are unchanged.
+- **2026-11-14 -- lamps stop lighting the backdrop** (`lamp_backdrop` 0.25, new).
+  In the noir tarn a shore lamp lit the far lake and mountains as if they stood
+  beside it, since the backdrop is painted into the same albedo the resolve
+  lights. A layer just behind the world now takes a quarter of the light, and
+  the share falls with the square of how near the layer is to the world, so the
+  mountains (depth about 0.7) take about 2%. The world, sprites and each lamp's
+  own hot core are unchanged.

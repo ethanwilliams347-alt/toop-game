@@ -188,6 +188,8 @@ bool Pipeline::run(const Inputs& in, std::string& why) {
                 bind_tex(1, in.emissive_tex);
                 bind_tex(2, blocks_[front_].tex);
                 bind_tex(3, sun_.tex);
+                bind_tex(4, in.receive_tex);
+                gl::Uniform1i(loc(p, "u_receive"), 4);
                 gl::Uniform1i(loc(p, "u_albedo"), 0);
                 gl::Uniform1i(loc(p, "u_emissive"), 1);
                 gl::Uniform1i(loc(p, "u_blocks"), 2);

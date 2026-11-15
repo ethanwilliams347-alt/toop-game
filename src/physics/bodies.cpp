@@ -1225,15 +1225,34 @@ void Grid::apply_body_forces(Body& b) {
 
     // The waterline: the highest liquid beside the body, and how full that cell
     // is. Beside, not above: what a body has displaced lands on top of it as it
-    // moves, and water lying on a raft is weight on it, not lift.
-    int water_row = INT_MAX;
-    int64_t water_fill = 0;  // 16.16 share of a full cell
+    // moves, and water lying on a raft is weight on it, not lift. Kept for the
+    // left and the right side apart; see where the two are joined.
+    int water_rows[2] = {INT_MAX, INT_MAX};
+    int64_t water_fills[2] = {0, 0};  // 16.16 share of a full cell
     int liquid_weight = 0;
 
     // Where the cells are, on average, against where the centre of mass says the
     // body is: the cells sit at the nearest whole-cell pose, and the difference is
     // how far the body really is below or above them.
     int64_t cell_w = 0, cell_y2 = 0;
+
+    // Whether liquid beside the body is part of a body of liquid, not a drop in
+    // the air: followed straight down, it has to come to rest on something --
+    // more liquid all the way to a floor, a solid, this body, the edge of the
+    // world -- rather than end over empty space or gas. Without this, one drop
+    // clinging beside the top row of a floating slab set the waterline there,
+    // the whole slab counted as under water, and the lift carried it up out of
+    // the pond for as long as the drop kept up with it. Only asked of a cell
+    // that would raise the waterline, so a pond's depth is walked a few times
+    // per body per step, not once per cell.
+    const auto liquid_rests_on_something = [&](int q) {
+        for (q += width; q < width * height; q += width) {
+            if (tip_visit[q] == here) return true;
+            const ElementType t = cells[q].type;
+            if (!is_liquid(t)) return is_solid(t);
+        }
+        return true;
+    };
 
     for (const int idx : b.at) {
         const int y = idx / width;
@@ -1266,7 +1285,10 @@ void Grid::apply_body_forces(Body& b) {
             const int q = idx + side;
             if (tip_visit[q] == here || !is_liquid(cells[q].type)) continue;
             const int64_t fill = static_cast<int64_t>(cells[q].mass) * ONE / LIQUID_FULL;
-            if (y < water_row || (y == water_row && fill > water_fill)) {
+            int& water_row = water_rows[(side + 1) / 2];
+            int64_t& water_fill = water_fills[(side + 1) / 2];
+            if ((y < water_row || (y == water_row && fill > water_fill)) &&
+                liquid_rests_on_something(q)) {
                 water_row = y;
                 water_fill = fill;
             }
@@ -1280,7 +1302,32 @@ void Grid::apply_body_forces(Body& b) {
         b.omega += divq(torque * BODY_GRAVITY / ONE / b.mass, b.k2);
     }
 
-    if (water_row == INT_MAX || cell_w == 0) return;
+    // Each side's waterline, a 16.16 row (smaller is higher), or none.
+    constexpr int64_t NO_WATER = INT64_MAX;
+    int64_t sides[2];
+    for (int i = 0; i < 2; ++i)
+        sides[i] = water_rows[i] == INT_MAX
+                       ? NO_WATER
+                       : static_cast<int64_t>(water_rows[i] + 1) * ONE - water_fills[i];
+    if ((sides[0] == NO_WATER && sides[1] == NO_WATER) || cell_w == 0) return;
+
+    // With liquid on both sides, the higher waterline, but never more than
+    // WATERLINE_SLACK above the lower one. A body in a pond has the pond on both
+    // sides at nearly one level -- a cell or so apart while it bobs, which the
+    // slack keeps, since taking the lower side there sank every raft by most of
+    // a row. What it leaves out is a stream or film down one side only (a drop
+    // clinging to the slab's edge each step, water poured down beside it),
+    // which reaches the pond and so passes the test above, and which set the
+    // waterline at the slab's top and lifted it out of the water. Held to the
+    // other side's level, it can lift the slab at most the slack's worth, and
+    // that stays where the pond is rather than climbing with the slab. Liquid on
+    // one side only is taken as it is: a raft against a pond's wall has nothing
+    // to check it against.
+    const int64_t higher = std::min(sides[0], sides[1]);
+    const int64_t lower = sides[0] == NO_WATER   ? sides[1]
+                          : sides[1] == NO_WATER ? sides[0]
+                                                 : std::max(sides[0], sides[1]);
+    const int64_t waterline = std::max(higher, lower - WATERLINE_SLACK);
 
     // Archimedes: lifted by the weight of the liquid it displaces, at the centre
     // of what it displaces -- which is what turns a tilted plank back level, since
@@ -1290,7 +1337,6 @@ void Grid::apply_body_forces(Body& b) {
     // a row at a time, and a raft chatters between two rows for ever instead of
     // settling between them.
     const int64_t offset = b.cy - cell_y2 * ONE / (2 * cell_w);
-    const int64_t waterline = static_cast<int64_t>(water_row + 1) * ONE - water_fill;
     int64_t lift = 0;         // weight units, 16.16
     int64_t lift_torque = 0;  // weight units times cells, 16.16
     int64_t under = 0;        // cells under, 16.16

@@ -87,8 +87,8 @@ light x=628 y=252 color=0.30,1.60,2.00 radius=36 flicker=0.06
 # goes deeper and more mirror-like; fire stays untinted, it must never be muted.
 material Sand tint=0.78,0.78,0.82 strength=0.00 rim=0.30 reflect=0.20 spec=0.45 depth=0.00
 material Water tint=0.80,0.92,1.00 texture=materials_caustics strength=0.30 rim=0.00 reflect=0.80 spec=0.85 depth=0.85
-material Wall tint=0.86,0.90,0.96 texture=materials_rock strength=0.70 rim=0.60 reflect=0.15 spec=0.35 depth=0.00
-material Wood tint=0.84,0.86,0.90 texture=materials_wood strength=0.60 rim=0.40 reflect=0.05 spec=0.20 depth=0.00
+material Wall tint=0.85,0.88,0.93 texture=materials_rock strength=0.50 rim=0.55 reflect=0.15 spec=0.35 depth=0.00
+material Wood tint=0.84,0.87,0.91 texture=materials_wood strength=0.45 rim=0.45 reflect=0.05 spec=0.20 depth=0.00
 material Oil tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.45 spec=1.00 depth=0.40
 material Steam tint=0.85,0.92,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00
 material Fire tint=1.00,1.00,1.00 strength=0.00 rim=0.00 reflect=0.00 spec=0.00 depth=0.00

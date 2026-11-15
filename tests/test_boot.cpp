@@ -186,8 +186,8 @@ void test_settings_file() {
         const DisplaySettings s = load_settings(path);
         check("settings: a file with only resolution= still loads its size",
               s.size == DisplayMode{2560, 1440});
-        check("settings: ...as a window, with VSync on and the SDL renderer",
-              s.window == WindowMode::Windowed && s.vsync && s.renderer == RendererChoice::Sdl);
+        check("settings: ...as a window, with VSync on and the GL renderer",
+              s.window == WindowMode::Windowed && s.vsync && s.renderer == RendererChoice::Gl);
     }
     write("resolution=1920x1080\nrenderer=gl\n");
     check("settings: the old format's renderer= is read",

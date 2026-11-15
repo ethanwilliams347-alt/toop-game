@@ -121,7 +121,7 @@ bool load(const std::string& path, Mood& out, std::string* error) {
 
     // The line each once-only record was first seen on; 0 is not yet.
     int model_line = 0, ambient_line = 0, sun_line = 0, fog_line = 0, bloom_line = 0;
-    int grade_line = 0, vignette_line = 0, grain_line = 0, weather_line = 0;
+    int grade_line = 0, vignette_line = 0, grain_line = 0, weather_line = 0, lamp_line = 0;
 
     std::string line;
     while (std::getline(in, line)) {
@@ -261,11 +261,15 @@ bool load(const std::string& path, Mood& out, std::string* error) {
                 !text_record::name_ok(f, true) || !no_more())
                 return fail("`grade` needs one .bmp file name in the mood file's own folder");
             m.grade = dir + f;
-        } else if (kind == "vignette" || kind == "grain") {
-            int& seen = kind == "vignette" ? vignette_line : grain_line;
+        } else if (kind == "vignette" || kind == "grain" || kind == "lamp_backdrop") {
+            int& seen = kind == "vignette" ? vignette_line
+                        : kind == "grain"  ? grain_line
+                                           : lamp_line;
             if (seen) return twice(seen);
             seen = line_no;
-            float& v = kind == "vignette" ? m.vignette : m.grain;
+            float& v = kind == "vignette" ? m.vignette
+                       : kind == "grain"  ? m.grain
+                                          : m.lamp_backdrop;
             std::string raw;
             if (!(fields >> raw) || !text_record::decimal(raw, v) || !in_range(v, 0.0f, 1.0f) ||
                 !no_more())
@@ -416,7 +420,7 @@ bool load(const std::string& path, Mood& out, std::string* error) {
         } else {
             return fail("'" + kind +
                         "' is not a mood record (light_model, ambient, sun, fog, bloom, grade, "
-                        "vignette, grain, weather, light, material)");
+                        "vignette, grain, lamp_backdrop, weather, light, material)");
         }
     }
 
@@ -488,6 +492,7 @@ void fill_lit(const Mood& m, lit::LitFrame& out) {
     out.grade = m.grade.empty() ? nullptr : m.grade.c_str();
     out.vignette = m.vignette;
     out.grain = m.grain;
+    out.lamp_backdrop = m.lamp_backdrop;
     out.weather = static_cast<int>(m.weather.kind);
     out.weather_density = m.weather.density;
     out.weather_angle_deg = m.weather.angle;
